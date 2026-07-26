@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Self
 
+from .recurrence import RecurrenceRule
+
 
 class ReminderStatus(StrEnum):
     """Reminder lifecycle state."""
@@ -80,6 +82,10 @@ class Reminder:
     delivery_policy: DeliveryPolicy | None = None
     delivered_at: datetime | None = None
     delivery_errors: tuple[str, ...] = ()
+    recurrence: RecurrenceRule | None = None
+    scheduled_due: datetime | None = None
+    last_occurrence_due: datetime | None = None
+    last_occurrence_status: ReminderStatus | None = None
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable reminder."""
@@ -103,12 +109,28 @@ class Reminder:
                 _format_datetime(self.delivered_at) if self.delivered_at else None
             ),
             "delivery_errors": list(self.delivery_errors),
+            "recurring": self.recurrence is not None,
+            "recurrence": self.recurrence.to_dict() if self.recurrence else None,
+            "scheduled_due": (
+                _format_datetime(self.scheduled_due) if self.scheduled_due else None
+            ),
+            "last_occurrence_due": (
+                _format_datetime(self.last_occurrence_due)
+                if self.last_occurrence_due
+                else None
+            ),
+            "last_occurrence_status": (
+                self.last_occurrence_status.value
+                if self.last_occurrence_status
+                else None
+            ),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
         """Deserialize and validate a reminder."""
         policy = data.get("delivery_policy")
+        recurrence = data.get("recurrence")
         return cls(
             id=str(data["id"]),
             user_id=str(data["user_id"]),
@@ -126,6 +148,22 @@ class Reminder:
             ),
             delivery_errors=tuple(
                 str(value) for value in data.get("delivery_errors", [])
+            ),
+            recurrence=RecurrenceRule.from_dict(recurrence) if recurrence else None,
+            scheduled_due=(
+                _parse_datetime(data["scheduled_due"])
+                if data.get("scheduled_due")
+                else None
+            ),
+            last_occurrence_due=(
+                _parse_datetime(data["last_occurrence_due"])
+                if data.get("last_occurrence_due")
+                else None
+            ),
+            last_occurrence_status=(
+                ReminderStatus(data["last_occurrence_status"])
+                if data.get("last_occurrence_status")
+                else None
             ),
         )
 

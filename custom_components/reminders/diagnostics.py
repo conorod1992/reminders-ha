@@ -24,5 +24,8 @@ async def async_get_config_entry_diagnostics(
         "failed_count": sum(
             reminder.status is ReminderStatus.FAILED for reminder in reminders
         ),
+        "recurring_count": sum(
+            reminder.recurrence is not None for reminder in reminders
+        ),
         "next_due_scheduled": manager.scheduled_for is not None,
     }

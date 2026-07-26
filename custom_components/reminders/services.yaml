@@ -44,6 +44,71 @@ create:
           filter:
             domain: assist_satellite
 
+create_recurring:
+  fields:
+    title:
+      required: true
+      example: "Put the recycling out"
+      selector:
+        text:
+    message:
+      selector:
+        text:
+          multiline: true
+    first_reminder:
+      required: true
+      selector:
+        datetime:
+    frequency:
+      required: true
+      selector:
+        select:
+          options:
+            - daily
+            - weekly
+            - monthly
+    interval:
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 365
+          mode: box
+    weekdays:
+      selector:
+        select:
+          multiple: true
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+    day_of_month:
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    timezone:
+      selector:
+        text:
+    user_id:
+      selector:
+        text:
+    delivery_mode:
+      default: default
+      selector:
+        select:
+          options:
+            - default
+            - custom
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+
 get:
   fields:
     reminder_id: &reminder_id
@@ -92,6 +157,43 @@ update:
     channels: *channels
     notify_targets: *notify_targets
     voice_targets: *voice_targets
+    first_reminder:
+      selector:
+        datetime:
+    frequency:
+      selector:
+        select:
+          options:
+            - daily
+            - weekly
+            - monthly
+    interval:
+      selector:
+        number:
+          min: 1
+          max: 365
+          mode: box
+    weekdays:
+      selector:
+        select:
+          multiple: true
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+    day_of_month:
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    timezone:
+      selector:
+        text:
 
 delete:
   fields:
