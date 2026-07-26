@@ -202,6 +202,14 @@ on the next start. This gives at-least-once recovery: a crash after an endpoint
 accepted a message but before final state was saved can produce a duplicate, but
 a reminder is not silently lost.
 
+Reminder record mutations use a prepare, persist, then commit sequence under the
+manager lock. If an immediate Store write fails, the proposed runtime state is
+discarded and the existing reminder records and scheduler remain unchanged. A
+delivery-result write failure is slightly different because its `delivering`
+claim was already persisted before the provider was called: both storage and
+runtime retain that claim, and startup recovery returns it to pending for an
+at-least-once retry.
+
 For a recurring series, a long outage produces at most one overdue delivery.
 After that representative missed occurrence, the manager calculates the first
 future occurrence directly from the original recurrence phase. It never emits
@@ -224,9 +232,11 @@ tools call the manager rather than accessing storage or physical endpoints.
 Storage writes occur only on persistent changes. Reminder creation, update,
 deletion, snooze, recurrence advancement, and delivery claim/result transitions
 await `Store.async_save` before their action returns or the next schedule is
-installed. Only lower-risk user preference writes remain coalesced. No reminder
-entities, per-reminder automations, timers, minute polling, Recorder tables, or
-external databases are created.
+installed. The candidate reminder dictionary is committed to runtime only after
+that save succeeds. Only lower-risk user preference writes remain intentionally
+eventually durable through a coalesced delayed save. No reminder entities,
+per-reminder automations, timers, minute polling, Recorder tables, or external
+databases are created.
 
 ## Current limitations and roadmap
 
