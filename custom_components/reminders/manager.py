@@ -15,6 +15,7 @@ from homeassistant.util import dt as dt_util
 from .const import SAVE_DELAY, SUPPORTED_CHANNELS
 from .delivery import DeliveryDispatcher
 from .models import DeliveryPolicy, Reminder, ReminderStatus, UserPreferences
+from .recurrence import RecurrenceRule, first_due, next_occurrence_after
 from .storage import ReminderStore, StoredData, deserialize_storage, serialize_storage
 
 
@@ -95,10 +96,43 @@ class ReminderManager:
         )
         async with self._lock:
             self._reminders[reminder.id] = reminder
-            self._queue_save()
+            await self._store.async_save(self._snapshot())
             self._reschedule_if_needed(reminder.due)
         if due <= now:
             await self._async_process_due(now)
+        return reminder
+
+    async def async_create_recurring(
+        self,
+        *,
+        user_id: str,
+        title: str,
+        recurrence: RecurrenceRule,
+        message: str | None = None,
+        delivery_policy: DeliveryPolicy | None = None,
+    ) -> Reminder:
+        """Create and durably persist an anchored recurring reminder."""
+        _validate_policy(delivery_policy)
+        if not title.strip():
+            raise ReminderValidationError("Title must not be empty")
+        now = dt_util.utcnow()
+        due = first_due(recurrence, now)
+        reminder = Reminder(
+            id=str(uuid4()),
+            user_id=user_id,
+            title=title.strip(),
+            message=message.strip() if message else None,
+            due=due,
+            scheduled_due=due,
+            created_at=now,
+            updated_at=now,
+            delivery_policy=delivery_policy,
+            recurrence=recurrence,
+        )
+        async with self._lock:
+            self._reminders[reminder.id] = reminder
+            await self._store.async_save(self._snapshot())
+            self._reschedule_if_needed(reminder.due)
         return reminder
 
     async def async_get(self, reminder_id: str) -> Reminder:
@@ -134,17 +168,35 @@ class ReminderManager:
             current = self._require(reminder_id)
             if current.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
-            allowed = {"title", "message", "due", "delivery_policy", "user_id"}
+            allowed = {
+                "title",
+                "message",
+                "due",
+                "delivery_policy",
+                "user_id",
+                "recurrence",
+            }
             unknown = set(changes) - allowed
             if unknown:
                 raise ReminderValidationError(f"Unsupported fields: {sorted(unknown)}")
             if "due" in changes:
+                if current.recurrence is not None:
+                    raise ReminderValidationError(
+                        "Recurring due time is derived from its recurrence rule"
+                    )
                 changes["due"] = _normalize_due(changes["due"])
             if "title" in changes:
                 changes["title"] = str(changes["title"]).strip()
                 if not changes["title"]:
                     raise ReminderValidationError("Title must not be empty")
             _validate_policy(changes.get("delivery_policy"))
+            if "recurrence" in changes:
+                recurrence = changes["recurrence"]
+                if not isinstance(recurrence, RecurrenceRule):
+                    raise ReminderValidationError("Recurrence rule is invalid")
+                next_due = first_due(recurrence, dt_util.utcnow())
+                changes["due"] = next_due
+                changes["scheduled_due"] = next_due
             updated = current.updated(
                 **changes,
                 status=ReminderStatus.PENDING,
@@ -153,7 +205,7 @@ class ReminderManager:
                 updated_at=dt_util.utcnow(),
             )
             self._reminders[reminder_id] = updated
-            self._queue_save()
+            await self._store.async_save(self._snapshot())
             self._reschedule(force=True)
         if updated.due <= dt_util.utcnow():
             await self._async_process_due(dt_util.utcnow())
@@ -166,7 +218,7 @@ class ReminderManager:
             if reminder.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
             del self._reminders[reminder_id]
-            self._queue_save()
+            await self._store.async_save(self._snapshot())
             self._reschedule(force=True)
 
     async def async_snooze(
@@ -180,7 +232,24 @@ class ReminderManager:
         if (due is None) == (duration is None):
             raise ReminderValidationError("Provide exactly one of due or duration")
         new_due = due if due is not None else dt_util.utcnow() + duration  # type: ignore[operator]
-        return await self.async_update(reminder_id, due=new_due)
+        new_due = _normalize_due(new_due)
+        async with self._lock:
+            current = self._require(reminder_id)
+            if current.status is ReminderStatus.DELIVERING:
+                raise ReminderValidationError("Reminder is currently being delivered")
+            updated = current.updated(
+                due=new_due,
+                status=ReminderStatus.PENDING,
+                delivered_at=None,
+                delivery_errors=(),
+                updated_at=dt_util.utcnow(),
+            )
+            self._reminders[reminder_id] = updated
+            await self._store.async_save(self._snapshot())
+            self._reschedule(force=True)
+        if updated.due <= dt_util.utcnow():
+            await self._async_process_due(dt_util.utcnow())
+        return updated
 
     async def async_set_user_preferences(
         self, user_id: str, policy: DeliveryPolicy
@@ -230,17 +299,35 @@ class ReminderManager:
                 current = self._reminders.get(claimed.id)
                 if current is None or current.status is not ReminderStatus.DELIVERING:
                     continue
-                status = (
+                occurrence_status = (
                     ReminderStatus.DELIVERED
                     if result.succeeded
                     else ReminderStatus.FAILED
                 )
-                self._reminders[claimed.id] = current.updated(
-                    status=status,
-                    delivered_at=effective_now if result.succeeded else None,
-                    delivery_errors=result.errors,
-                    updated_at=effective_now,
-                )
+                if current.recurrence is not None:
+                    scheduled_due = current.scheduled_due or claimed.due
+                    next_due = next_occurrence_after(
+                        current.recurrence, max(effective_now, scheduled_due)
+                    )
+                    self._reminders[claimed.id] = current.updated(
+                        status=ReminderStatus.PENDING,
+                        due=next_due,
+                        scheduled_due=next_due,
+                        last_occurrence_due=scheduled_due,
+                        last_occurrence_status=occurrence_status,
+                        delivered_at=(
+                            effective_now if result.succeeded else current.delivered_at
+                        ),
+                        delivery_errors=result.errors,
+                        updated_at=effective_now,
+                    )
+                else:
+                    self._reminders[claimed.id] = current.updated(
+                        status=occurrence_status,
+                        delivered_at=effective_now if result.succeeded else None,
+                        delivery_errors=result.errors,
+                        updated_at=effective_now,
+                    )
                 await self._store.async_save(self._snapshot())
         async with self._lock:
             self._reschedule(force=True)

@@ -39,7 +39,16 @@ class ReminderStore(Store[StoredData]):
     ) -> StoredData:
         """Migrate old storage versions."""
         if old_major_version == 1:
-            return _normalize_storage(old_data)
+            normalized = _normalize_storage(old_data)
+            if old_minor_version < 2:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("recurrence", None)
+                    raw.setdefault("scheduled_due", None)
+                    raw.setdefault("last_occurrence_due", None)
+                    raw.setdefault("last_occurrence_status", None)
+            return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."
         )
@@ -64,6 +73,8 @@ def deserialize_storage(
                 raise ValueError("Reminder ID does not match storage key")
             if reminder.status is ReminderStatus.DELIVERING:
                 reminder = reminder.updated(status=ReminderStatus.PENDING)
+            if reminder.recurrence and reminder.scheduled_due is None:
+                reminder = reminder.updated(scheduled_due=reminder.due)
             reminders[reminder_id] = reminder
         except (KeyError, TypeError, ValueError) as err:
             _LOGGER.error("Skipping malformed stored reminder %s: %s", reminder_id, err)
