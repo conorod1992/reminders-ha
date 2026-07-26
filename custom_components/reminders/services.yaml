@@ -15,7 +15,7 @@ create:
         datetime:
     user_id:
       selector:
-        user:
+        text:
     delivery_mode:
       default: default
       selector:
@@ -55,7 +55,7 @@ list:
   fields:
     user_id:
       selector:
-        user:
+        text:
     pending_only:
       default: false
       selector:
@@ -82,7 +82,7 @@ update:
         datetime:
     user_id:
       selector:
-        user:
+        text:
     delivery_mode:
       selector:
         select:
@@ -111,8 +111,7 @@ set_user_preferences:
   fields:
     user_id:
       selector:
-        user:
+        text:
     channels: *channels
     notify_targets: *notify_targets
     voice_targets: *voice_targets
-
