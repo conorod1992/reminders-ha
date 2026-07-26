@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import voluptuous as vol
 from homeassistant.core import (
@@ -19,6 +20,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
     SERVICE_CREATE,
+    SERVICE_CREATE_RECURRING,
     SERVICE_DELETE,
     SERVICE_GET,
     SERVICE_LIST,
@@ -29,6 +31,12 @@ from .const import (
 )
 from .manager import ReminderManager, ReminderNotFoundError, ReminderValidationError
 from .models import DeliveryPolicy, Reminder
+from .recurrence import (
+    RecurrenceError,
+    RecurrenceFrequency,
+    RecurrenceRule,
+    Weekday,
+)
 
 POLICY_FIELDS: dict[Any, Any] = {
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
@@ -45,6 +53,22 @@ CREATE_FIELDS: dict[Any, Any] = {
 }
 CREATE_FIELDS.update(POLICY_FIELDS)
 CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
+CREATE_RECURRING_FIELDS: dict[Any, Any] = {
+    vol.Required("title"): cv.string,
+    vol.Optional("message"): cv.string,
+    vol.Required("first_reminder"): vol.Any(datetime, cv.string),
+    vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
+    vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("weekdays"): vol.All(
+        cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
+    ),
+    vol.Optional("day_of_month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+    vol.Optional("timezone"): cv.string,
+    vol.Optional("user_id"): cv.string,
+    vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
+}
+CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
+CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
 ID_SCHEMA = vol.Schema({vol.Required("reminder_id"): cv.string})
 UPDATE_FIELDS: dict[Any, Any] = {
     vol.Required("reminder_id"): cv.string,
@@ -53,6 +77,14 @@ UPDATE_FIELDS: dict[Any, Any] = {
     vol.Optional("due"): vol.Any(datetime, cv.string),
     vol.Optional("user_id"): cv.string,
     vol.Optional("delivery_mode"): vol.In(("default", "custom")),
+    vol.Optional("first_reminder"): vol.Any(datetime, cv.string),
+    vol.Optional("frequency"): vol.In(tuple(RecurrenceFrequency)),
+    vol.Optional("interval"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("weekdays"): vol.All(
+        cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
+    ),
+    vol.Optional("day_of_month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+    vol.Optional("timezone"): cv.string,
 }
 UPDATE_FIELDS.update(POLICY_FIELDS)
 UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
@@ -111,6 +143,20 @@ def async_register_services(hass: HomeAssistant) -> None:
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
         return {"reminder": reminder.to_dict()}
 
+    async def create_recurring(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        user_id = await _resolve_user(hass, call, call.data.get("user_id"))
+        policy = _policy_from_data(call.data)
+        recurrence = _recurrence_from_data(hass, call.data)
+        reminder = await manager.async_create_recurring(
+            user_id=user_id,
+            title=call.data["title"],
+            message=call.data.get("message"),
+            recurrence=recurrence,
+            delivery_policy=policy,
+        )
+        return {"reminder": reminder.to_dict()} if call.return_response else None
+
     async def list_reminders(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         requested = call.data.get("user_id")
@@ -145,6 +191,22 @@ def async_register_services(hass: HomeAssistant) -> None:
             key in call.data for key in POLICY_FIELDS
         ):
             changes["delivery_policy"] = _policy_from_data(call.data)
+        recurrence_fields = {
+            "first_reminder",
+            "frequency",
+            "interval",
+            "weekdays",
+            "day_of_month",
+            "timezone",
+        }
+        if recurrence_fields.intersection(call.data):
+            if reminder.recurrence is None:
+                raise ReminderValidationError(
+                    "Recurrence fields can only update a recurring reminder"
+                )
+            changes["recurrence"] = _recurrence_from_data(
+                hass, call.data, reminder.recurrence
+            )
         updated = await manager.async_update(reminder.id, **changes)
         return {"reminder": updated.to_dict()} if call.return_response else None
 
@@ -182,6 +244,12 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     handlers = (
         (SERVICE_CREATE, create, CREATE_SCHEMA, SupportsResponse.OPTIONAL),
+        (
+            SERVICE_CREATE_RECURRING,
+            create_recurring,
+            CREATE_RECURRING_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
         (SERVICE_GET, get, ID_SCHEMA, SupportsResponse.ONLY),
         (SERVICE_LIST, list_reminders, LIST_SCHEMA, SupportsResponse.ONLY),
         (SERVICE_UPDATE, update, UPDATE_SCHEMA, SupportsResponse.OPTIONAL),
@@ -215,6 +283,8 @@ def _translate_errors(handler: Any) -> Any:
         except ReminderNotFoundError as err:
             raise ServiceValidationError(f"Unknown reminder ID: {err.args[0]}") from err
         except ReminderValidationError as err:
+            raise ServiceValidationError(str(err)) from err
+        except RecurrenceError as err:
             raise ServiceValidationError(str(err)) from err
 
     return wrapped
@@ -305,3 +375,77 @@ def _parse_datetime(hass: HomeAssistant, value: datetime | str) -> datetime:
             raise ServiceValidationError("Home Assistant timezone is invalid")
         parsed = parsed.replace(tzinfo=timezone)
     return dt_util.as_utc(parsed)
+
+
+def _recurrence_from_data(
+    hass: HomeAssistant,
+    data: Any,
+    current: RecurrenceRule | None = None,
+) -> RecurrenceRule:
+    """Build a complete recurrence rule from action fields."""
+    timezone = str(
+        data.get(
+            "timezone",
+            current.timezone if current is not None else hass.config.time_zone,
+        )
+    )
+    if "first_reminder" in data:
+        anchor_local = _parse_local_datetime(data["first_reminder"], timezone)
+    elif current is not None:
+        anchor_local = current.anchor_local
+    else:
+        raise RecurrenceError("First reminder is required")
+    frequency = RecurrenceFrequency(
+        data.get("frequency", current.frequency if current is not None else None)
+    )
+    interval = int(data.get("interval", current.interval if current else 1))
+
+    supplied_weekdays = tuple(data.get("weekdays", ()))
+    if frequency is not RecurrenceFrequency.WEEKLY and supplied_weekdays:
+        raise RecurrenceError("Only weekly recurrence can define weekdays")
+    if frequency is not RecurrenceFrequency.MONTHLY and "day_of_month" in data:
+        raise RecurrenceError("Only monthly recurrence can define day of month")
+
+    if frequency is RecurrenceFrequency.WEEKLY:
+        if "weekdays" in data:
+            weekdays = tuple(Weekday.from_name(value) for value in data["weekdays"])
+        elif current is not None and current.frequency is frequency:
+            weekdays = current.weekdays
+        else:
+            weekdays = (Weekday(anchor_local.weekday()),)
+    else:
+        weekdays = ()
+
+    day_of_month: int | None
+    if frequency is RecurrenceFrequency.MONTHLY:
+        if "day_of_month" in data:
+            day_of_month = int(data["day_of_month"])
+        elif current is not None and current.frequency is frequency:
+            day_of_month = current.day_of_month
+        else:
+            day_of_month = anchor_local.day
+    else:
+        day_of_month = None
+
+    return RecurrenceRule(
+        frequency=frequency,
+        interval=interval,
+        timezone=timezone,
+        anchor_local=anchor_local,
+        weekdays=weekdays,
+        day_of_month=day_of_month,
+    )
+
+
+def _parse_local_datetime(value: datetime | str, timezone: str) -> datetime:
+    """Parse a wall-clock anchor, converting aware input to the rule timezone."""
+    parsed = value if isinstance(value, datetime) else dt_util.parse_datetime(value)
+    if parsed is None:
+        raise RecurrenceError("First reminder datetime is invalid")
+    try:
+        zone = ZoneInfo(timezone)
+    except Exception as err:
+        raise RecurrenceError(f"Unknown timezone: {timezone}") from err
+    if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+        return parsed.astimezone(zone).replace(tzinfo=None)
+    return parsed.replace(tzinfo=None)

@@ -1,6 +1,7 @@
 {
   "services": {
     "create": {"service": "mdi:bell-plus"},
+    "create_recurring": {"service": "mdi:bell-sync"},
     "delete": {"service": "mdi:bell-remove"},
     "get": {"service": "mdi:bell"},
     "list": {"service": "mdi:bell-multiple"},

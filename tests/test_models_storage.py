@@ -27,6 +27,36 @@ async def test_storage_v1_minor_migration_normalizes_shape() -> None:
     assert migrated == {"reminders": {}, "users": {}}
 
 
+async def test_v1_migration_preserves_one_shot_and_preferences() -> None:
+    now = datetime(2026, 7, 26, 12, tzinfo=UTC)
+    reminder = Reminder(
+        id="legacy",
+        user_id="u1",
+        title="Legacy",
+        message="Body",
+        due=now,
+        created_at=now,
+        updated_at=now,
+    )
+    preferences = UserPreferences(DeliveryPolicy(("phone",), ("notify.phone",)))
+    old = serialize_storage({reminder.id: reminder}, {"u1": preferences})
+    for field in (
+        "recurring",
+        "recurrence",
+        "scheduled_due",
+        "last_occurrence_due",
+        "last_occurrence_status",
+    ):
+        old["reminders"][reminder.id].pop(field, None)
+    store = object.__new__(ReminderStore)
+    migrated = await store._async_migrate_func(1, 1, old)
+    reminders, users = deserialize_storage(migrated)
+    assert reminders[reminder.id].title == reminder.title
+    assert reminders[reminder.id].message == reminder.message
+    assert reminders[reminder.id].recurrence is None
+    assert users == {"u1": preferences}
+
+
 def test_serialize_deserialize_round_trip() -> None:
     now = datetime(2026, 7, 26, 12, tzinfo=UTC)
     reminder = Reminder(
@@ -44,6 +74,7 @@ def test_serialize_deserialize_round_trip() -> None:
     reminders, users = deserialize_storage(encoded)
     assert reminders == {"abc": reminder}
     assert users == {"user-1": preferences}
+    assert reminder.to_dict()["recurring"] is False
 
 
 def test_interrupted_delivery_is_recovered_as_pending() -> None:
@@ -73,6 +104,30 @@ def test_malformed_record_does_not_discard_valid_records() -> None:
     )
     data = serialize_storage({"valid": valid}, {})
     data["reminders"]["broken"] = {"id": "broken"}
+    reminders, _ = deserialize_storage(data)
+    assert reminders == {"valid": valid}
+
+
+def test_malformed_recurrence_isolated_from_other_records() -> None:
+    now = datetime(2026, 7, 26, 12, tzinfo=UTC)
+    valid = Reminder(
+        id="valid",
+        user_id="user-1",
+        title="Test",
+        due=now,
+        created_at=now,
+        updated_at=now,
+    )
+    data = serialize_storage({"valid": valid}, {})
+    broken = valid.updated(id="broken").to_dict()
+    broken["recurrence"] = {
+        "frequency": "weekly",
+        "interval": 0,
+        "timezone": "Europe/Dublin",
+        "anchor_local": "2026-07-27T20:00:00",
+        "weekdays": ["monday"],
+    }
+    data["reminders"]["broken"] = broken
     reminders, _ = deserialize_storage(data)
     assert reminders == {"valid": valid}
 
