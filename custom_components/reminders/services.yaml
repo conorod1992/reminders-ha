@@ -1,0 +1,118 @@
+create:
+  fields:
+    title:
+      required: true
+      example: "Put the bins out"
+      selector:
+        text:
+    message:
+      selector:
+        text:
+          multiline: true
+    due:
+      required: true
+      selector:
+        datetime:
+    user_id:
+      selector:
+        user:
+    delivery_mode:
+      default: default
+      selector:
+        select:
+          options:
+            - default
+            - custom
+    channels: &channels
+      selector:
+        select:
+          multiple: true
+          options:
+            - persistent_notification
+            - phone
+            - voice
+    notify_targets: &notify_targets
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: notify
+    voice_targets: &voice_targets
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: assist_satellite
+
+get:
+  fields:
+    reminder_id: &reminder_id
+      required: true
+      selector:
+        text:
+
+list:
+  fields:
+    user_id:
+      selector:
+        user:
+    pending_only:
+      default: false
+      selector:
+        boolean:
+    due_after:
+      selector:
+        datetime:
+    due_before:
+      selector:
+        datetime:
+
+update:
+  fields:
+    reminder_id: *reminder_id
+    title:
+      selector:
+        text:
+    message:
+      selector:
+        text:
+          multiline: true
+    due:
+      selector:
+        datetime:
+    user_id:
+      selector:
+        user:
+    delivery_mode:
+      selector:
+        select:
+          options:
+            - default
+            - custom
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+
+delete:
+  fields:
+    reminder_id: *reminder_id
+
+snooze:
+  fields:
+    reminder_id: *reminder_id
+    due:
+      selector:
+        datetime:
+    duration:
+      selector:
+        duration:
+
+set_user_preferences:
+  fields:
+    user_id:
+      selector:
+        user:
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+

@@ -1,0 +1,84 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Reminders is already configured"
+    },
+    "step": {
+      "user": {
+        "description": "Set up persistent, multi-user reminders. Delivery preferences can be configured with the reminders.set_user_preferences action.",
+        "title": "Set up Reminders"
+      }
+    }
+  },
+  "services": {
+    "create": {
+      "description": "Create a persistent reminder.",
+      "fields": {
+        "channels": {"description": "Logical channels for a custom delivery policy.", "name": "Channels"},
+        "delivery_mode": {"description": "Use the user's live defaults or a custom policy.", "name": "Delivery mode"},
+        "due": {"description": "When the reminder is due.", "name": "Due"},
+        "message": {"description": "Optional longer reminder text.", "name": "Message"},
+        "notify_targets": {"description": "Notify entities used by the phone channel.", "name": "Notify targets"},
+        "title": {"description": "Short reminder title.", "name": "Title"},
+        "user_id": {"description": "Recipient; defaults to the authenticated user.", "name": "User"},
+        "voice_targets": {"description": "Assist satellites used by the voice channel.", "name": "Voice targets"}
+      },
+      "name": "Create reminder"
+    },
+    "delete": {
+      "description": "Delete a reminder.",
+      "fields": {"reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}},
+      "name": "Delete reminder"
+    },
+    "get": {
+      "description": "Return one reminder as action response data.",
+      "fields": {"reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}},
+      "name": "Get reminder"
+    },
+    "list": {
+      "description": "Return reminders visible to the caller as action response data.",
+      "fields": {
+        "due_after": {"description": "Only reminders due at or after this time.", "name": "Due after"},
+        "due_before": {"description": "Only reminders due at or before this time.", "name": "Due before"},
+        "pending_only": {"description": "Only reminders waiting for delivery.", "name": "Pending only"},
+        "user_id": {"description": "User to filter; administrators may omit it to list all.", "name": "User"}
+      },
+      "name": "List reminders"
+    },
+    "set_user_preferences": {
+      "description": "Set a user's live default delivery policy.",
+      "fields": {
+        "channels": {"description": "Default logical channels.", "name": "Channels"},
+        "notify_targets": {"description": "Notify entities for phone delivery.", "name": "Notify targets"},
+        "user_id": {"description": "User; defaults to the authenticated user.", "name": "User"},
+        "voice_targets": {"description": "Assist satellites for voice delivery.", "name": "Voice targets"}
+      },
+      "name": "Set user preferences"
+    },
+    "snooze": {
+      "description": "Reschedule a reminder to an absolute time or by a duration.",
+      "fields": {
+        "due": {"description": "New absolute due time.", "name": "Due"},
+        "duration": {"description": "Duration from now.", "name": "Duration"},
+        "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}
+      },
+      "name": "Snooze reminder"
+    },
+    "update": {
+      "description": "Edit a reminder and recalculate scheduling.",
+      "fields": {
+        "channels": {"description": "Logical channels for a custom delivery policy.", "name": "Channels"},
+        "delivery_mode": {"description": "Use the user's live defaults or a custom policy.", "name": "Delivery mode"},
+        "due": {"description": "New due time.", "name": "Due"},
+        "message": {"description": "New optional message.", "name": "Message"},
+        "notify_targets": {"description": "Notify entities used by the phone channel.", "name": "Notify targets"},
+        "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"},
+        "title": {"description": "New title.", "name": "Title"},
+        "user_id": {"description": "New owner; administrators only for another user.", "name": "User"},
+        "voice_targets": {"description": "Assist satellites used by the voice channel.", "name": "Voice targets"}
+      },
+      "name": "Update reminder"
+    }
+  }
+}
+
