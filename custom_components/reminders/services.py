@@ -17,6 +17,16 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
+from .authorization import (
+    async_actor,
+    async_resolve_target_user,
+)
+from .authorization import (
+    async_get_authorized as auth_get_authorized,
+)
+from .authorization import (
+    async_resolve_list_user as auth_resolve_list_user,
+)
 from .const import (
     DOMAIN,
     SERVICE_CREATE,
@@ -296,54 +306,29 @@ async def _get_authorized(
     call: ServiceCall,
     reminder_id: str,
 ) -> Reminder:
-    reminder = await manager.async_get(reminder_id)
-    if call.context.user_id is None or call.context.user_id == reminder.user_id:
-        return reminder
-    user = await hass.auth.async_get_user(call.context.user_id)
-    if user is None or not user.is_admin:
-        raise HomeAssistantError("You cannot access another user's reminder")
-    return reminder
+    return await auth_get_authorized(
+        manager, await async_actor(hass, call.context.user_id), reminder_id
+    )
 
 
 async def _resolve_user(
     hass: HomeAssistant, call: ServiceCall, requested: str | None
 ) -> str:
-    context_user_id = call.context.user_id
-    if context_user_id is None:
-        if requested is None:
-            raise ServiceValidationError(
-                "user_id is required when the action has no authenticated user context"
-            )
-        return requested
-    if requested is None or requested == context_user_id:
-        return context_user_id
-    user = await hass.auth.async_get_user(context_user_id)
-    if user is None or not user.is_admin:
-        raise HomeAssistantError("Only administrators may select another user")
-    return requested
+    return await async_resolve_target_user(
+        hass, await async_actor(hass, call.context.user_id), requested
+    )
 
 
 async def _resolve_list_user(
     hass: HomeAssistant, call: ServiceCall, requested: str | None
 ) -> str | None:
-    context_user_id = call.context.user_id
-    if context_user_id is None:
-        if requested is None:
-            raise ServiceValidationError(
-                "user_id is required when the action has no authenticated user context"
-            )
-        return requested
-    if requested is None or requested == context_user_id:
-        user = await hass.auth.async_get_user(context_user_id)
-        return (
-            None
-            if user is not None and user.is_admin and requested is None
-            else context_user_id
-        )
-    user = await hass.auth.async_get_user(context_user_id)
-    if user is None or not user.is_admin:
-        raise HomeAssistantError("You cannot list another user's reminders")
-    return requested
+    actor = await async_actor(hass, call.context.user_id)
+    return await auth_resolve_list_user(
+        hass,
+        actor,
+        requested,
+        all_users=actor is not None and actor.is_admin and requested is None,
+    )
 
 
 def _policy_from_data(data: Any) -> DeliveryPolicy | None:

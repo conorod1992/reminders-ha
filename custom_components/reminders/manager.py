@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,6 +18,8 @@ from .delivery import DeliveryDispatcher
 from .models import DeliveryPolicy, Reminder, ReminderStatus, UserPreferences
 from .recurrence import RecurrenceRule, first_due, next_occurrence_after
 from .storage import ReminderStore, StoredData, deserialize_storage, serialize_storage
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ReminderNotFoundError(KeyError):
@@ -46,6 +49,7 @@ class ReminderManager:
         self._scheduled_for: datetime | None = None
         self._loaded = False
         self._unloaded = False
+        self._listeners: set[Callable[[frozenset[str]], None]] = set()
 
     @property
     def scheduled_for(self) -> datetime | None:
@@ -68,6 +72,18 @@ class ReminderManager:
         async with self._lock:
             self._unloaded = True
             self._cancel_timer()
+            self._listeners.clear()
+
+    def async_subscribe(
+        self, listener: Callable[[frozenset[str]], None]
+    ) -> Callable[[], None]:
+        """Subscribe to privacy-preserving state invalidations."""
+        self._listeners.add(listener)
+
+        def unsubscribe() -> None:
+            self._listeners.discard(listener)
+
+        return unsubscribe
 
     async def async_create(
         self,
@@ -101,6 +117,7 @@ class ReminderManager:
             self._reschedule_if_needed(reminder.due)
         if due <= now:
             await self._async_process_due(now)
+        self._notify_changed({user_id})
         return reminder
 
     async def async_create_recurring(
@@ -135,6 +152,7 @@ class ReminderManager:
             candidate[reminder.id] = reminder
             await self._async_persist_candidate(candidate)
             self._reschedule_if_needed(reminder.due)
+        self._notify_changed({user_id})
         return reminder
 
     async def async_get(self, reminder_id: str) -> Reminder:
@@ -212,6 +230,7 @@ class ReminderManager:
             self._reschedule(force=True)
         if updated.due <= dt_util.utcnow():
             await self._async_process_due(dt_util.utcnow())
+        self._notify_changed({current.user_id, updated.user_id})
         return updated
 
     async def async_delete(self, reminder_id: str) -> None:
@@ -224,6 +243,7 @@ class ReminderManager:
             del candidate[reminder_id]
             await self._async_persist_candidate(candidate)
             self._reschedule(force=True)
+        self._notify_changed({reminder.user_id})
 
     async def async_snooze(
         self,
@@ -254,6 +274,7 @@ class ReminderManager:
             self._reschedule(force=True)
         if updated.due <= dt_util.utcnow():
             await self._async_process_due(dt_util.utcnow())
+        self._notify_changed({current.user_id})
         return updated
 
     async def async_set_user_preferences(
@@ -265,6 +286,7 @@ class ReminderManager:
         async with self._lock:
             self._users[user_id] = preferences
             self._queue_save()
+        self._notify_changed({user_id})
         return preferences
 
     async def async_get_user_preferences(self, user_id: str) -> UserPreferences:
@@ -343,6 +365,7 @@ class ReminderManager:
                     candidate = dict(self._reminders)
                     candidate[claimed.id] = updated
                     await self._async_persist_candidate(candidate)
+                self._notify_changed({claimed.user_id})
         finally:
             async with self._lock:
                 self._reschedule(force=True)
@@ -396,6 +419,15 @@ class ReminderManager:
     def _snapshot(self) -> StoredData:
         return serialize_storage(dict(self._reminders), dict(self._users))
 
+    def _notify_changed(self, user_ids: set[str]) -> None:
+        """Notify API subscribers without exposing reminder data."""
+        owners = frozenset(user_ids)
+        for listener in tuple(self._listeners):
+            try:
+                listener(owners)
+            except Exception:
+                _LOGGER.exception("Error notifying a reminder state subscriber")
+
     def _require(self, reminder_id: str) -> Reminder:
         try:
             return self._reminders[reminder_id]
@@ -419,3 +451,13 @@ def _validate_policy(policy: DeliveryPolicy | None) -> None:
     unknown = set(policy.channels) - SUPPORTED_CHANNELS
     if unknown:
         raise ReminderValidationError(f"Unknown delivery channels: {sorted(unknown)}")
+    if any(not target.startswith("notify.") for target in policy.notify_targets):
+        raise ReminderValidationError("Phone targets must be notify entities")
+    if any(
+        not target.startswith("assist_satellite.") for target in policy.voice_targets
+    ):
+        raise ReminderValidationError("Voice targets must be Assist satellites")
+    if "phone" in policy.channels and not policy.notify_targets:
+        raise ReminderValidationError("Phone delivery needs at least one notify target")
+    if "voice" in policy.channels and not policy.voice_targets:
+        raise ReminderValidationError("Voice delivery needs at least one satellite")
