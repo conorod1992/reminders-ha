@@ -1,0 +1,11 @@
+{
+  "name": "reminders-ha-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --check ../custom_components/reminders/frontend/reminders-panel.js && node --check ../custom_components/reminders/frontend/reminders-utils.js",
+    "lint": "node --check ../custom_components/reminders/frontend/reminders-panel.js && node --check ../custom_components/reminders/frontend/reminders-utils.js",
+    "test": "node --test reminders-utils.test.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
