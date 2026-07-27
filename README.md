@@ -15,6 +15,7 @@ delivery preferences when they fire.
 - per-user defaults and per-reminder custom delivery policies
 - persistent notification, modern notify entity, and selected Assist satellite channels
 - create, get, list, update, delete, snooze, and preference actions
+- responsive sidebar management panel with live updates and admin user filtering
 - privacy-safe diagnostics (counts only; never reminder content or user IDs)
 
 ## Installation
@@ -36,12 +37,69 @@ integration from the UI.
 
 Requires Home Assistant 2026.7 or newer.
 
+## Opening Reminders
+
+Open **Sidebar → Reminders**. The integration installs and registers its panel
+automatically; there is no separate frontend repository or resource to add.
+The integration details page under **Settings → Devices & services →
+Reminders** also links to the same management page through Home Assistant's
+supported configuration-panel integration.
+
+The page starts in **Upcoming**. **Recurring** shows series definitions and
+their next occurrence, while **Failed** surfaces one-shot delivery failures and
+the last failed occurrence of an active series. Changes from automations,
+another browser, delivery, or an administrator appear live without polling.
+
+Use **Add reminder** and choose **One-time** or **Recurring**. Reminder fields
+use date/time controls in Home Assistant's configured timezone; no YAML,
+timestamps, entity IDs, or Developer Tools are required. Clicking **Edit** keeps
+the form open if a backend validation or persistence error occurs. **Delete**
+always asks for confirmation. **Snooze** offers presets and a custom date/time;
+snoozing a recurring reminder moves only its current occurrence.
+
 ## Delivery preferences
 
-Run `reminders.set_user_preferences` from Developer Tools → Actions. An
-authenticated caller defaults to their own Home Assistant user. Administrators
-may select another user. Actions invoked without an authenticated user context
-(some automations) must provide `user_id` explicitly.
+Open **Reminders → Preferences** to choose default phone, voice, and persistent
+notification channels. Phone and Assist satellite selectors use friendly names
+from entities visible to the current Home Assistant user. Targets are always
+selected explicitly; the integration never guesses ownership from an entity
+name.
+
+A reminder set to **Use my defaults** resolves the latest preferences when it
+fires. A **Custom** reminder stores only its own selected logical channels and
+targets. Administrators can choose whose preferences they are editing; ordinary
+users can view and change only their own. The backend enforces this—the
+frontend is not treated as a security boundary.
+
+## Recurring reminders in the UI
+
+**First reminder** sets both the first eligible occurrence and the recurrence
+phase. Choose Daily, Weekly, or Monthly and an **Every** interval. Weekly forms
+select one or more weekdays; those days occur together in the same active week.
+For example, every two weeks on Tuesday and Thursday runs twice in one week,
+then skips the next week. The first reminder's weekday is selected by default.
+
+Monthly forms use a fixed day from 1–31. Months without that date are skipped;
+the 31st is never silently moved to the end of a shorter month. Timezone is an
+advanced field and defaults to Home Assistant's configured timezone. Existing
+DST behavior and the recurrence anchor remain authoritative in the backend.
+
+## Administrator view
+
+Administrators still start at **My reminders**. They may switch to **All users**
+or **Specific user**, where owner display names distinguish records without
+changing the stored Home Assistant user IDs. Administrators can create, edit,
+delete, snooze, and configure preferences for another user. Ordinary users are
+always restricted to their own records by the authenticated WebSocket API.
+
+## Automations and actions
+
+The UI is the normal human interface. These actions remain available for
+automations, scripts, Developer Tools, and programmatic clients. An authenticated
+caller defaults to their own Home Assistant user. Actions invoked without an
+authenticated user context must provide `user_id` explicitly.
+
+To set preferences programmatically:
 
 ```yaml
 action: reminders.set_user_preferences
@@ -62,8 +120,6 @@ The logical channels are:
 No device-name inference is used. A reminder with default delivery stores no
 copy of these preferences, so changing a target updates every future default
 reminder automatically.
-
-## Actions
 
 ### Create a one-shot reminder
 
@@ -164,8 +220,10 @@ response_variable: my_reminders
 ```
 
 `list` supports `user_id`, `pending_only`, `due_after`, and `due_before`.
-Ordinary users can only read their own records; administrators may list all or
-select another user. Responses retain all existing fields and add `recurring`,
+Ordinary users can only read their own records; administrators may omit the user
+to list all or select another user. The management UI still defaults administrators
+to their own reminders and provides an explicit all-users scope. Responses retain
+all existing fields and add `recurring`,
 the recurrence definition, its underlying `scheduled_due`, and last-occurrence
 details.
 
@@ -246,10 +304,8 @@ databases are created.
   rules. It does not yet support RRULE import, yearly rules, "last weekday",
   "third Friday of the month", or "last day of month" shortcuts.
 - V1 does not include acknowledgement buttons, retries/escalation, history
-  retention controls, presence-aware satellite choice, a dedicated reminder
-  dashboard, or direct conversation-agent tools.
+  retention controls, presence-aware satellite choice, or direct conversation-agent tools.
 - Failed delivery is recorded but has no automatic retry policy in V1.
-- User preferences are configured with an action rather than a dedicated profile UI.
 
 The stored model and delivery boundary deliberately leave room for recurrence
 with local-time semantics, acknowledgement and escalation state, richer voice
@@ -263,6 +319,10 @@ python -m ruff format --check .
 python -m ruff check .
 python -m mypy custom_components/reminders
 python -m pytest
+cd frontend
+npm run build
+npm run lint
+npm test
 ```
 
 CI additionally runs Hassfest and HACS validation. See [LICENSE](LICENSE).
