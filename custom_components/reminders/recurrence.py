@@ -245,7 +245,14 @@ def occurrence_number(rule: RecurrenceRule, occurrence: datetime) -> int:
         before = len(first_days) + (active - 1) * len(rule.weekdays)
         return before + list(rule.weekdays).index(Weekday(local.weekday())) + 1
     if rule.frequency is RecurrenceFrequency.YEARLY:
-        return (local.year - rule.anchor_local.year) // rule.interval + 1
+        count = 0
+        for year in range(rule.anchor_local.year, local.year + 1, rule.interval):
+            try:
+                rule.anchor_local.replace(year=year)
+            except ValueError:
+                continue
+            count += 1
+        return count
 
     anchor_month = rule.anchor_local.year * 12 + rule.anchor_local.month - 1
     target_month = local.year * 12 + local.month - 1

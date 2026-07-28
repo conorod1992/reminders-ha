@@ -44,7 +44,7 @@ class RemindersTool(llm.Tool):
         self,
         name: str,
         description: str,
-        parameters: Any,
+        parameters: vol.Schema,
         handler: ToolHandler,
     ) -> None:
         self.name = name
@@ -103,17 +103,19 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "create_reminder",
             "Create one one-time reminder. Provide due or a relative delay in minutes.",
-            vol.All(
-                vol.Schema(
-                    {
-                        **create_common,
-                        vol.Exclusive("due", "when"): cv.string,
-                        vol.Exclusive("delay_minutes", "when"): vol.All(
-                            vol.Coerce(int), vol.Range(min=1)
-                        ),
-                    }
-                ),
-                cv.has_at_least_one_key("due", "delay_minutes"),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(
+                        {
+                            **create_common,
+                            vol.Exclusive("due", "when"): cv.string,
+                            vol.Exclusive("delay_minutes", "when"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1)
+                            ),
+                        }
+                    ),
+                    cv.has_at_least_one_key("due", "delay_minutes"),
+                )
             ),
             _create,
         ),
@@ -166,58 +168,66 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "get_reminder",
             "Get reminder details by ID or an unambiguous exact title.",
-            vol.All(
-                vol.Schema(TARGET_SCHEMA),
-                cv.has_at_least_one_key("reminder_id", "title"),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
             ),
             _get,
         ),
         RemindersTool(
             "update_reminder",
             "Update an unambiguous reminder's title, message, due time, or policies.",
-            vol.All(
-                vol.Schema(
-                    {
-                        **TARGET_SCHEMA,
-                        vol.Optional("new_title"): cv.string,
-                        vol.Optional("message"): vol.Any(None, cv.string),
-                        vol.Optional("due"): cv.string,
-                        vol.Optional("acknowledgement_policy"): vol.In(
-                            tuple(AcknowledgementPolicy)
-                        ),
-                        vol.Optional("quiet_hours_policy"): vol.In(
-                            tuple(QuietHoursPolicy)
-                        ),
-                    }
-                ),
-                cv.has_at_least_one_key("reminder_id", "title"),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(
+                        {
+                            **TARGET_SCHEMA,
+                            vol.Optional("new_title"): cv.string,
+                            vol.Optional("message"): vol.Any(None, cv.string),
+                            vol.Optional("due"): cv.string,
+                            vol.Optional("acknowledgement_policy"): vol.In(
+                                tuple(AcknowledgementPolicy)
+                            ),
+                            vol.Optional("quiet_hours_policy"): vol.In(
+                                tuple(QuietHoursPolicy)
+                            ),
+                        }
+                    ),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
             ),
             _update,
         ),
         RemindersTool(
             "delete_reminder",
             "Cancel/delete an unambiguous reminder or recurring series.",
-            vol.All(
-                vol.Schema(TARGET_SCHEMA),
-                cv.has_at_least_one_key("reminder_id", "title"),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
             ),
             _delete,
         ),
         RemindersTool(
             "snooze_reminder",
             "Snooze only the active occurrence by due time or minutes.",
-            vol.All(
-                vol.Schema(
-                    {
-                        **TARGET_SCHEMA,
-                        vol.Exclusive("due", "when"): cv.string,
-                        vol.Exclusive("minutes", "when"): vol.All(
-                            vol.Coerce(int), vol.Range(min=1)
-                        ),
-                    }
-                ),
-                cv.has_at_least_one_key("reminder_id", "title"),
-                cv.has_at_least_one_key("due", "minutes"),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(
+                        {
+                            **TARGET_SCHEMA,
+                            vol.Exclusive("due", "when"): cv.string,
+                            vol.Exclusive("minutes", "when"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1)
+                            ),
+                        }
+                    ),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                    cv.has_at_least_one_key("due", "minutes"),
+                )
             ),
             _snooze,
         ),
@@ -225,9 +235,13 @@ def _tools() -> list[llm.Tool]:
             "acknowledge_reminder",
             "Mark one delivered occurrence done; occurrence_id disambiguates "
             "series history.",
-            vol.All(
-                vol.Schema({**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}),
-                cv.has_at_least_one_key("reminder_id", "title"),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(
+                        {**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}
+                    ),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
             ),
             _acknowledge,
         ),

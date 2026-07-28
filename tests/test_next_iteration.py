@@ -288,6 +288,17 @@ def test_recurrence_end_date_and_count_are_anchored() -> None:
     )
     assert next_due_after(date_limited, datetime(2026, 1, 2, 9, tzinfo=UTC)) is None
 
+    leap_limited = RecurrenceRule(
+        RecurrenceFrequency.YEARLY,
+        1,
+        "UTC",
+        datetime(2024, 2, 29, 9),
+        occurrence_count=2,
+    )
+    assert next_due_after(leap_limited, leap_limited.anchor_utc) == datetime(
+        2028, 2, 29, 9, tzinfo=UTC
+    )
+
 
 async def test_storage_1_2_migration_adds_safe_defaults() -> None:
     now = datetime(2026, 7, 1, 12, tzinfo=UTC)

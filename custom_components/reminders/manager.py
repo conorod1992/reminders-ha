@@ -650,7 +650,7 @@ class ReminderManager:
                 occurrence_status = OccurrenceStatus.FAILED
             finished = occurrence.updated(
                 status=occurrence_status,
-                delivered_at=effective_now,
+                delivered_at=effective_now if result.succeeded else None,
                 succeeded_channels=result.succeeded,
                 failed_channels=result.failed_channels,
                 delivery_errors=result.errors,
@@ -689,7 +689,9 @@ class ReminderManager:
                         status=occurrence_reminder_status,
                         last_occurrence_due=scheduled_due,
                         last_occurrence_status=occurrence_reminder_status,
-                        delivered_at=effective_now,
+                        delivered_at=(
+                            effective_now if result.succeeded else current.delivered_at
+                        ),
                         delivery_errors=result.errors,
                         occurrence_history=tuple(history),
                         updated_at=effective_now,
@@ -697,7 +699,7 @@ class ReminderManager:
             else:
                 updated = current.updated(
                     status=occurrence_reminder_status,
-                    delivered_at=effective_now,
+                    delivered_at=effective_now if result.succeeded else None,
                     delivery_errors=result.errors,
                     occurrence_history=tuple(history),
                     updated_at=effective_now,
@@ -942,7 +944,11 @@ def _prune_history(
     if len(retained) > preferences.history_max_occurrences:
         removable = [item for item in retained if item.id not in protected]
         keep_removable = max(0, preferences.history_max_occurrences - len(protected))
-        keep_ids = {item.id for item in removable[-keep_removable:]}
+        keep_ids = (
+            {item.id for item in removable[-keep_removable:]}
+            if keep_removable
+            else set()
+        )
         retained = [
             item for item in retained if item.id in protected or item.id in keep_ids
         ]
