@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.websocket_api import async_register_command
@@ -44,7 +44,7 @@ COMMAND_PREFIX = f"{DOMAIN}/"
 
 def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, Any]:
     """Serialize a list row without embedding unrelated retained history."""
-    result = cast(dict[str, Any], reminder.to_dict())
+    result = reminder.to_dict()
     result["occurrence_history"] = [
         item.to_dict()
         for item in reminder.occurrence_history
