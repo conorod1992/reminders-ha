@@ -7,7 +7,10 @@ from typing import Any, cast
 import voluptuous as vol
 from homeassistant.components.websocket_api import async_register_command
 from homeassistant.components.websocket_api.connection import ActiveConnection
-from homeassistant.components.websocket_api.decorators import async_response, websocket_command
+from homeassistant.components.websocket_api.decorators import (
+    async_response,
+    websocket_command,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -81,13 +84,9 @@ async def _failed_page(
             if item.status is ReminderStatus.FAILED
             or item.last_occurrence_status is ReminderStatus.FAILED
         )
-        if len(page) < 1000:
+        if len(page) < 1000 or len(matches) >= offset + limit:
             break
         source_offset += 1000
-        if len(matches) >= offset + limit and page[-1].due > matches[-1].due:
-            # Results are due-sorted, but continue only when later pages could still
-            # contribute before the requested slice.
-            break
     return matches[offset : offset + limit]
 
 
@@ -123,9 +122,7 @@ async def websocket_list(
         msg.get("user_id") if scope == "user" else None,
         all_users=scope == "all",
     )
-    due_after = (
-        _parse_datetime(hass, msg["due_after"]) if "due_after" in msg else None
-    )
+    due_after = _parse_datetime(hass, msg["due_after"]) if "due_after" in msg else None
     due_before = (
         _parse_datetime(hass, msg["due_before"]) if "due_before" in msg else None
     )
