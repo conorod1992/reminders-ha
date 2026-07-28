@@ -214,9 +214,11 @@ and apply to previews and delivery scheduling alike.
 ## Home Assistant actions
 
 All actions have visual-editor names, descriptions, examples, and selectors.
-Admin recipient fields use Home Assistant's user selector; YAML still accepts
-the immutable `user_id`. Ordinary users cannot target another user even if they
-manually write an ID.
+Home Assistant 2026.7 does not expose a valid service-action user selector, so
+admin `user_id` fields use the best supported text selector and clearly explain
+that they expect the immutable ID. The custom panel provides the natural
+friendly-name user picker. Ordinary users cannot target another user even if
+they manually write an ID.
 
 Existing action names remain compatible:
 
@@ -371,6 +373,9 @@ user IDs, targets, and history content are excluded.
   in bounded history.
 - Quiet hours use Home Assistant's configured timezone because Home Assistant
   does not currently expose an independent timezone on each user record.
+- Home Assistant 2026.7's generic service selector schema rejects `user`, so
+  service actions retain an explained `user_id` text field. The custom panel
+  supplies the secure friendly-name picker.
 
 ## Development
 

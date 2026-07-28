@@ -27,7 +27,7 @@ create:
       name: User
       description: Recipient. Leave empty to use the authenticated caller; only administrators can select another user.
       selector:
-        user:
+        text:
     delivery_mode: &delivery_mode
       name: Delivery
       description: Use the user's live defaults, or provide channels and targets for this reminder.
