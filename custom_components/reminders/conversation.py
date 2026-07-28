@@ -22,7 +22,12 @@ from .authorization import (
 )
 from .const import DOMAIN
 from .manager import ReminderManager, ReminderValidationError
-from .models import AcknowledgementPolicy, QuietHoursPolicy, Reminder
+from .models import (
+    AcknowledgementPolicy,
+    QuietHoursPolicy,
+    Reminder,
+    ReminderStatus,
+)
 from .recurrence import RecurrenceFrequency
 from .services import _parse_datetime, _recurrence_from_data
 
@@ -271,6 +276,17 @@ def _manager(hass: HomeAssistant) -> ReminderManager:
     return manager
 
 
+def _compact_reminder(reminder: Reminder) -> dict[str, Any]:
+    """Serialize list results without embedding bounded historical occurrences."""
+    result = reminder.to_dict()
+    result["occurrence_history"] = [
+        item
+        for item in result.get("occurrence_history", [])
+        if item.get("status") == "awaiting_acknowledgement"
+    ]
+    return result
+
+
 async def _identity(hass: HomeAssistant, context: llm.LLMContext) -> tuple[Actor, str]:
     user_id = context.context.user_id if context.context is not None else None
     actor = await async_actor(hass, user_id)
@@ -325,7 +341,10 @@ async def _list(
     user_id = await async_resolve_list_user(hass, actor, args.get("user_id"))
     reminders = await _manager(hass).async_list(
         user_id=user_id,
-        pending_only=True,
+        statuses={
+            ReminderStatus.PENDING,
+            ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+        },
         query=args.get("query"),
         due_after=_parse_datetime(hass, args["due_after"])
         if "due_after" in args
@@ -336,7 +355,7 @@ async def _list(
         recurring=args.get("recurring"),
         limit=args["limit"],
     )
-    return {"reminders": [item.to_dict() for item in reminders]}
+    return {"reminders": [_compact_reminder(item) for item in reminders]}
 
 
 async def _resolve_reminder(
