@@ -8,6 +8,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+from .conversation import async_register_conversation_api
 from .delivery import (
     DeliveryDispatcher,
     NotifyProvider,
@@ -28,6 +29,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up integration-wide resources."""
     async_register_services(hass)
     async_register_websocket_api(hass)
+    async_register_conversation_api(hass)
     return True
 
 

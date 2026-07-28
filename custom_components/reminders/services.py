@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -29,6 +29,7 @@ from .authorization import (
 )
 from .const import (
     DOMAIN,
+    SERVICE_ACKNOWLEDGE,
     SERVICE_CREATE,
     SERVICE_CREATE_RECURRING,
     SERVICE_DELETE,
@@ -36,12 +37,19 @@ from .const import (
     SERVICE_LIST,
     SERVICE_SET_USER_PREFERENCES,
     SERVICE_SNOOZE,
+    SERVICE_TEST_DELIVERY,
     SERVICE_UPDATE,
     SUPPORTED_CHANNELS,
 )
 from .manager import ReminderManager, ReminderNotFoundError, ReminderValidationError
-from .models import DeliveryPolicy, Reminder
+from .models import (
+    AcknowledgementPolicy,
+    DeliveryPolicy,
+    QuietHoursPolicy,
+    Reminder,
+)
 from .recurrence import (
+    MonthlyMode,
     RecurrenceError,
     RecurrenceFrequency,
     RecurrenceRule,
@@ -60,6 +68,12 @@ CREATE_FIELDS: dict[Any, Any] = {
     vol.Required("due"): vol.Any(datetime, cv.string),
     vol.Optional("user_id"): cv.string,
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
+    vol.Optional("acknowledgement_policy", default="default"): vol.In(
+        tuple(AcknowledgementPolicy)
+    ),
+    vol.Optional("quiet_hours_policy", default="respect"): vol.In(
+        tuple(QuietHoursPolicy)
+    ),
 }
 CREATE_FIELDS.update(POLICY_FIELDS)
 CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
@@ -73,9 +87,20 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
         cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
     ),
     vol.Optional("day_of_month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
+    vol.Optional("monthly_mode"): vol.In(tuple(MonthlyMode)),
+    vol.Optional("monthly_weekday"): vol.In(tuple(day.label for day in Weekday)),
+    vol.Optional("monthly_week"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
+    vol.Optional("end_date"): cv.date,
+    vol.Optional("occurrence_count"): vol.All(vol.Coerce(int), vol.Range(min=1)),
     vol.Optional("timezone"): cv.string,
     vol.Optional("user_id"): cv.string,
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
+    vol.Optional("acknowledgement_policy", default="default"): vol.In(
+        tuple(AcknowledgementPolicy)
+    ),
+    vol.Optional("quiet_hours_policy", default="respect"): vol.In(
+        tuple(QuietHoursPolicy)
+    ),
 }
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
 CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
@@ -95,6 +120,15 @@ UPDATE_FIELDS: dict[Any, Any] = {
     ),
     vol.Optional("day_of_month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=31)),
     vol.Optional("timezone"): cv.string,
+    vol.Optional("monthly_mode"): vol.In(tuple(MonthlyMode)),
+    vol.Optional("monthly_weekday"): vol.In(tuple(day.label for day in Weekday)),
+    vol.Optional("monthly_week"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
+    vol.Optional("end_date"): vol.Any(None, cv.date),
+    vol.Optional("occurrence_count"): vol.Any(
+        None, vol.All(vol.Coerce(int), vol.Range(min=1))
+    ),
+    vol.Optional("acknowledgement_policy"): vol.In(tuple(AcknowledgementPolicy)),
+    vol.Optional("quiet_hours_policy"): vol.In(tuple(QuietHoursPolicy)),
 }
 UPDATE_FIELDS.update(POLICY_FIELDS)
 UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
@@ -104,6 +138,7 @@ LIST_SCHEMA = vol.Schema(
         vol.Optional("pending_only", default=False): cv.boolean,
         vol.Optional("due_after"): vol.Any(datetime, cv.string),
         vol.Optional("due_before"): vol.Any(datetime, cv.string),
+        vol.Optional("query"): cv.string,
     }
 )
 SNOOZE_SCHEMA = vol.All(
@@ -126,8 +161,37 @@ PREFERENCES_SCHEMA = vol.Schema(
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("require_acknowledgement", default=False): cv.boolean,
+        vol.Optional("history_retention_days", default=90): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=3650)
+        ),
+        vol.Optional("history_max_occurrences", default=250): vol.All(
+            vol.Coerce(int), vol.Range(min=10, max=5000)
+        ),
+        vol.Optional("quiet_hours_enabled", default=False): cv.boolean,
+        vol.Optional("quiet_hours_start", default="23:00"): cv.time,
+        vol.Optional("quiet_hours_end", default="07:00"): cv.time,
+        vol.Optional("quiet_hours_channels", default=["voice"]): vol.All(
+            cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]
+        ),
+        vol.Optional(
+            "quiet_hours_fallback_channels", default=["persistent_notification"]
+        ): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     }
 )
+ACKNOWLEDGE_SCHEMA = vol.Schema(
+    {
+        vol.Required("reminder_id"): cv.string,
+        vol.Optional("occurrence_id"): cv.string,
+    }
+)
+TEST_DELIVERY_FIELDS: dict[Any, Any] = {
+    vol.Optional("user_id"): cv.string,
+    vol.Required("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
+    vol.Optional("notify_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("voice_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+}
+TEST_DELIVERY_SCHEMA = vol.Schema(TEST_DELIVERY_FIELDS)
 
 
 def async_register_services(hass: HomeAssistant) -> None:
@@ -145,6 +209,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             message=call.data.get("message"),
             due=_parse_datetime(hass, call.data["due"]),
             delivery_policy=policy,
+            acknowledgement_policy=AcknowledgementPolicy(
+                call.data["acknowledgement_policy"]
+            ),
+            quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -164,6 +232,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             message=call.data.get("message"),
             recurrence=recurrence,
             delivery_policy=policy,
+            acknowledgement_policy=AcknowledgementPolicy(
+                call.data["acknowledgement_policy"]
+            ),
+            quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -184,6 +256,7 @@ def async_register_services(hass: HomeAssistant) -> None:
                 if "due_before" in call.data
                 else None
             ),
+            query=call.data.get("query"),
         )
         return {"reminders": [item.to_dict() for item in reminders]}
 
@@ -197,6 +270,14 @@ def async_register_services(hass: HomeAssistant) -> None:
             changes["due"] = _parse_datetime(hass, call.data["due"])
         if "user_id" in call.data:
             changes["user_id"] = await _resolve_user(hass, call, call.data["user_id"])
+        if "acknowledgement_policy" in call.data:
+            changes["acknowledgement_policy"] = AcknowledgementPolicy(
+                call.data["acknowledgement_policy"]
+            )
+        if "quiet_hours_policy" in call.data:
+            changes["quiet_hours_policy"] = QuietHoursPolicy(
+                call.data["quiet_hours_policy"]
+            )
         if "delivery_mode" in call.data or any(
             key in call.data for key in POLICY_FIELDS
         ):
@@ -207,6 +288,11 @@ def async_register_services(hass: HomeAssistant) -> None:
             "interval",
             "weekdays",
             "day_of_month",
+            "monthly_mode",
+            "monthly_weekday",
+            "monthly_week",
+            "end_date",
+            "occurrence_count",
             "timezone",
         }
         if recurrence_fields.intersection(call.data):
@@ -247,10 +333,52 @@ def async_register_services(hass: HomeAssistant) -> None:
             notify_targets=tuple(call.data["notify_targets"]),
             voice_targets=tuple(call.data["voice_targets"]),
         )
-        preferences = await manager.async_set_user_preferences(user_id, policy)
+        preferences = await manager.async_set_user_preferences(
+            user_id,
+            policy,
+            **{
+                key: call.data[key]
+                for key in (
+                    "require_acknowledgement",
+                    "history_retention_days",
+                    "history_max_occurrences",
+                    "quiet_hours_enabled",
+                    "quiet_hours_start",
+                    "quiet_hours_end",
+                    "quiet_hours_channels",
+                    "quiet_hours_fallback_channels",
+                )
+                if key in call.data
+            },
+        )
         if not call.return_response:
             return None
         return {"preferences": preferences.to_dict(), "user_id": user_id}
+
+    async def acknowledge(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
+        occurrence = await manager.async_acknowledge(
+            reminder.id,
+            occurrence_id=call.data.get("occurrence_id"),
+            acknowledged_by=call.context.user_id,
+        )
+        return {"occurrence": occurrence.to_dict()} if call.return_response else None
+
+    async def test_delivery(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        user_id = await _resolve_user(hass, call, call.data.get("user_id"))
+        policy = DeliveryPolicy(
+            tuple(call.data["channels"]),
+            tuple(call.data.get("notify_targets", ())),
+            tuple(call.data.get("voice_targets", ())),
+        )
+        result = await manager.async_test_delivery(user_id=user_id, policy=policy)
+        return {
+            "succeeded_channels": list(result.succeeded),
+            "failed_channels": list(result.failed_channels),
+            "errors": list(result.errors),
+        }
 
     handlers = (
         (SERVICE_CREATE, create, CREATE_SCHEMA, SupportsResponse.OPTIONAL),
@@ -265,6 +393,18 @@ def async_register_services(hass: HomeAssistant) -> None:
         (SERVICE_UPDATE, update, UPDATE_SCHEMA, SupportsResponse.OPTIONAL),
         (SERVICE_DELETE, delete, ID_SCHEMA, SupportsResponse.NONE),
         (SERVICE_SNOOZE, snooze, SNOOZE_SCHEMA, SupportsResponse.OPTIONAL),
+        (
+            SERVICE_ACKNOWLEDGE,
+            acknowledge,
+            ACKNOWLEDGE_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
+        (
+            SERVICE_TEST_DELIVERY,
+            test_delivery,
+            TEST_DELIVERY_SCHEMA,
+            SupportsResponse.ONLY,
+        ),
         (
             SERVICE_SET_USER_PREFERENCES,
             set_preferences,
@@ -388,8 +528,16 @@ def _recurrence_from_data(
     supplied_weekdays = tuple(data.get("weekdays", ()))
     if frequency is not RecurrenceFrequency.WEEKLY and supplied_weekdays:
         raise RecurrenceError("Only weekly recurrence can define weekdays")
-    if frequency is not RecurrenceFrequency.MONTHLY and "day_of_month" in data:
-        raise RecurrenceError("Only monthly recurrence can define day of month")
+    monthly_fields = {
+        "day_of_month",
+        "monthly_mode",
+        "monthly_weekday",
+        "monthly_week",
+    }
+    if frequency is not RecurrenceFrequency.MONTHLY and monthly_fields.intersection(
+        data
+    ):
+        raise RecurrenceError("Only monthly recurrence can define monthly patterns")
 
     if frequency is RecurrenceFrequency.WEEKLY:
         if "weekdays" in data:
@@ -402,15 +550,60 @@ def _recurrence_from_data(
         weekdays = ()
 
     day_of_month: int | None
+    monthly_mode = MonthlyMode.DAY_OF_MONTH
+    monthly_weekday: Weekday | None = None
+    monthly_week: int | None = None
     if frequency is RecurrenceFrequency.MONTHLY:
-        if "day_of_month" in data:
+        monthly_mode = MonthlyMode(
+            data.get(
+                "monthly_mode",
+                current.monthly_mode
+                if current is not None and current.frequency is frequency
+                else MonthlyMode.DAY_OF_MONTH,
+            )
+        )
+        if monthly_mode is MonthlyMode.DAY_OF_MONTH and "day_of_month" in data:
             day_of_month = int(data["day_of_month"])
-        elif current is not None and current.frequency is frequency:
+        elif (
+            monthly_mode is MonthlyMode.DAY_OF_MONTH
+            and current is not None
+            and current.frequency is frequency
+        ):
             day_of_month = current.day_of_month
-        else:
+        elif monthly_mode is MonthlyMode.DAY_OF_MONTH:
             day_of_month = anchor_local.day
+        else:
+            day_of_month = None
+        if monthly_mode in {MonthlyMode.NTH_WEEKDAY, MonthlyMode.LAST_WEEKDAY}:
+            if "monthly_weekday" in data:
+                monthly_weekday = Weekday.from_name(data["monthly_weekday"])
+            elif current is not None and current.frequency is frequency:
+                monthly_weekday = current.monthly_weekday
+            else:
+                monthly_weekday = Weekday(anchor_local.weekday())
+        if monthly_mode is MonthlyMode.NTH_WEEKDAY:
+            monthly_week = int(
+                data.get(
+                    "monthly_week",
+                    current.monthly_week
+                    if current is not None and current.frequency is frequency
+                    else (anchor_local.day - 1) // 7 + 1,
+                )
+            )
     else:
         day_of_month = None
+
+    end_value = data.get("end_date", current.end_date if current is not None else None)
+    end_date = (
+        end_value
+        if isinstance(end_value, date)
+        else date.fromisoformat(str(end_value))
+        if end_value
+        else None
+    )
+    count_value = data.get(
+        "occurrence_count", current.occurrence_count if current is not None else None
+    )
 
     return RecurrenceRule(
         frequency=frequency,
@@ -419,6 +612,11 @@ def _recurrence_from_data(
         anchor_local=anchor_local,
         weekdays=weekdays,
         day_of_month=day_of_month,
+        monthly_mode=monthly_mode,
+        monthly_weekday=monthly_weekday,
+        monthly_week=monthly_week,
+        end_date=end_date,
+        occurrence_count=int(count_value) if count_value is not None else None,
     )
 
 

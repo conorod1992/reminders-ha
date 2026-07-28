@@ -1,5 +1,6 @@
 {
   "services": {
+    "acknowledge": {"service": "mdi:check-circle"},
     "create": {"service": "mdi:bell-plus"},
     "create_recurring": {"service": "mdi:bell-sync"},
     "delete": {"service": "mdi:bell-remove"},
@@ -7,6 +8,7 @@
     "list": {"service": "mdi:bell-multiple"},
     "set_user_preferences": {"service": "mdi:bell-cog"},
     "snooze": {"service": "mdi:bell-sleep"},
+    "test_delivery": {"service": "mdi:bell-check"},
     "update": {"service": "mdi:bell-edit"}
   }
 }

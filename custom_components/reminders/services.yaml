@@ -1,29 +1,357 @@
 create:
+  name: Create a reminder
+  description: Creates a one-time reminder. Delivery, completion tracking, and quiet hours use the selected user's current defaults unless overridden.
   fields:
-    title:
+    title: &title
+      name: Title
+      description: What should be remembered.
       required: true
       example: "Put the bins out"
       selector:
         text:
-    message:
+    message: &message
+      name: Message
+      description: Optional extra detail delivered with the title.
+      example: "Put the recycling bin at the kerb."
       selector:
         text:
           multiline: true
     due:
+      name: When
+      description: Exact due date and time. A value without an offset uses Home Assistant's timezone.
       required: true
+      example: "2026-08-04 20:00:00"
       selector:
         datetime:
-    user_id:
+    user_id: &user
+      name: User
+      description: Recipient. Leave empty to use the authenticated caller; only administrators can select another user.
       selector:
-        text:
-    delivery_mode:
+        user:
+    delivery_mode: &delivery_mode
+      name: Delivery
+      description: Use the user's live defaults, or provide channels and targets for this reminder.
       default: default
       selector:
         select:
           options:
-            - default
-            - custom
+            - label: Use the user's defaults
+              value: default
+            - label: Choose channels for this reminder
+              value: custom
     channels: &channels
+      name: Delivery channels
+      description: Logical delivery methods used when Delivery is custom.
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Home Assistant notification
+              value: persistent_notification
+            - label: Phone notification
+              value: phone
+            - label: Assist satellite voice
+              value: voice
+    notify_targets: &notify_targets
+      name: Phones
+      description: Notify entities used by the phone channel.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: notify
+    voice_targets: &voice_targets
+      name: Voice devices
+      description: Assist satellites used for voice announcements.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: assist_satellite
+    acknowledgement_policy: &ack_policy
+      name: Completion tracking
+      description: Inherit the user's current preference, explicitly require Done, or explicitly skip completion tracking.
+      default: default
+      selector:
+        select:
+          options:
+            - label: Use the user's default
+              value: default
+            - label: Require acknowledgement
+              value: required
+            - label: Do not require acknowledgement
+              value: not_required
+    quiet_hours_policy: &quiet_policy
+      name: Quiet hours
+      description: Respect the user's current quiet hours or bypass them for an urgent reminder.
+      default: respect
+      selector:
+        select:
+          options:
+            - label: Respect quiet hours
+              value: respect
+            - label: Ignore quiet hours (urgent)
+              value: ignore
+
+create_recurring:
+  name: Create a recurring reminder
+  description: Creates an anchored recurring series. The first reminder fixes the local wall-clock phase and DST behavior.
+  fields:
+    title: *title
+    message: *message
+    first_reminder: &first_reminder
+      name: First reminder
+      description: First eligible local date/time and the permanent recurrence anchor.
+      required: true
+      example: "2026-08-03 20:00:00"
+      selector:
+        datetime:
+    frequency: &frequency
+      name: Repeat
+      description: Calendar unit used by the recurrence.
+      required: true
+      selector:
+        select:
+          options:
+            - label: Daily
+              value: daily
+            - label: Weekly
+              value: weekly
+            - label: Monthly
+              value: monthly
+            - label: Yearly
+              value: yearly
+    interval: &interval
+      name: Every
+      description: Number of days, active weeks, months, or years between occurrences.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 365
+          mode: box
+    weekdays: &weekdays
+      name: Weekdays
+      description: Days within each active week. The first reminder must be on one of them.
+      selector:
+        select:
+          multiple: true
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+    monthly_mode: &monthly_mode
+      name: Monthly pattern
+      description: Use a calendar day, nth weekday, last weekday, or last calendar day.
+      selector:
+        select:
+          options:
+            - label: Day of month
+              value: day_of_month
+            - label: Nth weekday
+              value: nth_weekday
+            - label: Last weekday
+              value: last_weekday
+            - label: Last calendar day
+              value: last_day
+    day_of_month: &day_of_month
+      name: Day of month
+      description: Calendar day for day-of-month rules. Invalid months are skipped, preserving existing behavior.
+      selector:
+        number:
+          min: 1
+          max: 31
+          mode: box
+    monthly_weekday: &monthly_weekday
+      name: Monthly weekday
+      description: Weekday for nth-weekday or last-weekday patterns.
+      selector:
+        select:
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+    monthly_week: &monthly_week
+      name: Week number
+      description: 1 for first, 2 for second, through 5 for fifth. Used only by nth-weekday rules.
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    end_date: &end_date
+      name: End date
+      description: Optional final eligible local calendar date (inclusive).
+      selector:
+        date:
+    occurrence_count: &occurrence_count
+      name: Maximum occurrences
+      description: Optional one-based limit counted from the original anchor, including occurrences skipped during downtime.
+      selector:
+        number:
+          min: 1
+          mode: box
+    timezone: &timezone
+      name: Timezone
+      description: Optional IANA timezone. Defaults to Home Assistant's configured timezone.
+      example: "Europe/Dublin"
+      selector:
+        text:
+    user_id: *user
+    delivery_mode: *delivery_mode
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+    acknowledgement_policy: *ack_policy
+    quiet_hours_policy: *quiet_policy
+
+get:
+  name: Get a reminder
+  description: Returns one reminder by its immutable ID after checking caller ownership.
+  fields:
+    reminder_id: &reminder_id
+      name: Reminder ID
+      description: Immutable ID returned by create or list.
+      required: true
+      selector:
+        text:
+
+list:
+  name: List reminders
+  description: Returns reminders visible to the caller, with optional search and due-time filters.
+  fields:
+    user_id: *user
+    pending_only:
+      name: Upcoming only
+      description: Return only reminders waiting for their next delivery.
+      default: false
+      selector:
+        boolean:
+    query:
+      name: Search
+      description: Case-insensitive title and message search.
+      selector:
+        text:
+    due_after:
+      name: Due after
+      description: Include reminders due at or after this time.
+      selector:
+        datetime:
+    due_before:
+      name: Due before
+      description: Include reminders due at or before this time.
+      selector:
+        datetime:
+
+update:
+  name: Update a reminder
+  description: Updates selected fields while preserving retained history. Recurring due times remain derived from their recurrence.
+  fields:
+    reminder_id: *reminder_id
+    title: *title
+    message: *message
+    due:
+      name: New due time
+      description: One-time reminders only.
+      selector:
+        datetime:
+    user_id: *user
+    delivery_mode: *delivery_mode
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+    acknowledgement_policy: *ack_policy
+    quiet_hours_policy: *quiet_policy
+    first_reminder: *first_reminder
+    frequency: *frequency
+    interval: *interval
+    weekdays: *weekdays
+    monthly_mode: *monthly_mode
+    day_of_month: *day_of_month
+    monthly_weekday: *monthly_weekday
+    monthly_week: *monthly_week
+    end_date: *end_date
+    occurrence_count: *occurrence_count
+    timezone: *timezone
+
+delete:
+  name: Delete a reminder
+  description: Permanently deletes a one-time reminder or an entire recurring series.
+  fields:
+    reminder_id: *reminder_id
+
+snooze:
+  name: Snooze a reminder
+  description: Moves a one-time reminder or only the active occurrence of a recurring series.
+  fields:
+    reminder_id: *reminder_id
+    due:
+      name: New due time
+      description: Exact snooze time. Do not also provide Duration.
+      selector:
+        datetime:
+    duration:
+      name: Duration
+      description: Relative snooze duration. Do not also provide New due time.
+      selector:
+        duration:
+
+acknowledge:
+  name: Mark a reminder done
+  description: Acknowledges one successfully delivered occurrence that requires completion tracking.
+  fields:
+    reminder_id: *reminder_id
+    occurrence_id:
+      name: Occurrence ID
+      description: Optional for a one-time reminder or when exactly one series occurrence awaits acknowledgement; otherwise required.
+      selector:
+        text:
+
+set_user_preferences:
+  name: Set reminder preferences
+  description: Sets one user's live delivery, acknowledgement, history, and quiet-hours defaults.
+  fields:
+    user_id: *user
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+    require_acknowledgement:
+      name: Require acknowledgement by default
+      description: Applied at each occurrence's delivery time when its policy is Use my default.
+      default: false
+      selector:
+        boolean:
+    quiet_hours_enabled:
+      name: Enable quiet hours
+      description: Suppresses configured channels during the local wall-clock window.
+      default: false
+      selector:
+        boolean:
+    quiet_hours_start:
+      name: Quiet hours start
+      description: Local wall-clock start; overnight windows are supported.
+      default: "23:00:00"
+      selector:
+        time:
+    quiet_hours_end:
+      name: Quiet hours end
+      description: Local wall-clock end.
+      default: "07:00:00"
+      selector:
+        time:
+    quiet_hours_channels:
+      name: Suppressed channels
+      description: Channels to suppress during quiet hours. Voice is the recommended default.
+      default:
+        - voice
       selector:
         select:
           multiple: true
@@ -31,189 +359,42 @@ create:
             - persistent_notification
             - phone
             - voice
-    notify_targets: &notify_targets
-      selector:
-        entity:
-          multiple: true
-          filter:
-            domain: notify
-    voice_targets: &voice_targets
-      selector:
-        entity:
-          multiple: true
-          filter:
-            domain: assist_satellite
-
-create_recurring:
-  fields:
-    title:
-      required: true
-      example: "Put the recycling out"
-      selector:
-        text:
-    message:
-      selector:
-        text:
-          multiline: true
-    first_reminder:
-      required: true
-      selector:
-        datetime:
-    frequency:
-      required: true
-      selector:
-        select:
-          options:
-            - daily
-            - weekly
-            - monthly
-    interval:
-      default: 1
-      selector:
-        number:
-          min: 1
-          max: 365
-          mode: box
-    weekdays:
+    quiet_hours_fallback_channels:
+      name: Fallback channels
+      description: Channels added when a selected channel is suppressed; persistent notification is the safe default.
+      default:
+        - persistent_notification
       selector:
         select:
           multiple: true
           options:
-            - monday
-            - tuesday
-            - wednesday
-            - thursday
-            - friday
-            - saturday
-            - sunday
-    day_of_month:
+            - persistent_notification
+            - phone
+            - voice
+    history_retention_days:
+      name: History retention days
+      description: Completed occurrence history older than this is removed; awaiting acknowledgement is protected.
+      default: 90
       selector:
         number:
           min: 1
-          max: 31
+          max: 3650
           mode: box
-    timezone:
-      selector:
-        text:
-    user_id:
-      selector:
-        text:
-    delivery_mode:
-      default: default
-      selector:
-        select:
-          options:
-            - default
-            - custom
-    channels: *channels
-    notify_targets: *notify_targets
-    voice_targets: *voice_targets
-
-get:
-  fields:
-    reminder_id: &reminder_id
-      required: true
-      selector:
-        text:
-
-list:
-  fields:
-    user_id:
-      selector:
-        text:
-    pending_only:
-      default: false
-      selector:
-        boolean:
-    due_after:
-      selector:
-        datetime:
-    due_before:
-      selector:
-        datetime:
-
-update:
-  fields:
-    reminder_id: *reminder_id
-    title:
-      selector:
-        text:
-    message:
-      selector:
-        text:
-          multiline: true
-    due:
-      selector:
-        datetime:
-    user_id:
-      selector:
-        text:
-    delivery_mode:
-      selector:
-        select:
-          options:
-            - default
-            - custom
-    channels: *channels
-    notify_targets: *notify_targets
-    voice_targets: *voice_targets
-    first_reminder:
-      selector:
-        datetime:
-    frequency:
-      selector:
-        select:
-          options:
-            - daily
-            - weekly
-            - monthly
-    interval:
+    history_max_occurrences:
+      name: Maximum retained occurrences
+      description: Per-reminder count cap in addition to the age limit.
+      default: 250
       selector:
         number:
-          min: 1
-          max: 365
+          min: 10
+          max: 5000
           mode: box
-    weekdays:
-      selector:
-        select:
-          multiple: true
-          options:
-            - monday
-            - tuesday
-            - wednesday
-            - thursday
-            - friday
-            - saturday
-            - sunday
-    day_of_month:
-      selector:
-        number:
-          min: 1
-          max: 31
-          mode: box
-    timezone:
-      selector:
-        text:
 
-delete:
+test_delivery:
+  name: Test reminder delivery
+  description: Sends a harmless test through real delivery providers without creating a reminder or history record.
   fields:
-    reminder_id: *reminder_id
-
-snooze:
-  fields:
-    reminder_id: *reminder_id
-    due:
-      selector:
-        datetime:
-    duration:
-      selector:
-        duration:
-
-set_user_preferences:
-  fields:
-    user_id:
-      selector:
-        text:
+    user_id: *user
     channels: *channels
     notify_targets: *notify_targets
     voice_targets: *voice_targets

@@ -5,14 +5,14 @@
     },
     "step": {
       "user": {
-        "description": "Set up persistent, multi-user reminders. Delivery preferences can be configured with the reminders.set_user_preferences action.",
+        "description": "Set up persistent, multi-user reminders. A friendly delivery setup opens in the Reminders panel.",
         "title": "Set up Reminders"
       }
     }
   },
   "services": {
     "create": {
-      "description": "Create a persistent reminder.",
+      "description": "Create a one-time reminder with optional delivery, acknowledgement, and quiet-hours overrides.",
       "fields": {
         "channels": {"description": "Logical channels for a custom delivery policy.", "name": "Channels"},
         "delivery_mode": {"description": "Use the user's live defaults or a custom policy.", "name": "Delivery mode"},
@@ -26,13 +26,13 @@
       "name": "Create reminder"
     },
     "create_recurring": {
-      "description": "Create an anchored daily, weekly, or monthly reminder series.",
+      "description": "Create an anchored daily, weekly, monthly, or yearly reminder series.",
       "fields": {
         "channels": {"description": "Logical channels for a custom delivery policy.", "name": "Channels"},
         "day_of_month": {"description": "Calendar day used by a monthly recurrence.", "name": "Day of month"},
         "delivery_mode": {"description": "Use the user's live defaults or a custom policy.", "name": "Delivery mode"},
         "first_reminder": {"description": "The first intended occurrence and recurrence phase anchor.", "name": "First reminder"},
-        "frequency": {"description": "Repeat daily, weekly, or monthly.", "name": "Repeat"},
+        "frequency": {"description": "Repeat daily, weekly, monthly, or yearly.", "name": "Repeat"},
         "interval": {"description": "Repeat every this many days, active weeks, or active months.", "name": "Every"},
         "message": {"description": "Optional longer reminder text.", "name": "Message"},
         "notify_targets": {"description": "Notify entities used by the phone channel.", "name": "Notify targets"},
@@ -64,8 +64,16 @@
       },
       "name": "List reminders"
     },
+    "acknowledge": {
+      "description": "Mark one delivered reminder occurrence done.",
+      "fields": {
+        "occurrence_id": {"description": "Occurrence ID when a recurring series has more than one awaiting acknowledgement.", "name": "Occurrence ID"},
+        "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}
+      },
+      "name": "Mark reminder done"
+    },
     "set_user_preferences": {
-      "description": "Set a user's live default delivery policy.",
+      "description": "Set a user's live delivery, acknowledgement, quiet-hours, and history defaults.",
       "fields": {
         "channels": {"description": "Default logical channels.", "name": "Channels"},
         "notify_targets": {"description": "Notify entities for phone delivery.", "name": "Notify targets"},
@@ -73,6 +81,16 @@
         "voice_targets": {"description": "Assist satellites for voice delivery.", "name": "Voice targets"}
       },
       "name": "Set user preferences"
+    },
+    "test_delivery": {
+      "description": "Test real delivery providers without creating a reminder or history record.",
+      "fields": {
+        "channels": {"description": "Channels to test.", "name": "Channels"},
+        "notify_targets": {"description": "Phone notify entities to test.", "name": "Phones"},
+        "user_id": {"description": "User; defaults to the authenticated user.", "name": "User"},
+        "voice_targets": {"description": "Assist satellites to test.", "name": "Voice devices"}
+      },
+      "name": "Test reminder delivery"
     },
     "snooze": {
       "description": "Reschedule a reminder to an absolute time or by a duration.",
