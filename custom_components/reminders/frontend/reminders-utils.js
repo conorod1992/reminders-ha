@@ -23,9 +23,24 @@ export function recurrenceSummary(reminder, locale = undefined) {
       ? `Every ${days} at ${time}`
       : `${every} weeks on ${days} at ${time}`;
   }
+  if (rule.frequency === "yearly") {
+    const date = new Intl.DateTimeFormat(locale, { month: "long", day: "numeric", timeZone: "UTC" })
+      .format(new Date(`${String(rule.anchor_local).slice(0, 10)}T12:00:00Z`));
+    return rule.interval === 1
+      ? `Every year on ${date} at ${time}`
+      : `${every} years on ${date} at ${time}`;
+  }
+  const dayName = rule.monthly_weekday
+    ? rule.monthly_weekday[0].toUpperCase() + rule.monthly_weekday.slice(1)
+    : "";
+  let pattern;
+  if (rule.monthly_mode === "last_day") pattern = "the last day";
+  else if (rule.monthly_mode === "last_weekday") pattern = `the last ${dayName}`;
+  else if (rule.monthly_mode === "nth_weekday") pattern = `the ${ordinal(rule.monthly_week)} ${dayName}`;
+  else pattern = `the ${ordinal(rule.day_of_month)}`;
   return rule.interval === 1
-    ? `Every month on the ${ordinal(rule.day_of_month)} at ${time}`
-    : `${every} months on the ${ordinal(rule.day_of_month)} at ${time}`;
+    ? `Every month on ${pattern} at ${time}`
+    : `${every} months on ${pattern} at ${time}`;
 }
 
 export function deliverySummary(reminder) {
@@ -57,4 +72,34 @@ export function zonedInputParts(value, timeZone, locale = "en-CA") {
 
 export function localDateTime(date, time) {
   return `${date}T${time}:00`;
+}
+
+export function quickTimeParts(choice, timeZone, now = Date.now()) {
+  const instant = new Date(now);
+  if (["10m", "30m", "1h"].includes(choice)) {
+    const minutes = { "10m": 10, "30m": 30, "1h": 60 }[choice];
+    return zonedInputParts(new Date(instant.getTime() + minutes * 60000), timeZone);
+  }
+  const today = zonedInputParts(instant, timeZone);
+  if (choice === "later") {
+    const currentHour = Number(today.time.slice(0, 2));
+    const hour = Math.min(23, Math.max(18, currentHour + 2));
+    return { date: today.date, time: `${String(hour).padStart(2, "0")}:${hour === 23 ? "59" : "00"}` };
+  }
+  const tomorrow = zonedInputParts(new Date(instant.getTime() + 36 * 3600000), timeZone);
+  return { date: tomorrow.date, time: "09:00" };
+}
+
+export function acknowledgementSummary(reminder) {
+  return {
+    default: "Use my default",
+    required: "Done required",
+    not_required: "No completion needed",
+  }[reminder?.acknowledgement_policy || "default"];
+}
+
+export function awaitingOccurrences(reminder) {
+  return (reminder?.occurrence_history || []).filter(
+    (item) => item.status === "awaiting_acknowledgement",
+  );
 }

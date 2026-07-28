@@ -1,22 +1,31 @@
 # Reminders for Home Assistant
 
-Reminders is a HACS-compatible custom integration that adds persistent,
-multi-user reminders to Home Assistant. Reminders survive restarts, wake at the
-next exact due instant rather than polling, and resolve each user's current
-delivery preferences when they fire.
+Reminders is a HACS-compatible, multi-user reminder integration for Home
+Assistant. It persists reminders across restarts, wakes at the exact next due
+instant, and delivers through Home Assistant notifications, phone notify
+entities, and Assist satellites.
+
+It deliberately creates no per-reminder entities, automations, polling loops,
+Recorder tables, external databases, or per-occurrence Home Assistant objects.
 
 ## Highlights
 
-- Home Assistant `Store` persistence with a versioned, migration-ready schema
-- one scheduler callback for the next due timestamp, including simultaneous due items
-- overdue delivery after restart and recovery of interrupted deliveries
-- anchored daily, weekly, and monthly recurrences with local-time DST semantics
-- ownership by Home Assistant user ID with caller-aware access checks
-- per-user defaults and per-reminder custom delivery policies
-- persistent notification, modern notify entity, and selected Assist satellite channels
-- create, get, list, update, delete, snooze, and preference actions
-- responsive sidebar management panel with live updates and admin user filtering
-- privacy-safe diagnostics (counts only; never reminder content or user IDs)
+- beginner create flow: **Title → When → Save**
+- quick choices for 10 minutes, 30 minutes, one hour, later today, and tomorrow
+  morning, alongside exact date/time controls
+- anchored daily, weekly, monthly, and yearly recurrences with local wall-clock
+  and deterministic DST behavior
+- nth/last weekday, last calendar day, end date, and occurrence-count recurrence
+  constraints
+- optional per-occurrence Done/acknowledgement tracking
+- bounded, searchable occurrence history with channel-level delivery results
+- first-run delivery wizard, friendly target names, and delivery test controls
+- per-user voice quiet hours with a persistent-notification fallback
+- duplicate, edit, snooze, search, filter, and live-update panel controls
+- authenticated WebSocket API, visual-editor-friendly actions, and structured
+  conversation/LLM tools
+- immutable Home Assistant user-ID ownership enforced in the backend
+- one exact next-due callback for the whole integration; no polling
 
 ## Installation
 
@@ -24,292 +33,344 @@ delivery preferences when they fire.
 
 1. In HACS, add `https://github.com/conorod1992/reminders-ha` as a custom
    repository with category **Integration**.
-2. Install **Reminders**.
-3. Restart Home Assistant.
-4. Go to **Settings → Devices & services → Add integration**, search for
+2. Install **Reminders** and restart Home Assistant.
+3. Go to **Settings → Devices & services → Add integration**, search for
    **Reminders**, and complete the one-step setup.
+4. Open **Sidebar → Reminders**.
 
-### Manual
-
-Copy `custom_components/reminders` into the matching directory below your Home
-Assistant configuration directory, restart Home Assistant, and add the
-integration from the UI.
+For manual installation, copy `custom_components/reminders` into the matching
+Home Assistant configuration directory, restart, and add the integration.
 
 Requires Home Assistant 2026.7 or newer.
 
-## Opening Reminders
+## Panel and first-run setup
 
-Open **Sidebar → Reminders**. The integration installs and registers its panel
-automatically; there is no separate frontend repository or resource to add.
-The integration details page under **Settings → Devices & services →
-Reminders** also links to the same management page through Home Assistant's
-supported configuration-panel integration.
+The first time a user opens Reminders, a dismissible setup dialog explains and
+configures:
 
-The page starts in **Upcoming**. **Recurring** shows series definitions and
-their next occurrence, while **Failed** surfaces one-shot delivery failures and
-the last failed occurrence of an active series. Changes from automations,
-another browser, delivery, or an administrator appear live without polling.
+- Home Assistant persistent notifications (the simple, reliable default)
+- phone notify targets
+- Assist satellite voice targets
+- whether reminders should require Done by default
 
-Use **Add reminder** and choose **One-time** or **Recurring**. Reminder fields
-use date/time controls in Home Assistant's configured timezone; no YAML,
-timestamps, entity IDs, or Developer Tools are required. Clicking **Edit** keeps
-the form open if a backend validation or persistence error occurs. **Delete**
-always asks for confirmation. **Snooze** offers presets and a custom date/time;
-snoozing a recurring reminder moves only its current occurrence.
+Entity choices use friendly Home Assistant names; users never need to type
+entity IDs. Optional channels may be skipped, and dismissing the wizard does
+not block the normal panel. An administrator's first-run dialog is always for
+their own user. Administrators can explicitly choose another user only from the
+regular Preferences dialog.
 
-## Delivery preferences
+Preferences provides separate **Test notification**, **Test phone**, **Test
+voice**, and **Test configured delivery** controls. Tests use the targets
+currently selected in the form, even before Save, and call the same delivery
+providers as real reminders. They send “This is a test reminder from Home
+Assistant.” and do not create a reminder or history item.
 
-Open **Reminders → Preferences** to choose default phone, voice, and persistent
-notification channels. Phone and Assist satellite selectors use friendly names
-from entities visible to the current Home Assistant user. Targets are always
-selected explicitly; the integration never guesses ownership from an entity
-name.
+## Creating and managing reminders
 
-A reminder set to **Use my defaults** resolves the latest preferences when it
-fires. A **Custom** reminder stores only its own selected logical channels and
-targets. Administrators can choose whose preferences they are editing; ordinary
-users can view and change only their own. The backend enforces this—the
-frontend is not treated as a security boundary.
+The default Add dialog shows only the title, quick time choices, exact date and
+time, and Save. Message, recurrence, recipient, custom delivery,
+acknowledgement, and urgent quiet-hours override are under **Advanced options**.
 
-## Recurring reminders in the UI
+Quick choices populate the normal date/time fields in Home Assistant's
+configured timezone. They do not use a separate scheduler. The date/time fields
+remain editable before Save.
 
-**First reminder** sets both the first eligible occurrence and the recurrence
-phase. Choose Daily, Weekly, or Monthly and an **Every** interval. Weekly forms
-select one or more weekdays; those days occur together in the same active week.
-For example, every two weeks on Tuesday and Thursday runs twice in one week,
-then skips the next week. The first reminder's weekday is selected by default.
+Each reminder card supports:
 
-Monthly forms use a fixed day from 1–31. Months without that date are skipped;
-the 31st is never silently moved to the end of a shorter month. Timezone is an
-advanced field and defaults to Home Assistant's configured timezone. Existing
-DST behavior and the recurrence anchor remain authoritative in the backend.
+- **Edit**
+- **Duplicate**
+- **Snooze**
+- **Done**, when a delivered occurrence awaits acknowledgement
+- **Delete**
 
-## Administrator view
+Duplicating opens an unsaved form. A one-time copy deliberately has no due time,
+so a new time must be chosen. A recurring copy retains its rule as an editable
+new series definition, receives a new ID only when saved, and never copies
+history, occurrence state, acknowledgement state, or internal IDs.
 
-Administrators still start at **My reminders**. They may switch to **All users**
-or **Specific user**, where owner display names distinguish records without
-changing the stored Home Assistant user IDs. Administrators can create, edit,
-delete, snooze, and configure preferences for another user. Ordinary users are
-always restricted to their own records by the authenticated WebSocket API.
+Search matches title and message in the backend. Administrators can explicitly
+filter by owner using friendly display names while the API continues submitting
+immutable IDs. Upcoming, Recurring, History, and Failed views remain live via a
+privacy-preserving invalidation subscription; there is no polling.
 
-## Automations and actions
+## Optional Done / acknowledgement
 
-The UI is the normal human interface. These actions remain available for
-automations, scripts, Developer Tools, and programmatic clients. An authenticated
-caller defaults to their own Home Assistant user. Actions invoked without an
-authenticated user context must provide `user_id` explicitly.
+Not every reminder needs completion tracking. Each user chooses **Require
+acknowledgement by default**, and each reminder has one of three policies:
 
-To set preferences programmatically:
+- `default`: use the owner's current preference
+- `required`: require acknowledgement for this reminder/series
+- `not_required`: never require acknowledgement for this reminder/series
 
-```yaml
-action: reminders.set_user_preferences
-data:
-  channels:
-    - phone
-    - persistent_notification
-  notify_targets:
-    - notify.conors_phone
-```
+Legacy users and reminders default to `false` and `default`, so upgrading does
+not suddenly require acknowledgement.
 
-The logical channels are:
+Like default delivery settings, `default` is resolved at **occurrence delivery
+time**, not creation time. Changing the user preference therefore affects
+future deliveries, including future occurrences of an existing series, without
+rewriting reminder records. The resolved boolean is recorded on that occurrence
+so its historical meaning never changes later.
 
-- `persistent_notification`: built-in, reliable delivery with no selected endpoint
-- `phone`: calls `notify.send_message` for the selected notify entities
-- `voice`: calls `assist_satellite.announce` for selected compatible satellites
+A successful required delivery becomes `awaiting_acknowledgement`; successful
+delivery itself is not redefined as completion. Done records an acknowledgement
+timestamp and, for authenticated calls, the Home Assistant user ID that did it.
+For a recurring series, only the delivered occurrence is acknowledged. The
+series has already advanced to its next anchored occurrence and continues
+normally.
 
-No device-name inference is used. A reminder with default delivery stores no
-copy of these preferences, so changing a target updates every future default
-reminder automatically.
+The lifecycle vocabulary is explicit:
 
-### Create a one-shot reminder
+- scheduled
+- delivering (durable transient claim)
+- delivered
+- awaiting acknowledgement
+- acknowledged
+- failed
+- cancelled where a retained occurrence is replaced by a recurrence edit
+
+## Occurrence history and retention
+
+Each one-time reminder and recurring occurrence records:
+
+- original scheduled due time and current due time
+- whether and when it was snoozed
+- actual delivery time
+- successful, failed, and quiet-hours-suppressed channels
+- privacy-safe provider error types
+- whether acknowledgement was required
+- acknowledgement time and user ID when available
+- eventual outcome
+
+History is embedded in the reminder/series Store record; it does not create
+entities or Recorder rows. The History view uses backend search, date/status
+filters, limits, and offsets, so the browser never needs an unbounded dataset.
+
+Defaults are **90 days** and **250 occurrences per reminder**. Users may adjust
+both in Preferences (or the preference action). Retention runs on delivery and
+preference changes. The active scheduled occurrence and occurrences awaiting
+acknowledgement are protected from pruning; this can temporarily exceed the
+count cap if many acknowledgements are outstanding.
+
+Deleting a reminder retains the integration's backwards-compatible hard-delete
+semantics and removes its embedded history too.
+
+## Delivery preferences and quiet hours
+
+A reminder set to **Use my defaults** resolves the owner's latest delivery
+preferences when the occurrence fires. A custom reminder stores its own logical
+channels and selected targets.
+
+Supported channels are:
+
+- `persistent_notification`: built-in Home Assistant notification
+- `phone`: `notify.send_message` to selected notify entities
+- `voice`: `assist_satellite.announce` to selected Assist satellites
+
+Quiet hours are per user and follow Home Assistant's configured timezone. The
+default window is 23:00–07:00, disabled until the user enables it. Overnight
+windows work naturally. By default quiet hours suppress voice, allow existing
+phone/persistent delivery to continue, and add persistent notification as a
+fallback when a selected voice channel is suppressed.
+
+Quiet hours do **not** defer or move a reminder. The occurrence remains due at
+its scheduled instant and its history records suppressed channels. An advanced
+per-reminder `ignore` policy bypasses quiet hours for urgent reminders.
+
+## Recurrence model
+
+All recurrence is anchored to **First reminder** in a named timezone. The anchor
+defines the local wall-clock time and the active week/month/year phase. Supported
+patterns are:
+
+- daily, every N days
+- weekly, every N active weeks on one or more weekdays
+- monthly on calendar day N (legacy behavior)
+- monthly on the first through fifth weekday
+- monthly on the last chosen weekday
+- monthly on the last calendar day
+- yearly, every N years on the anchor month/day
+- optional inclusive local end date
+- optional maximum occurrence count from the original anchor
+
+The panel offers Weekdays and Weekends presets, a plain-English summary, and a
+backend-calculated preview of upcoming occurrences.
+
+Existing monthly-day rules remain unchanged: months without the chosen day are
+skipped, so a rule on the 31st does not move to the 30th or February's last day.
+The new `last_day` rule is explicit. A yearly 29 February rule similarly skips
+non-leap years.
+
+Next occurrences are calculated from the original phase. Late delivery and
+snoozing never introduce drift. After downtime the manager delivers at most one
+representative overdue occurrence and calculates the next future occurrence
+directly; it does not replay every missed event. Count limits remain anchored,
+so missed occurrences still consume their original sequence positions.
+
+For DST, local wall time remains authoritative. An ambiguous autumn time uses
+the first occurrence (`fold=0`). A nonexistent spring time moves forward to the
+first valid wall-clock second after the gap. These policies are deterministic
+and apply to previews and delivery scheduling alike.
+
+## Home Assistant actions
+
+All actions have visual-editor names, descriptions, examples, and selectors.
+Admin recipient fields use Home Assistant's user selector; YAML still accepts
+the immutable `user_id`. Ordinary users cannot target another user even if they
+manually write an ID.
+
+Existing action names remain compatible:
+
+- `reminders.create`
+- `reminders.create_recurring`
+- `reminders.get`
+- `reminders.list`
+- `reminders.update`
+- `reminders.delete`
+- `reminders.snooze`
+- `reminders.set_user_preferences`
+
+New actions are:
+
+- `reminders.acknowledge`
+- `reminders.test_delivery`
+
+An authenticated action defaults to its caller. A system action without a user
+context must explicitly provide a valid `user_id`.
+
+### Create examples
 
 ```yaml
 action: reminders.create
 data:
   title: Put the bins out
-  message: Put the recycling bin at the kerb
-  due: "2026-07-27 20:00:00"
+  due: "2026-08-04 20:00:00"
+  acknowledgement_policy: default
 ```
-
-Naive date/time values from the UI are interpreted in Home Assistant's configured
-timezone and stored as UTC. Offset-aware values are also accepted. Set
-`response_variable` to capture the new reminder object and ID.
-
-Use a per-reminder override by selecting custom delivery:
-
-```yaml
-action: reminders.create
-data:
-  title: Quiet reminder
-  due: "2026-07-27T20:00:00+01:00"
-  delivery_mode: custom
-  channels:
-    - persistent_notification
-```
-
-### Create a recurring reminder
-
-`reminders.create_recurring` keeps recurrence fields out of ordinary one-shot
-creation. Every series requires an explicit **First reminder**:
 
 ```yaml
 action: reminders.create_recurring
 data:
-  title: Put recycling out
-  first_reminder: "2026-08-03 20:00:00"
-  frequency: weekly
-  interval: 2
-  weekdays:
-    - monday
+  title: Monthly report
+  first_reminder: "2026-08-03 09:00:00"
+  frequency: monthly
+  monthly_mode: nth_weekday
+  monthly_week: 1
+  monthly_weekday: monday
+  occurrence_count: 12
 ```
 
-The first reminder date/time defines the recurrence phase. The integration does
-not choose which alternating week/month a recurring reminder belongs to. A
-past first reminder is retained as the anchor, but creation schedules only the
-next future occurrence rather than replaying the history.
+Naive date/time values use Home Assistant's timezone; offset-aware values are
+converted to UTC. Set `response_variable` to capture returned reminder data.
 
-Supported patterns are:
-
-- `daily`: every day or every X days at the first reminder's wall-clock time
-- `weekly`: every X active weeks on one or more selected weekdays
-- `monthly`: every X active months on a selected calendar day
-
-For a single weekly weekday, `weekdays` may be omitted and defaults to the first
-reminder's weekday. Multiple weekdays belong to the same active week:
+### Acknowledge and test examples
 
 ```yaml
-action: reminders.create_recurring
-data:
-  title: Water plants
-  first_reminder: "2026-08-04 09:00:00"
-  frequency: weekly
-  interval: 2
-  weekdays:
-    - tuesday
-    - thursday
-```
-
-This produces Tuesday and Thursday in the week beginning 3 August, skips the
-following week, then produces Tuesday and Thursday in the week beginning
-17 August. The interval is not applied independently to each weekday.
-
-"Every 3 weeks on Friday" means Friday in every third active week starting
-from the first reminder's recurrence phase. It does not mean the third Friday
-of every month.
-
-For monthly schedules, the first reminder's date must match `day_of_month`.
-Months without that calendar day are skipped: a monthly reminder on the 31st
-runs on 31 January, then 31 March, not 28 February or 30 April.
-
-The timezone defaults to Home Assistant's configured timezone and can be
-overridden with an IANA name such as `Europe/Dublin`. Recurrence stores local
-wall time and calculates each UTC instant from the original anchor, so DST does
-not shift an 08:00 reminder to 07:00 or 09:00 local time. A nonexistent local
-time during the spring gap moves to the first valid wall-clock second after the
-gap. An autumn repeated time uses its first occurrence.
-
-### Get and list
-
-These read-only actions require response data:
-
-```yaml
-action: reminders.list
-data:
-  pending_only: true
-response_variable: my_reminders
-```
-
-`list` supports `user_id`, `pending_only`, `due_after`, and `due_before`.
-Ordinary users can only read their own records; administrators may omit the user
-to list all or select another user. The management UI still defaults administrators
-to their own reminders and provides an explicit all-users scope. Responses retain
-all existing fields and add `recurring`,
-the recurrence definition, its underlying `scheduled_due`, and last-occurrence
-details.
-
-### Update, delete, and snooze
-
-All use the UUID returned by `create`, `create_recurring`, or `list`:
-
-```yaml
-action: reminders.snooze
+action: reminders.acknowledge
 data:
   reminder_id: 05d7c355-f394-40d6-b052-d5da1fc979cb
-  duration:
-    minutes: 30
 ```
 
-`update` accepts a new title, message, due time, recipient (administrator only),
-or delivery policy. For recurring reminders it also accepts `first_reminder`,
-`frequency`, `interval`, `weekdays`, `day_of_month`, and `timezone`; changing
-any recurrence field recalculates and immediately persists the next occurrence.
-Direct `due` edits are rejected for recurring reminders because due is derived
-from the recurrence rule. `delete` removes the whole series.
+For recurring history with multiple outstanding items, also provide
+`occurrence_id`.
 
-Snoozing a recurring reminder delays only its current occurrence. The stored
-regular occurrence remains unchanged, so snoozing this Monday from 20:00 to
-21:00 does not move next Monday away from 20:00. Repeated snoozes and restarts
-preserve that distinction.
+```yaml
+action: reminders.test_delivery
+data:
+  channels:
+    - phone
+  notify_targets:
+    - notify.conors_phone
+response_variable: delivery_test
+```
 
-## Restart and failure behavior
+The response lists successful and failed channels and safe error summaries.
 
-At startup, overdue pending reminders are delivered immediately. Before calling
-delivery providers, the manager persists a transient `delivering` state. If Home
-Assistant stops during delivery, that state is recovered to pending and retried
-on the next start. This gives at-least-once recovery: a crash after an endpoint
-accepted a message but before final state was saved can produce a duplicate, but
-a reminder is not silently lost.
+## Structured conversation tools
 
-Reminder record mutations use a prepare, persist, then commit sequence under the
-manager lock. If an immediate Store write fails, the proposed runtime state is
-discarded and the existing reminder records and scheduler remain unchanged. A
-delivery-result write failure is slightly different because its `delivering`
-claim was already persisted before the provider was called: both storage and
-runtime retain that claim, and startup recovery returns it to pending for an
-at-least-once retry.
+The integration registers an opt-in **Reminders** LLM API for Home Assistant
+conversation agents. Select that API in an agent's configuration to expose:
 
-For a recurring series, a long outage produces at most one overdue delivery.
-After that representative missed occurrence, the manager calculates the first
-future occurrence directly from the original recurrence phase. It never emits
-one notification for every missed day/week/month and never derives the next
-time from the late delivery timestamp.
+- create one-time reminder
+- create recurring reminder
+- list reminders
+- get reminder details
+- update reminder
+- delete/cancel reminder
+- snooze reminder
+- acknowledge/mark done
+- query history
 
-Provider failures are isolated. If at least one selected channel succeeds, the
-occurrence is successful and its failed channel names are retained. A failed
-one-shot reminder is marked failed and is not retried in a tight loop. A failed
-recurring occurrence records `last_occurrence_status: failed`, advances to the
-next phased occurrence, and leaves the series pending.
+Tools use structured arguments and return structured reminder/history data.
+They call `ReminderManager`; they cannot execute arbitrary services.
 
-## Architecture
+When the conversation context contains an authenticated Home Assistant user,
+the same ownership checks as the panel and actions apply. An ordinary user can
+never read or mutate another user's records. Administrator cross-user behavior
+requires an explicit `user_id` argument. Calls with no authenticated user
+context are rejected.
 
-`ReminderManager` owns the in-memory records, mutations, persistence snapshots,
-and the single next-due callback. Delivery is delegated to providers through
-logical `DeliveryPolicy` values. Home Assistant actions and future conversation
-tools call the manager rather than accessing storage or physical endpoints.
+Title-based tools require an exact, unique match. If zero or multiple reminders
+match, mutation does not run; the tool returns `needs_disambiguation` and safe
+candidate IDs/times so the agent can ask a follow-up question.
 
-Storage writes occur only on persistent changes. Reminder creation, update,
-deletion, snooze, recurrence advancement, and delivery claim/result transitions
-await `Store.async_save` before their action returns or the next schedule is
-installed. The candidate reminder dictionary is committed to runtime only after
-that save succeeds. Only lower-risk user preference writes remain intentionally
-eventually durable through a coalesced delayed save. No reminder entities,
-per-reminder automations, timers, minute polling, Recorder tables, or external
-databases are created.
+## Persistence, restart, and migration
 
-## Current limitations and roadmap
+Storage schema 1.3 adds recurrence pattern/limit fields, per-user preferences,
+and occurrence history. Migration from 1.0–1.2:
 
-- Voice delivery requires satellites that implement `assist_satellite.announce`;
-  endpoint capabilities vary, so persistent/phone delivery remains the baseline.
-- Recurrence supports daily, active-week weekday, and fixed calendar-day monthly
-  rules. It does not yet support RRULE import, yearly rules, "last weekday",
-  "third Friday of the month", or "last day of month" shortcuts.
-- V1 does not include acknowledgement buttons, retries/escalation, history
-  retention controls, presence-aware satellite choice, or direct conversation-agent tools.
-- Failed delivery is recorded but has no automatic retry policy in V1.
+- preserves all existing reminder IDs, owners, content, due times, policies,
+  recurrence anchors, and legacy monthly-day semantics
+- creates one conservative lifecycle occurrence for each legacy reminder
+- sets acknowledgement to `default` with the user default `false`
+- disables quiet hours until explicitly configured
+- marks existing preference records as configured
+- applies 90-day/250-occurrence retention defaults
 
-The stored model and delivery boundary deliberately leave room for recurrence
-with local-time semantics, acknowledgement and escalation state, richer voice
-selection, and structured conversation tools.
+Malformed individual records remain isolated rather than discarding the whole
+Store document.
+
+Reminder mutations follow prepare → persist → commit under the manager lock.
+Creation, update, delete, snooze, acknowledgement, recurrence advancement, and
+delivery claim/result transitions await an atomic Store write before runtime
+state is committed. Preference changes are now immediately durable too.
+
+Before provider calls, due work is persisted as `delivering`. A restart recovers
+that claim to the pending delivery path. This is intentionally at-least-once: a
+crash after an endpoint accepted a message but before the result write may
+produce a duplicate, but does not silently lose a reminder.
+
+Provider failures are isolated. If at least one channel succeeds, delivery is
+successful and failed channels remain in history. A fully failed one-time
+reminder stops without a retry loop. A failed recurring occurrence is recorded
+and the series advances to its next anchored occurrence.
+
+## Security and diagnostics
+
+Reminder ownership is an immutable Home Assistant user ID. Every service,
+WebSocket command, history query, preference mutation, delivery test, and
+conversation tool resolves the authenticated actor in the backend. The panel
+is not a security boundary.
+
+Ordinary users can access only their own reminders, preferences, and history.
+Administrators may explicitly target another user or request all-user views.
+Names and entity IDs are display/endpoint values only and never infer ownership.
+
+Diagnostics expose aggregate counts and scheduler presence only; reminder text,
+user IDs, targets, and history content are excluded.
+
+## Deliberate limitations
+
+- The Done control is currently in the Reminders panel and actions/API; adding
+  provider-specific interactive buttons to every phone platform would require
+  platform-specific payloads and callback plumbing.
+- Conversation tools are available only to agents whose configuration opts into
+  the Reminders LLM API, and authenticated behavior depends on the agent passing
+  Home Assistant request context.
+- Raw RRULE import/export is not the primary UI and is deferred.
+- Automatic delivery retry/escalation is not included; failures remain visible
+  in bounded history.
+- Quiet hours use Home Assistant's configured timezone because Home Assistant
+  does not currently expose an independent timezone on each user record.
 
 ## Development
 
