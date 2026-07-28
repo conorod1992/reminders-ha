@@ -19,7 +19,7 @@ from .frontend import async_register_frontend, async_unregister_panel
 from .manager import ReminderManager
 from .services import async_register_services
 from .storage import ReminderStore
-from .websocket_api import async_register_websocket_api
+from .websocket_registration import async_register_websocket_api
 
 RemindersConfigEntry = ConfigEntry[ReminderManager]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
