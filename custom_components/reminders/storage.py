@@ -48,6 +48,60 @@ class ReminderStore(Store[StoredData]):
                     raw.setdefault("scheduled_due", None)
                     raw.setdefault("last_occurrence_due", None)
                     raw.setdefault("last_occurrence_status", None)
+            if old_minor_version < 3:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("acknowledgement_policy", "default")
+                    raw.setdefault("quiet_hours_policy", "respect")
+                    raw.setdefault("current_occurrence_number", 1)
+                    due = raw.get("due")
+                    occurrence_id = f"legacy-{raw.get('id', 'occurrence')}"
+                    raw.setdefault("current_occurrence_id", occurrence_id)
+                    if due is None:
+                        raw.setdefault("occurrence_history", [])
+                        continue
+                    status = str(raw.get("status", "pending"))
+                    occurrence_status = {
+                        "pending": "scheduled",
+                        "delivering": "delivering",
+                    }.get(status, status)
+                    raw.setdefault(
+                        "occurrence_history",
+                        [
+                            {
+                                "id": occurrence_id,
+                                "scheduled_due": raw.get("scheduled_due") or due,
+                                "due": due,
+                                "status": occurrence_status,
+                                "delivered_at": raw.get("delivered_at"),
+                                "succeeded_channels": [],
+                                "failed_channels": [],
+                                "delivery_errors": raw.get("delivery_errors", []),
+                                "suppressed_channels": [],
+                                "acknowledgement_required": False,
+                                "acknowledged_at": None,
+                                "acknowledged_by": None,
+                                "snoozed": False,
+                                "snoozed_at": None,
+                            }
+                        ],
+                    )
+                for raw in normalized["users"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("require_acknowledgement", False)
+                    raw.setdefault("configured", True)
+                    raw.setdefault("history_retention_days", 90)
+                    raw.setdefault("history_max_occurrences", 250)
+                    raw.setdefault("quiet_hours_enabled", False)
+                    raw.setdefault("quiet_hours_start", "23:00")
+                    raw.setdefault("quiet_hours_end", "07:00")
+                    raw.setdefault("quiet_hours_channels", ["voice"])
+                    raw.setdefault(
+                        "quiet_hours_fallback_channels",
+                        ["persistent_notification"],
+                    )
             return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."

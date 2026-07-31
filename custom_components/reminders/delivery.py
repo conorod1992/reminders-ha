@@ -99,6 +99,14 @@ class DeliveryResult:
 
     succeeded: tuple[str, ...]
     errors: tuple[str, ...]
+    failed: tuple[str, ...] = ()
+
+    @property
+    def failed_channels(self) -> tuple[str, ...]:
+        """Return stable failed channel names, including legacy test doubles."""
+        if self.failed:
+            return self.failed
+        return tuple(error.partition(":")[0] for error in self.errors)
 
 
 class DeliveryDispatcher:
@@ -113,10 +121,12 @@ class DeliveryDispatcher:
         """Deliver through every configured channel."""
         succeeded: list[str] = []
         errors: list[str] = []
+        failed: list[str] = []
         for channel in dict.fromkeys(policy.channels):
             provider = self._providers.get(channel)
             if provider is None:
                 errors.append(f"{channel}: provider unavailable")
+                failed.append(channel)
                 continue
             try:
                 await provider.async_deliver(reminder, policy)
@@ -128,6 +138,7 @@ class DeliveryDispatcher:
                     err,
                 )
                 errors.append(f"{channel}: {type(err).__name__}")
+                failed.append(channel)
             else:
                 succeeded.append(channel)
-        return DeliveryResult(tuple(succeeded), tuple(errors))
+        return DeliveryResult(tuple(succeeded), tuple(errors), tuple(failed))
