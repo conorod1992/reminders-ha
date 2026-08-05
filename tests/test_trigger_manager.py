@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from homeassistant.core import State
+from homeassistant.core import Event, State
 
 from custom_components.reminders.manager import ReminderManager
 from custom_components.reminders.models import (
@@ -154,6 +155,58 @@ async def test_equivalent_state_triggers_share_and_release_listener(
     await manager.async_delete(second.id)
     assert manager.trigger_listener_count == 0
     assert trigger_listeners == []
+
+
+async def test_state_listener_schedules_safely_from_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    no_timers: None,
+) -> None:
+    """State callbacks may be dispatched by Home Assistant's executor."""
+    listener: list[Any] = []
+
+    def listen(_hass: Any, _entity_ids: list[str], callback: Any) -> Any:
+        listener.append(callback)
+        return lambda: None
+
+    monkeypatch.setattr(
+        "custom_components.reminders.triggers.registry.async_track_state_change_event",
+        listen,
+    )
+    loop = asyncio.get_running_loop()
+
+    def create_task(coroutine: Any, name: str | None = None) -> None:
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(coroutine, name=name))
+
+    hass = SimpleNamespace(
+        states={"light.study": State("light.study", "on")},
+        bus=SimpleNamespace(),
+        create_task=create_task,
+    )
+    dispatcher = FakeDispatcher()
+    manager = ReminderManager(hass, fake_store, dispatcher)  # type: ignore[arg-type]
+    await manager.async_load()
+    await manager.async_create_triggered(
+        user_id="u1",
+        title="Light off",
+        trigger={"type": "state", "entity_id": "light.study", "to": "off"},
+    )
+
+    event = Event(
+        "state_changed",
+        {
+            "entity_id": "light.study",
+            "old_state": State("light.study", "on"),
+            "new_state": State("light.study", "off"),
+        },
+    )
+    await asyncio.to_thread(listener[0], event)
+    for _ in range(100):
+        if dispatcher.calls:
+            break
+        await asyncio.sleep(0)
+
+    assert len(dispatcher.calls) == 1
 
 
 async def test_already_matching_default_and_opt_in(
