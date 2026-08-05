@@ -102,6 +102,24 @@ class ReminderStore(Store[StoredData]):
                         "quiet_hours_fallback_channels",
                         ["persistent_notification"],
                     )
+            if old_minor_version < 4:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("activation_type", "time")
+                    raw.setdefault("trigger", None)
+                    raw.setdefault("trigger_summary", None)
+                    raw.setdefault("trigger_description", None)
+                    raw.setdefault("repeat_policy", "once")
+                    raw.setdefault("fire_if_already_matching", False)
+                    raw.setdefault("while_awaiting_acknowledgement", "skip")
+                    raw.setdefault("cooldown_seconds", 0)
+                    raw.setdefault("available_from", None)
+                    raw.setdefault("expires_at", None)
+                    raw.setdefault("last_triggered_at", None)
+                    raw.setdefault("snoozed_until", None)
+                    raw.setdefault("immediate_evaluated", False)
+                    raw.setdefault("cooldown_skip_count", 0)
             return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."
@@ -126,7 +144,13 @@ def deserialize_storage(
             if reminder.id != reminder_id:
                 raise ValueError("Reminder ID does not match storage key")
             if reminder.status is ReminderStatus.DELIVERING:
-                reminder = reminder.updated(status=ReminderStatus.PENDING)
+                reminder = reminder.updated(
+                    status=(
+                        ReminderStatus.WAITING_FOR_TRIGGER
+                        if reminder.trigger is not None
+                        else ReminderStatus.PENDING
+                    )
+                )
             if reminder.recurrence and reminder.scheduled_due is None:
                 reminder = reminder.updated(scheduled_due=reminder.due)
             reminders[reminder_id] = reminder

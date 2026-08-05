@@ -398,3 +398,75 @@ test_delivery:
     channels: *channels
     notify_targets: *notify_targets
     voice_targets: *voice_targets
+
+create_triggered:
+  name: Create a triggered reminder
+  description: Creates a reminder that is activated directly by an entity, zone, event, or named trigger without creating a Home Assistant automation.
+  fields:
+    title: *title
+    message: *message
+    trigger:
+      name: Trigger
+      description: Structured state, numeric_state, zone, event, or named trigger definition.
+      required: true
+      example:
+        type: state
+        entity_id: sensor.work_status
+        to: Finished for today
+      selector:
+        object:
+    user_id: *user
+    repeat_policy:
+      name: Repeat policy
+      default: once
+      selector:
+        select:
+          options:
+            - label: Once
+              value: once
+            - label: Every trigger
+              value: every_trigger
+            - label: Rearm after acknowledgement
+              value: rearm_after_acknowledgement
+    fire_if_already_matching:
+      name: Fire immediately if already matching
+      description: Off by default. When disabled, waits for the next matching change after creation or restart.
+      default: false
+      selector:
+        boolean:
+    cooldown_seconds:
+      name: Cooldown
+      description: Minimum seconds between occurrence creation for this reminder.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 31536000
+          mode: box
+          unit_of_measurement: seconds
+    available_from:
+      name: Available from
+      selector:
+        datetime:
+    expires_at:
+      name: Expiry
+      selector:
+        datetime:
+    delivery_mode: *delivery_mode
+    channels: *channels
+    notify_targets: *notify_targets
+    voice_targets: *voice_targets
+    acknowledgement_policy: *ack_policy
+    quiet_hours_policy: *quiet_policy
+
+fire_trigger:
+  name: Fire a named reminder trigger
+  description: Activates eligible reminders owned by the caller and armed for this named trigger.
+  fields:
+    trigger_id:
+      name: Trigger ID
+      required: true
+      example: printing_started
+      selector:
+        text:
+    user_id: *user

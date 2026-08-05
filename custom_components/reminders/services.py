@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import voluptuous as vol
@@ -32,7 +32,9 @@ from .const import (
     SERVICE_ACKNOWLEDGE,
     SERVICE_CREATE,
     SERVICE_CREATE_RECURRING,
+    SERVICE_CREATE_TRIGGERED,
     SERVICE_DELETE,
+    SERVICE_FIRE_TRIGGER,
     SERVICE_GET,
     SERVICE_LIST,
     SERVICE_SET_USER_PREFERENCES,
@@ -44,9 +46,12 @@ from .const import (
 from .manager import ReminderManager, ReminderNotFoundError, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
+    ActivationType,
     DeliveryPolicy,
     QuietHoursPolicy,
     Reminder,
+    TriggerRepeatPolicy,
+    WhileAwaitingAcknowledgement,
 )
 from .recurrence import (
     MonthlyMode,
@@ -55,6 +60,7 @@ from .recurrence import (
     RecurrenceRule,
     Weekday,
 )
+from .triggers.models import TriggerDefinition, TriggerValidationError
 
 POLICY_FIELDS: dict[Any, Any] = {
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
@@ -104,6 +110,38 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
 }
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
 CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
+CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
+    vol.Required("title"): cv.string,
+    vol.Optional("message"): cv.string,
+    vol.Required("trigger"): dict,
+    vol.Optional("user_id"): cv.string,
+    vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
+    vol.Optional("acknowledgement_policy", default="default"): vol.In(
+        tuple(AcknowledgementPolicy)
+    ),
+    vol.Optional("quiet_hours_policy", default="respect"): vol.In(
+        tuple(QuietHoursPolicy)
+    ),
+    vol.Optional("repeat_policy", default="once"): vol.In(tuple(TriggerRepeatPolicy)),
+    vol.Optional("fire_if_already_matching", default=False): cv.boolean,
+    vol.Optional("while_awaiting_acknowledgement", default="skip"): vol.In(
+        tuple(WhileAwaitingAcknowledgement)
+    ),
+    vol.Optional("cooldown_seconds", default=0): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+    ),
+    vol.Optional("available_from"): vol.Any(datetime, cv.string),
+    vol.Optional("expires_at"): vol.Any(datetime, cv.string),
+    vol.Optional("trigger_description"): cv.string,
+}
+CREATE_TRIGGERED_FIELDS.update(POLICY_FIELDS)
+CREATE_TRIGGERED_SCHEMA = vol.Schema(CREATE_TRIGGERED_FIELDS)
+FIRE_TRIGGER_SCHEMA = vol.Schema(
+    {
+        vol.Required("trigger_id"): cv.string,
+        vol.Optional("user_id"): cv.string,
+    }
+)
 ID_SCHEMA = vol.Schema({vol.Required("reminder_id"): cv.string})
 UPDATE_FIELDS: dict[Any, Any] = {
     vol.Required("reminder_id"): cv.string,
@@ -129,6 +167,19 @@ UPDATE_FIELDS: dict[Any, Any] = {
     ),
     vol.Optional("acknowledgement_policy"): vol.In(tuple(AcknowledgementPolicy)),
     vol.Optional("quiet_hours_policy"): vol.In(tuple(QuietHoursPolicy)),
+    vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
+    vol.Optional("trigger"): dict,
+    vol.Optional("trigger_description"): vol.Any(None, cv.string),
+    vol.Optional("repeat_policy"): vol.In(tuple(TriggerRepeatPolicy)),
+    vol.Optional("fire_if_already_matching"): cv.boolean,
+    vol.Optional("while_awaiting_acknowledgement"): vol.In(
+        tuple(WhileAwaitingAcknowledgement)
+    ),
+    vol.Optional("cooldown_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+    ),
+    vol.Optional("available_from"): vol.Any(None, datetime, cv.string),
+    vol.Optional("expires_at"): vol.Any(None, datetime, cv.string),
 }
 UPDATE_FIELDS.update(POLICY_FIELDS)
 UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
@@ -139,6 +190,7 @@ LIST_SCHEMA = vol.Schema(
         vol.Optional("due_after"): vol.Any(datetime, cv.string),
         vol.Optional("due_before"): vol.Any(datetime, cv.string),
         vol.Optional("query"): cv.string,
+        vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
     }
 )
 SNOOZE_SCHEMA = vol.All(
@@ -147,9 +199,10 @@ SNOOZE_SCHEMA = vol.All(
             vol.Required("reminder_id"): cv.string,
             vol.Optional("due"): vol.Any(datetime, cv.string),
             vol.Optional("duration"): cv.time_period,
+            vol.Optional("wait_for_next_trigger"): cv.boolean,
         }
     ),
-    cv.has_at_least_one_key("due", "duration"),
+    cv.has_at_least_one_key("due", "duration", "wait_for_next_trigger"),
 )
 PREFERENCES_SCHEMA = vol.Schema(
     {
@@ -239,6 +292,48 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
+    async def create_triggered(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        user_id = await _resolve_user(hass, call, call.data.get("user_id"))
+        reminder = await manager.async_create_triggered(
+            user_id=user_id,
+            title=call.data["title"],
+            message=call.data.get("message"),
+            trigger=TriggerDefinition.from_dict(call.data["trigger"]),
+            delivery_policy=_policy_from_data(call.data),
+            acknowledgement_policy=AcknowledgementPolicy(
+                call.data["acknowledgement_policy"]
+            ),
+            quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
+            repeat_policy=TriggerRepeatPolicy(call.data["repeat_policy"]),
+            fire_if_already_matching=call.data["fire_if_already_matching"],
+            while_awaiting_acknowledgement=WhileAwaitingAcknowledgement(
+                call.data["while_awaiting_acknowledgement"]
+            ),
+            cooldown_seconds=call.data["cooldown_seconds"],
+            available_from=(
+                _parse_datetime(hass, call.data["available_from"])
+                if "available_from" in call.data
+                else None
+            ),
+            expires_at=(
+                _parse_datetime(hass, call.data["expires_at"])
+                if "expires_at" in call.data
+                else None
+            ),
+            trigger_description=call.data.get("trigger_description"),
+        )
+        return {"reminder": reminder.to_dict()} if call.return_response else None
+
+    async def fire_trigger(call: ServiceCall) -> ServiceResponse:
+        user_id = await _resolve_user(hass, call, call.data.get("user_id"))
+        return cast(
+            ServiceResponse,
+            await _manager(hass).async_fire_named_trigger(
+                call.data["trigger_id"], user_id=user_id
+            ),
+        )
+
     async def list_reminders(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         requested = call.data.get("user_id")
@@ -257,6 +352,11 @@ def async_register_services(hass: HomeAssistant) -> None:
                 else None
             ),
             query=call.data.get("query"),
+            activation_type=(
+                ActivationType(call.data["activation_type"])
+                if "activation_type" in call.data
+                else None
+            ),
         )
         return {"reminders": [item.to_dict() for item in reminders]}
 
@@ -278,6 +378,30 @@ def async_register_services(hass: HomeAssistant) -> None:
             changes["quiet_hours_policy"] = QuietHoursPolicy(
                 call.data["quiet_hours_policy"]
             )
+        if "activation_type" in call.data:
+            changes["activation_type"] = ActivationType(call.data["activation_type"])
+        if "trigger" in call.data:
+            changes["trigger"] = TriggerDefinition.from_dict(call.data["trigger"])
+        for key in (
+            "trigger_description",
+            "fire_if_already_matching",
+            "cooldown_seconds",
+        ):
+            if key in call.data:
+                changes[key] = call.data[key]
+        if "repeat_policy" in call.data:
+            changes["repeat_policy"] = TriggerRepeatPolicy(call.data["repeat_policy"])
+        if "while_awaiting_acknowledgement" in call.data:
+            changes["while_awaiting_acknowledgement"] = WhileAwaitingAcknowledgement(
+                call.data["while_awaiting_acknowledgement"]
+            )
+        for key in ("available_from", "expires_at"):
+            if key in call.data:
+                changes[key] = (
+                    _parse_datetime(hass, call.data[key])
+                    if call.data[key] is not None
+                    else None
+                )
         if "delivery_mode" in call.data or any(
             key in call.data for key in POLICY_FIELDS
         ):
@@ -316,6 +440,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
         if "due" in call.data and "duration" in call.data:
             raise ServiceValidationError("Provide due or duration, not both")
+        if call.data.get("wait_for_next_trigger"):
+            if "due" in call.data or "duration" in call.data:
+                raise ServiceValidationError(
+                    "Wait for next trigger cannot be combined with due or duration"
+                )
+            updated = await manager.async_wait_for_next_trigger(reminder.id)
+            return {"reminder": updated.to_dict()} if call.return_response else None
         updated = await manager.async_snooze(
             reminder.id,
             due=(
@@ -383,6 +514,18 @@ def async_register_services(hass: HomeAssistant) -> None:
     handlers = (
         (SERVICE_CREATE, create, CREATE_SCHEMA, SupportsResponse.OPTIONAL),
         (
+            SERVICE_CREATE_TRIGGERED,
+            create_triggered,
+            CREATE_TRIGGERED_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
+        (
+            SERVICE_FIRE_TRIGGER,
+            fire_trigger,
+            FIRE_TRIGGER_SCHEMA,
+            SupportsResponse.ONLY,
+        ),
+        (
             SERVICE_CREATE_RECURRING,
             create_recurring,
             CREATE_RECURRING_SCHEMA,
@@ -435,6 +578,8 @@ def _translate_errors(handler: Any) -> Any:
         except ReminderValidationError as err:
             raise ServiceValidationError(str(err)) from err
         except RecurrenceError as err:
+            raise ServiceValidationError(str(err)) from err
+        except TriggerValidationError as err:
             raise ServiceValidationError(str(err)) from err
 
     return wrapped

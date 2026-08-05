@@ -7,7 +7,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import RemindersConfigEntry
-from .models import ReminderStatus
+from .models import ActivationType, ReminderStatus
 
 
 async def async_get_config_entry_diagnostics(
@@ -27,5 +27,9 @@ async def async_get_config_entry_diagnostics(
         "recurring_count": sum(
             reminder.recurrence is not None for reminder in reminders
         ),
+        "triggered_count": sum(
+            reminder.activation_type is ActivationType.TRIGGER for reminder in reminders
+        ),
+        "trigger_listener_count": manager.trigger_listener_count,
         "next_due_scheduled": manager.scheduled_for is not None,
     }

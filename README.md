@@ -211,6 +211,156 @@ the first occurrence (`fold=0`). A nonexistent spring time moves forward to the
 first valid wall-clock second after the gap. These policies are deterministic
 and apply to previews and delivery scheduling alike.
 
+## Triggered reminders
+
+Triggered reminders wait for something to happen instead of a date/time. Choose
+**When something happens** in Add reminder, select the trigger type, and fill in
+the small set of fields shown for it. Advanced options contain repeat policy,
+cooldown, availability, expiry, duration matching, and already-matching
+behavior. Scheduled, recurring, and triggered reminders all use the same
+delivery providers, quiet hours, acknowledgement, snooze, ownership, and
+bounded occurrence history.
+
+The integration registers Home Assistant event/state listeners directly. It
+does not create automation entities. Equivalent definitions share a listener,
+listeners are rebuilt from storage at startup, and unused listeners are removed
+after edits, deletion, completion, expiry, or unload.
+
+Supported trigger definitions are:
+
+```yaml
+# State (attribute and for_seconds are optional)
+type: state
+entity_id: sensor.work_status
+to: Finished for today
+
+# Numeric state; above and below form an optional bounded range
+type: numeric_state
+entity_id: sensor.printer_toner
+below: 10
+
+# Normal Home Assistant zone entry/exit semantics
+type: zone
+entity_id: person.conor
+zone_entity_id: zone.woodies_carlow
+event: enter
+
+# Event-data is a subset match; additional fired-event keys are allowed
+type: event
+event_type: jarvis_opportunity
+event_data:
+  type: printing_started
+
+# Integration-owned extension point
+type: named
+trigger_id: quiet_time_after_work
+```
+
+State triggers fire only for a real change in the observed state or selected
+attribute. Numeric triggers fire when the value crosses into the requested
+range, not on every update while it stays there. Zone triggers use Home
+Assistant's zone/location calculation. `unknown`, `unavailable`, missing, and
+non-numeric values are handled as non-matches.
+
+`fire_if_already_matching` defaults to `false`. A reminder created or restored
+while its state, numeric range, or zone already matches therefore waits for a
+future genuine transition. This prevents restart from becoming a trigger. When
+enabled, the condition is evaluated once after the reminder is safely
+persisted. For a `for_seconds` condition whose prior match duration cannot be
+proven, Reminders conservatively waits the full configured duration. Event and
+named triggers have no durable already-matching state.
+
+Repeat policies are `once` (the default), `every_trigger`, and
+`rearm_after_acknowledgement`. Every-trigger reminders skip by default while an
+older occurrence awaits acknowledgement; Advanced options can instead permit a
+new occurrence. Rearm-after-acknowledgement always waits for a new transition
+after Done. Cooldown is per reminder and starts when an occurrence is durably
+created, so provider failure cannot cause rapid duplicate occurrence creation.
+Its last activation time persists across restarts.
+
+Before `available_from`, hits are ignored and the reminder remains armed. At
+`expires_at`, it becomes an expired reminder-level record without inventing a
+fake delivered occurrence, and its listener is removed. These boundaries use
+exact callbacks, not polling. Timed snooze suppresses hits until the selected
+time and then waits for the next transition. **Wait for next trigger** resolves
+the current occurrence and explicitly re-arms even a once reminder.
+
+### Triggered reminder actions
+
+```yaml
+action: reminders.create_triggered
+data:
+  title: Get sealant
+  trigger:
+    type: zone
+    entity_id: person.conor
+    zone_entity_id: zone.woodies_carlow
+    event: enter
+  repeat_policy: once
+  fire_if_already_matching: false
+```
+
+```yaml
+action: reminders.create_triggered
+data:
+  title: Review tomorrow's schedule
+  trigger:
+    type: state
+    entity_id: sensor.work_status
+    to: Finished for today
+  repeat_policy: every_trigger
+  cooldown_seconds: 21600
+```
+
+```yaml
+action: reminders.create_triggered
+data:
+  title: Check the printer toner
+  trigger:
+    type: named
+    trigger_id: printing_started
+  repeat_policy: rearm_after_acknowledgement
+  acknowledgement_policy: required
+```
+
+```yaml
+action: reminders.fire_trigger
+data:
+  trigger_id: printing_started
+```
+
+Named triggers let Jarvis or another bounded context engine decide when an
+opportunity exists without teaching Reminders that higher-level logic. A normal
+automation may optionally bridge an unsupported source into a named trigger:
+
+```yaml
+alias: Reminder Trigger - Printing Started
+triggers:
+  - trigger: state
+    entity_id: sensor.hp_printer_status
+    to: printing
+actions:
+  - action: reminders.fire_trigger
+    data:
+      trigger_id: printing_started
+```
+
+That automation is optional and only applies to named triggers. State,
+numeric-state, zone, and event reminders are listened for directly.
+
+Named-trigger IDs are normalized to lowercase and restricted to letters,
+digits, underscores, dots, and hyphens. Ordinary callers fire and receive
+counts only for their own reminders. Administrators must explicitly target
+another user, and system-context actions require an explicit valid `user_id`.
+Configured event-data snapshots are bounded and retained in history; arbitrary
+event payloads, user IDs, reminder text, and targets are excluded from
+diagnostics.
+
+The initial trigger version deliberately excludes templates, arbitrary service
+execution, device-trigger schemas, webhooks, complex AND/OR condition trees,
+custom radius calculations, and automatic automation generation. Use a named
+trigger when external logic is more complex than the supported direct types.
+
 ## Home Assistant actions
 
 All actions have visual-editor names, descriptions, examples, and selectors.

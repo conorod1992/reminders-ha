@@ -5,11 +5,13 @@ from typing import Final
 DOMAIN: Final = "reminders"
 STORAGE_KEY: Final = f"{DOMAIN}.storage"
 STORAGE_VERSION: Final = 1
-STORAGE_MINOR_VERSION: Final = 3
+STORAGE_MINOR_VERSION: Final = 4
 SAVE_DELAY: Final = 2.0
 
 SERVICE_CREATE: Final = "create"
 SERVICE_CREATE_RECURRING: Final = "create_recurring"
+SERVICE_CREATE_TRIGGERED: Final = "create_triggered"
+SERVICE_FIRE_TRIGGER: Final = "fire_trigger"
 SERVICE_ACKNOWLEDGE: Final = "acknowledge"
 SERVICE_DELETE: Final = "delete"
 SERVICE_GET: Final = "get"
