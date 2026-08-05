@@ -105,7 +105,7 @@ class RemindersManagementPanel extends HTMLElement {
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
         select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}
         .list{display:grid;gap:12px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}
-        .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.success{color:var(--success-color);padding:8px 0}
+        .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
         dialog{width:min(680px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;border:0;border-radius:12px;padding:0;background:var(--card-background-color);color:var(--primary-text-color);box-shadow:0 8px 28px rgba(0,0,0,.35)}dialog::backdrop{background:rgba(0,0,0,.45)}.dialog{padding:22px}.dialog h2{margin:0 0 8px}.form{display:grid;gap:16px}.dialog-actions{justify-content:flex-end;margin-top:20px}.hidden{display:none!important}details{border-top:1px solid var(--divider-color);padding-top:12px}summary{cursor:pointer;color:var(--primary-color);margin-bottom:14px}.advanced{display:grid;gap:16px}.quick button.selected{background:var(--primary-color);color:#fff}.preview{padding:10px;border-radius:8px;background:var(--secondary-background-color)}
         @media(max-width:720px){.page{padding:16px}.card{grid-template-columns:1fr;gap:8px}.actions{justify-content:flex-start;border-top:1px solid var(--divider-color);padding-top:8px}.fieldrow{grid-template-columns:1fr}.toolbar,.scope{width:100%}.scope select{flex:1}}
       </style>
@@ -293,8 +293,8 @@ class RemindersManagementPanel extends HTMLElement {
           <div class="trigger-fields state-fields"><label>Entity<select name="state_entity"></select></label><label>New state<input name="state_to" maxlength="255"></label></div>
           <div class="trigger-fields numeric-fields hidden"><label>Entity<select name="numeric_entity"></select></label><div class="fieldrow"><label>Above<input name="numeric_above" type="number" step="any"></label><label>Below<input name="numeric_below" type="number" step="any"></label></div></div>
           <div class="trigger-fields zone-fields hidden"><label>Person or tracker<select name="zone_entity"></select></label><label>Zone<select name="zone_zone"></select></label><label>Event<select name="zone_event"><option value="enter">Enters</option><option value="leave">Leaves</option></select></label></div>
-          <div class="trigger-fields event-fields hidden"><label>Event type<input name="event_type" required maxlength="128"></label></div>
-          <div class="trigger-fields named-fields hidden"><label>Trigger ID<input name="trigger_id" required maxlength="128" pattern="[a-z0-9][a-z0-9_.-]*"></label><label>Friendly label (optional)<input name="trigger_description" maxlength="255"></label></div>
+          <div class="trigger-fields event-fields hidden"><label>Event type<input name="event_type" maxlength="128"></label></div>
+          <div class="trigger-fields named-fields hidden"><label>Trigger ID<input name="trigger_id" maxlength="128" pattern="[a-z0-9][a-z0-9_.-]*"></label><label>Friendly label (optional)<input name="trigger_description" maxlength="255"></label></div>
         </div>
         <details ${recurring || triggered ? "open" : ""}><summary>Advanced options</summary><div class="advanced">
           <label>Message (optional)<textarea name="message" maxlength="4000"></textarea></label>
@@ -324,6 +324,7 @@ class RemindersManagementPanel extends HTMLElement {
           <label>Completion tracking<select name="acknowledgement_policy"><option value="default">Use my default</option><option value="required">Require me to mark it done</option><option value="not_required">Do not require completion</option></select></label>
           <label>Quiet hours<select name="quiet_hours_policy"><option value="respect">Respect my quiet hours</option><option value="ignore">Ignore quiet hours (urgent)</option></select></label>
         </div></details>
+        <div class="form-error hidden" role="alert"></div>
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
       </form></div>`;
     const form = dialog.querySelector("form");
@@ -457,6 +458,7 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   _syncTriggerType(form) {
+    const triggered = form.elements.activation_type.value === "trigger";
     const type = form.elements.trigger_type.value;
     for (const [name, value] of [["state", "state"], ["numeric", "numeric_state"], ["zone", "zone"], ["event", "event"], ["named", "named"]]) {
       form.querySelector(`.${name}-fields`)?.classList.toggle("hidden", type !== value);
@@ -468,12 +470,12 @@ class RemindersManagementPanel extends HTMLElement {
     form.querySelector(".event-data").classList.toggle("hidden", type !== "event");
     form.querySelector(".awaiting-option").classList.toggle("hidden", form.elements.repeat_policy.value !== "every_trigger");
     form.querySelector(".cooldown-custom").classList.toggle("hidden", form.elements.cooldown_preset.value !== "custom");
-    form.elements.event_type.required = type === "event";
-    form.elements.trigger_id.required = type === "named";
-    form.elements.state_entity.required = type === "state";
-    form.elements.numeric_entity.required = type === "numeric_state";
-    form.elements.zone_entity.required = type === "zone";
-    form.elements.zone_zone.required = type === "zone";
+    form.elements.event_type.required = triggered && type === "event";
+    form.elements.trigger_id.required = triggered && type === "named";
+    form.elements.state_entity.required = triggered && type === "state";
+    form.elements.numeric_entity.required = triggered && type === "numeric_state";
+    form.elements.zone_entity.required = triggered && type === "zone";
+    form.elements.zone_zone.required = triggered && type === "zone";
   }
 
   _syncDelivery(dialog) {
@@ -552,6 +554,9 @@ class RemindersManagementPanel extends HTMLElement {
 
   async _saveReminder(dialog, form, reminder) {
     const save = form.querySelector("[type=submit]");
+    const errorHost = form.querySelector(".form-error");
+    errorHost.textContent = "";
+    errorHost.classList.add("hidden");
     save.disabled = true;
     try {
     const triggered = form.elements.activation_type.value === "trigger";
@@ -596,7 +601,9 @@ class RemindersManagementPanel extends HTMLElement {
       dialog.close();
       await this._load();
     } catch (error) {
-      this._showError(error);
+      errorHost.textContent = error?.message || String(error);
+      errorHost.classList.remove("hidden");
+      errorHost.scrollIntoView({ behavior: "smooth", block: "nearest" });
       save.disabled = false;
     }
   }

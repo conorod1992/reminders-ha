@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -13,6 +14,41 @@ from custom_components.reminders.frontend import (
     async_register_frontend,
     async_unregister_panel,
 )
+
+
+def test_reminder_form_only_requires_active_trigger_fields() -> None:
+    """Hidden trigger controls must not block time-reminder submission."""
+    panel_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+
+    for field in (
+        "event_type",
+        "trigger_id",
+        "state_entity",
+        "numeric_entity",
+        "zone_entity",
+        "zone_zone",
+    ):
+        assert f"form.elements.{field}.required = triggered &&" in panel_source
+
+
+def test_reminder_form_displays_submission_errors_inside_dialog() -> None:
+    """Custom trigger validation and API errors remain visible above the modal."""
+    panel_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'class="form-error hidden" role="alert"' in panel_source
+    assert 'errorHost.classList.remove("hidden")' in panel_source
 
 
 async def test_panel_registers_once_and_reloads_cleanly(
