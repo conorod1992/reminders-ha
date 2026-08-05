@@ -33,7 +33,7 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
         webcomponent_name=PANEL_ELEMENT,
         sidebar_title="Reminders",
         sidebar_icon="mdi:bell",
-        module_url=f"{STATIC_URL}/reminders-panel.js?v=0.5.0",
+        module_url=f"{STATIC_URL}/reminders-panel.js?v=2.0.3",
         config={"api_prefix": f"{DOMAIN}/"},
         require_admin=False,
         config_panel_domain=DOMAIN,
