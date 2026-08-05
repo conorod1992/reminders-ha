@@ -127,7 +127,7 @@ class RemindersManagementPanel extends HTMLElement {
     host.replaceChildren();
     const tabs = document.createElement("div");
     tabs.className = "tabs";
-    for (const [view, label] of [["upcoming", "Upcoming"], ["recurring", "Recurring"], ["history", "History"], ["failed", "Failed"]]) {
+    for (const [view, label] of [["upcoming", "Upcoming"], ["triggered", "Triggered"], ["recurring", "Recurring"], ["expired", "Expired"], ["history", "History"], ["failed", "Failed"]]) {
       const button = document.createElement("button");
       button.className = `tab${view === this._view ? " active" : ""}`;
       button.textContent = label;
@@ -192,7 +192,9 @@ class RemindersManagementPanel extends HTMLElement {
     card.className = "card";
     const when = document.createElement("div");
     when.className = "when";
-    when.textContent = this._formatDate(reminder.due);
+    when.textContent = reminder.activation_type === "trigger"
+      ? (reminder.trigger_summary || "Waiting for trigger")
+      : this._formatDate(reminder.due);
     const body = document.createElement("div");
     const title = document.createElement("div");
     title.className = "name";
@@ -206,7 +208,9 @@ class RemindersManagementPanel extends HTMLElement {
     }
     const meta = document.createElement("div");
     meta.className = "meta";
-    const values = [recurrenceSummary(reminder, this._hass.locale?.language), deliverySummary(reminder), acknowledgementSummary(reminder)];
+    const values = reminder.activation_type === "trigger"
+      ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
+      : [recurrenceSummary(reminder, this._hass.locale?.language), deliverySummary(reminder), acknowledgementSummary(reminder)];
     if (reminder.owner_name) values.push(reminder.owner_name);
     meta.textContent = values.join(" · ");
     body.append(meta);
@@ -266,6 +270,7 @@ class RemindersManagementPanel extends HTMLElement {
   _openReminderForm(reminder = null, duplicate = null) {
     const source = reminder || duplicate;
     const recurring = Boolean(source?.recurring);
+    const triggered = source?.activation_type === "trigger";
     const rule = source?.recurrence;
     const zone = rule?.timezone || this._hass.config.time_zone;
     const dueParts = rule
@@ -278,16 +283,40 @@ class RemindersManagementPanel extends HTMLElement {
       ${duplicate && !recurring ? '<p class="hint">Choose a new time before saving this copy.</p>' : ""}
       <form id="reminder-form" class="form">
         <label>Title<input name="title" required maxlength="255"></label>
-        <div class="quick" ${reminder || recurring ? "hidden" : ""}><button type="button" data-quick="10m">10 minutes</button><button type="button" data-quick="30m">30 minutes</button><button type="button" data-quick="1h">1 hour</button><button type="button" data-quick="later">Later today</button><button type="button" data-quick="tomorrow">Tomorrow morning</button></div>
-        <div class="fieldrow"><label>Date<input name="date" type="date" required></label><label>Time<input name="time" type="time" required></label></div>
-        <details ${recurring ? "open" : ""}><summary>Advanced options</summary><div class="advanced">
+        <label>Remind me<select name="activation_type"><option value="time">At a date and time</option><option value="trigger">When something happens</option></select></label>
+        <div id="time-activation">
+          <div class="quick" ${reminder || recurring ? "hidden" : ""}><button type="button" data-quick="10m">10 minutes</button><button type="button" data-quick="30m">30 minutes</button><button type="button" data-quick="1h">1 hour</button><button type="button" data-quick="later">Later today</button><button type="button" data-quick="tomorrow">Tomorrow morning</button></div>
+          <div class="fieldrow"><label>Date<input name="date" type="date" required></label><label>Time<input name="time" type="time" required></label></div>
+        </div>
+        <div id="trigger-activation" class="hidden">
+          <label>Trigger type<select name="trigger_type"><option value="state">Entity changes state</option><option value="numeric_state">Numeric value enters a range</option><option value="zone">Enter or leave a zone</option><option value="event">Home Assistant event</option><option value="named">Named trigger</option></select></label>
+          <div class="trigger-fields state-fields"><label>Entity<select name="state_entity"></select></label><label>New state<input name="state_to" maxlength="255"></label></div>
+          <div class="trigger-fields numeric-fields hidden"><label>Entity<select name="numeric_entity"></select></label><div class="fieldrow"><label>Above<input name="numeric_above" type="number" step="any"></label><label>Below<input name="numeric_below" type="number" step="any"></label></div></div>
+          <div class="trigger-fields zone-fields hidden"><label>Person or tracker<select name="zone_entity"></select></label><label>Zone<select name="zone_zone"></select></label><label>Event<select name="zone_event"><option value="enter">Enters</option><option value="leave">Leaves</option></select></label></div>
+          <div class="trigger-fields event-fields hidden"><label>Event type<input name="event_type" required maxlength="128"></label></div>
+          <div class="trigger-fields named-fields hidden"><label>Trigger ID<input name="trigger_id" required maxlength="128" pattern="[a-z0-9][a-z0-9_.-]*"></label><label>Friendly label (optional)<input name="trigger_description" maxlength="255"></label></div>
+        </div>
+        <details ${recurring || triggered ? "open" : ""}><summary>Advanced options</summary><div class="advanced">
           <label>Message (optional)<textarea name="message" maxlength="4000"></textarea></label>
           ${reminder ? "" : '<label class="repeat-toggle"><span><input name="repeat" type="checkbox"> Repeat this reminder</span></label>'}
           <div id="recurrence" class="hidden">
-            <div class="fieldrow"><label>Repeat<select name="frequency"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label>Every<input name="interval" type="number" min="1" value="1"></label></div><div id="weekly" class="hidden"><span>Days</span><div class="checkrow weekdays"></div><div class="quick"><button type="button" data-days="weekday">Weekdays</button><button type="button" data-days="weekend">Weekends</button></div></div>
+            <div class="fieldrow"><label>Repeat<select name="frequency"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label>Every<input name="interval" type="number" min="1" value="1"></label></div>
+            <div id="weekly" class="hidden"><span>Days</span><div class="checkrow weekdays"></div><div class="quick"><button type="button" data-days="weekday">Weekdays</button><button type="button" data-days="weekend">Weekends</button></div></div>
             <div id="monthly" class="hidden"><label>Monthly pattern<select name="monthly_mode"><option value="day_of_month">Day of month</option><option value="nth_weekday">Nth weekday</option><option value="last_weekday">Last weekday</option><option value="last_day">Last calendar day</option></select></label><div class="fieldrow monthly-pattern"><label class="day-field">Day<input name="day_of_month" type="number" min="1" max="31"></label><label class="week-field hidden">Which<input name="monthly_week" type="number" min="1" max="5"></label><label class="weekday-field hidden">Weekday<select name="monthly_weekday">${WEEKDAYS.map((day) => `<option value="${day}">${this._capitalize(day)}</option>`).join("")}</select></label></div></div>
             <div class="fieldrow"><label>End date (optional)<input name="end_date" type="date"></label><label>Stop after (optional)<input name="occurrence_count" type="number" min="1" placeholder="occurrences"></label></div>
             <label>Timezone<input name="timezone"></label><button type="button" class="secondary preview-button">Preview next dates</button><div class="preview hidden"></div>
+          </div>
+          <div id="trigger-advanced" class="hidden">
+            <div class="state-advanced"><div class="fieldrow"><label>Previous state (optional)<input name="state_from"></label><label>Attribute (optional)<input name="state_attribute"></label></div></div>
+            <div class="numeric-advanced hidden"><label>Attribute (optional)<input name="numeric_attribute"></label></div>
+            <label class="duration-option">Must remain matching for (seconds)<input name="for_seconds" type="number" min="0" max="31536000" value="0"></label>
+            <label><span><input name="fire_if_already_matching" type="checkbox"> Fire immediately if already matching</span><span class="hint">Off by default. When disabled, this waits for the next matching change rather than firing because it already matches after creation or restart.</span></label>
+            <label>Repeat policy<select name="repeat_policy"><option value="once">Once</option><option value="every_trigger">Every trigger</option><option value="rearm_after_acknowledgement">Rearm after acknowledgement</option></select></label>
+            <label class="awaiting-option hidden">While awaiting acknowledgement<select name="while_awaiting_acknowledgement"><option value="skip">Skip new trigger</option><option value="deliver_new_occurrence">Deliver a new occurrence</option></select></label>
+            <label>Cooldown<select name="cooldown_preset"><option value="0">No cooldown</option><option value="300">5 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="86400">1 day</option><option value="custom">Custom</option></select></label>
+            <label class="cooldown-custom hidden">Custom cooldown (seconds)<input name="cooldown_seconds" type="number" min="0" max="31536000" value="0"></label>
+            <div class="fieldrow"><label>Available from (optional)<input name="available_from" type="datetime-local"></label><label>Expiry (optional)<input name="expires_at" type="datetime-local"></label></div>
+            <label class="event-data hidden">Event data (optional JSON object)<textarea name="event_data" placeholder='{"type":"printing_started"}'></textarea></label>
           </div>
           <div id="owner"></div>
           <label>Delivery<select name="delivery_mode"><option value="default">Use my defaults</option><option value="custom">Choose for this reminder</option></select></label>
@@ -298,8 +327,10 @@ class RemindersManagementPanel extends HTMLElement {
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
       </form></div>`;
     const form = dialog.querySelector("form");
+    form.dataset.recurring = String(recurring);
     form.elements.title.value = source?.title || "";
     form.elements.message.value = source?.message || "";
+    form.elements.activation_type.value = triggered ? "trigger" : "time";
     form.elements.date.value = dueParts.date;
     form.elements.time.value = dueParts.time;
     if (form.elements.repeat) form.elements.repeat.checked = recurring;
@@ -322,6 +353,33 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.timezone.value = zone;
     form.elements.acknowledgement_policy.value = source?.acknowledgement_policy || "default";
     form.elements.quiet_hours_policy.value = source?.quiet_hours_policy || "respect";
+    const trigger = source?.trigger || {};
+    form.elements.trigger_type.value = trigger.type || "state";
+    this._populateEntitySelect(form.elements.state_entity, null, trigger.entity_id);
+    this._populateEntitySelect(form.elements.numeric_entity, null, trigger.entity_id);
+    this._populateEntitySelect(form.elements.zone_entity, ["person", "device_tracker"], trigger.entity_id);
+    this._populateEntitySelect(form.elements.zone_zone, ["zone"], trigger.zone_entity_id);
+    form.elements.state_to.value = trigger.type === "state" ? (trigger.to ?? "") : "";
+    form.elements.state_from.value = trigger.from ?? "";
+    form.elements.state_attribute.value = trigger.type === "state" ? (trigger.attribute ?? "") : "";
+    form.elements.numeric_above.value = trigger.above ?? "";
+    form.elements.numeric_below.value = trigger.below ?? "";
+    form.elements.numeric_attribute.value = trigger.type === "numeric_state" ? (trigger.attribute ?? "") : "";
+    form.elements.zone_event.value = trigger.event || "enter";
+    form.elements.event_type.value = trigger.event_type || "";
+    form.elements.event_data.value = trigger.event_data ? JSON.stringify(trigger.event_data, null, 2) : "";
+    form.elements.trigger_id.value = trigger.trigger_id || "";
+    form.elements.trigger_description.value = source?.trigger_description || "";
+    form.elements.for_seconds.value = trigger.for_seconds || 0;
+    form.elements.fire_if_already_matching.checked = source?.fire_if_already_matching || false;
+    form.elements.repeat_policy.value = source?.repeat_policy || "once";
+    form.elements.while_awaiting_acknowledgement.value = source?.while_awaiting_acknowledgement || "skip";
+    const cooldown = source?.cooldown_seconds || 0;
+    const presets = [0, 300, 1800, 3600, 21600, 86400];
+    form.elements.cooldown_preset.value = presets.includes(cooldown) ? String(cooldown) : "custom";
+    form.elements.cooldown_seconds.value = cooldown;
+    form.elements.available_from.value = this._localDateTimeValue(source?.available_from);
+    form.elements.expires_at.value = this._localDateTimeValue(source?.expires_at);
     if (this._hass.user?.is_admin) {
       const label = document.createElement("label");
       label.textContent = "Recipient";
@@ -357,11 +415,16 @@ class RemindersManagementPanel extends HTMLElement {
       for (const input of form.querySelectorAll("[name=weekday]")) input.checked = selected.includes(input.value);
     };
     if (form.elements.repeat) form.elements.repeat.onchange = () => this._syncRecurrence(form, form.elements.repeat.checked);
+    form.elements.activation_type.onchange = () => this._syncActivation(form);
+    form.elements.trigger_type.onchange = () => this._syncTriggerType(form);
+    form.elements.repeat_policy.onchange = () => this._syncTriggerType(form);
+    form.elements.cooldown_preset.onchange = () => this._syncTriggerType(form);
     form.elements.frequency.onchange = () => this._syncRecurrence(form, true);
     form.elements.monthly_mode.onchange = () => this._syncRecurrence(form, true);
     form.elements.delivery_mode.onchange = () => this._syncDelivery(dialog);
     dialog.querySelector(".preview-button").onclick = () => this._previewRecurrence(form);
     this._syncRecurrence(form, recurring);
+    this._syncActivation(form);
     this._syncDelivery(dialog);
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
@@ -378,6 +441,39 @@ class RemindersManagementPanel extends HTMLElement {
     form.querySelector(".day-field").classList.toggle("hidden", mode !== "day_of_month");
     form.querySelector(".week-field").classList.toggle("hidden", mode !== "nth_weekday");
     for (const item of form.querySelectorAll(".weekday-field")) item.classList.toggle("hidden", !["nth_weekday", "last_weekday"].includes(mode));
+  }
+
+  _syncActivation(form) {
+    const triggered = form.elements.activation_type.value === "trigger";
+    form.querySelector("#time-activation").classList.toggle("hidden", triggered);
+    form.querySelector("#trigger-activation").classList.toggle("hidden", !triggered);
+    form.querySelector("#trigger-advanced").classList.toggle("hidden", !triggered);
+    form.querySelector(".repeat-toggle")?.classList.toggle("hidden", triggered);
+    form.elements.date.required = !triggered;
+    form.elements.time.required = !triggered;
+    if (triggered && form.elements.repeat) form.elements.repeat.checked = false;
+    this._syncRecurrence(form, !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true"));
+    this._syncTriggerType(form);
+  }
+
+  _syncTriggerType(form) {
+    const type = form.elements.trigger_type.value;
+    for (const [name, value] of [["state", "state"], ["numeric", "numeric_state"], ["zone", "zone"], ["event", "event"], ["named", "named"]]) {
+      form.querySelector(`.${name}-fields`)?.classList.toggle("hidden", type !== value);
+    }
+    form.querySelector(".state-advanced").classList.toggle("hidden", type !== "state");
+    form.querySelector(".numeric-advanced").classList.toggle("hidden", type !== "numeric_state");
+    form.querySelector(".duration-option").classList.toggle("hidden", !["state", "numeric_state"].includes(type));
+    form.querySelector("[name=fire_if_already_matching]").closest("label").classList.toggle("hidden", !["state", "numeric_state", "zone"].includes(type));
+    form.querySelector(".event-data").classList.toggle("hidden", type !== "event");
+    form.querySelector(".awaiting-option").classList.toggle("hidden", form.elements.repeat_policy.value !== "every_trigger");
+    form.querySelector(".cooldown-custom").classList.toggle("hidden", form.elements.cooldown_preset.value !== "custom");
+    form.elements.event_type.required = type === "event";
+    form.elements.trigger_id.required = type === "named";
+    form.elements.state_entity.required = type === "state";
+    form.elements.numeric_entity.required = type === "numeric_state";
+    form.elements.zone_entity.required = type === "zone";
+    form.elements.zone_zone.required = type === "zone";
   }
 
   _syncDelivery(dialog) {
@@ -408,6 +504,38 @@ class RemindersManagementPanel extends HTMLElement {
     return data;
   }
 
+  _triggerData(form) {
+    const type = form.elements.trigger_type.value;
+    const trigger = { type };
+    if (type === "state") {
+      trigger.entity_id = form.elements.state_entity.value;
+      if (form.elements.state_from.value !== "") trigger.from = form.elements.state_from.value;
+      if (form.elements.state_to.value !== "") trigger.to = form.elements.state_to.value;
+      if (form.elements.state_attribute.value.trim()) trigger.attribute = form.elements.state_attribute.value.trim();
+      if (trigger.from === undefined && trigger.to === undefined && !trigger.attribute) throw new Error("State trigger needs a new state, previous state, or attribute");
+    } else if (type === "numeric_state") {
+      trigger.entity_id = form.elements.numeric_entity.value;
+      if (form.elements.numeric_above.value !== "") trigger.above = Number(form.elements.numeric_above.value);
+      if (form.elements.numeric_below.value !== "") trigger.below = Number(form.elements.numeric_below.value);
+      if (trigger.above === undefined && trigger.below === undefined) throw new Error("Enter an Above or Below value");
+      if (form.elements.numeric_attribute.value.trim()) trigger.attribute = form.elements.numeric_attribute.value.trim();
+    } else if (type === "zone") {
+      trigger.entity_id = form.elements.zone_entity.value;
+      trigger.zone_entity_id = form.elements.zone_zone.value;
+      trigger.event = form.elements.zone_event.value;
+    } else if (type === "event") {
+      trigger.event_type = form.elements.event_type.value.trim();
+      if (form.elements.event_data.value.trim()) {
+        trigger.event_data = JSON.parse(form.elements.event_data.value);
+        if (!trigger.event_data || Array.isArray(trigger.event_data) || typeof trigger.event_data !== "object") throw new Error("Event data must be a JSON object");
+      }
+    } else {
+      trigger.trigger_id = form.elements.trigger_id.value.trim().toLowerCase();
+    }
+    if (["state", "numeric_state"].includes(type) && Number(form.elements.for_seconds.value)) trigger.for_seconds = Number(form.elements.for_seconds.value);
+    return trigger;
+  }
+
   async _previewRecurrence(form) {
     const host = form.querySelector(".preview");
     host.classList.remove("hidden");
@@ -425,7 +553,9 @@ class RemindersManagementPanel extends HTMLElement {
   async _saveReminder(dialog, form, reminder) {
     const save = form.querySelector("[type=submit]");
     save.disabled = true;
-    const recurring = reminder?.recurring || form.elements.repeat?.checked;
+    try {
+    const triggered = form.elements.activation_type.value === "trigger";
+    const recurring = !triggered && (reminder?.recurring || form.elements.repeat?.checked);
     const data = {
       title: form.elements.title.value,
       message: form.elements.message.value || null,
@@ -439,14 +569,30 @@ class RemindersManagementPanel extends HTMLElement {
       data.notify_targets = this._selected(form.elements.notify_targets);
       data.voice_targets = this._selected(form.elements.voice_targets);
     }
-    Object.assign(data, recurring ? this._recurrenceData(form) : { due: localDateTime(form.elements.date.value, form.elements.time.value) });
+    if (triggered) {
+      data.trigger = this._triggerData(form);
+      data.repeat_policy = form.elements.repeat_policy.value;
+      data.fire_if_already_matching = form.elements.fire_if_already_matching.checked;
+      data.while_awaiting_acknowledgement = form.elements.while_awaiting_acknowledgement.value;
+      data.cooldown_seconds = form.elements.cooldown_preset.value === "custom" ? Number(form.elements.cooldown_seconds.value) : Number(form.elements.cooldown_preset.value);
+      if (form.elements.trigger_description.value) data.trigger_description = form.elements.trigger_description.value;
+      else if (reminder) data.trigger_description = null;
+      if (form.elements.available_from.value) data.available_from = form.elements.available_from.value;
+      else if (reminder) data.available_from = null;
+      if (form.elements.expires_at.value) data.expires_at = form.elements.expires_at.value;
+      else if (reminder) data.expires_at = null;
+    } else {
+      Object.assign(data, recurring ? this._recurrenceData(form) : { due: localDateTime(form.elements.date.value, form.elements.time.value) });
+    }
     if (reminder?.recurring) {
       data.end_date = form.elements.end_date.value || null;
       data.occurrence_count = form.elements.occurrence_count.value ? Number(form.elements.occurrence_count.value) : null;
     }
-    try {
-      if (reminder) { data.reminder_id = reminder.id; await this._call("update", data); }
-      else await this._call(recurring ? "create_recurring" : "create", data);
+      if (reminder) {
+        data.reminder_id = reminder.id;
+        data.activation_type = triggered ? "trigger" : "time";
+        await this._call("update", data);
+      } else await this._call(triggered ? "create_triggered" : recurring ? "create_recurring" : "create", data);
       dialog.close();
       await this._load();
     } catch (error) {
@@ -457,12 +603,14 @@ class RemindersManagementPanel extends HTMLElement {
 
   _openSnooze(reminder) {
     const dialog = this.shadowRoot.querySelector("#dialog");
-    dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint">${reminder.recurring ? "Only this occurrence moves; the series stays anchored." : reminder.title}</p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button></div><div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div><div class="dialog-actions"><button class="secondary cancel">Cancel</button><button class="custom">Snooze</button></div></div>`;
+    const triggered = reminder.activation_type === "trigger";
+    dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint">${triggered ? "Matching triggers are ignored until the snooze ends; it will then wait for the next matching change." : reminder.recurring ? "Only this occurrence moves; the series stays anchored." : reminder.title}</p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button>${triggered ? '<button class="next-trigger">Wait for next trigger</button>' : ""}</div>${triggered ? "" : '<div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div>'}<div class="dialog-actions"><button class="secondary cancel">Cancel</button>${triggered ? "" : '<button class="custom">Snooze</button>'}</div></div>`;
     const parts = quickTimeParts("1h", this._hass.config.time_zone);
-    const inputs = dialog.querySelectorAll("input"); inputs[0].value = parts.date; inputs[1].value = parts.time;
+    const inputs = dialog.querySelectorAll("input"); if (!triggered) { inputs[0].value = parts.date; inputs[1].value = parts.time; }
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     for (const button of dialog.querySelectorAll("[data-seconds]")) button.onclick = () => this._doSnooze(dialog, reminder, { duration_seconds: Number(button.dataset.seconds) });
-    dialog.querySelector(".custom").onclick = () => this._doSnooze(dialog, reminder, { due: localDateTime(inputs[0].value, inputs[1].value) });
+    if (triggered) dialog.querySelector(".next-trigger").onclick = () => this._doSnooze(dialog, reminder, { wait_for_next_trigger: true });
+    else dialog.querySelector(".custom").onclick = () => this._doSnooze(dialog, reminder, { due: localDateTime(inputs[0].value, inputs[1].value) });
     dialog.showModal();
   }
 
@@ -585,6 +733,29 @@ class RemindersManagementPanel extends HTMLElement {
     const select = document.createElement("select"); select.multiple = true;
     for (const [id, state] of Object.entries(this._hass.states || {}).filter(([id]) => id.startsWith(`${domain}.`))) select.add(new Option(state.attributes.friendly_name || id, id, false, selected.includes(id)));
     return select;
+  }
+
+  _populateEntitySelect(select, domains = null, selected = "") {
+    select.replaceChildren(new Option("Select an entity", ""));
+    for (const [id, state] of Object.entries(this._hass.states || {})) {
+      const domain = id.split(".")[0];
+      if (domains && !domains.includes(domain)) continue;
+      select.add(new Option(state.attributes.friendly_name || id, id, false, id === selected));
+    }
+    select.value = selected || "";
+  }
+
+  _localDateTimeValue(value) {
+    if (!value) return "";
+    const parts = zonedInputParts(value, this._hass.config.time_zone);
+    return `${parts.date}T${parts.time}`;
+  }
+
+  _duration(seconds) {
+    if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+    if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+    if (seconds % 60 === 0) return `${seconds / 60}m`;
+    return `${seconds}s`;
   }
 
   _selected(select) { return select ? [...select.selectedOptions].map((option) => option.value) : []; }

@@ -8,6 +8,29 @@ from enum import StrEnum
 from typing import Any, Self
 
 from .recurrence import RecurrenceRule
+from .triggers.models import TriggerDefinition
+
+
+class ActivationType(StrEnum):
+    """How a reminder becomes active."""
+
+    TIME = "time"
+    TRIGGER = "trigger"
+
+
+class TriggerRepeatPolicy(StrEnum):
+    """How a triggered reminder re-arms."""
+
+    ONCE = "once"
+    EVERY_TRIGGER = "every_trigger"
+    REARM_AFTER_ACKNOWLEDGEMENT = "rearm_after_acknowledgement"
+
+
+class WhileAwaitingAcknowledgement(StrEnum):
+    """Behavior for a new hit while an older occurrence awaits completion."""
+
+    SKIP = "skip"
+    DELIVER_NEW_OCCURRENCE = "deliver_new_occurrence"
 
 
 class ReminderStatus(StrEnum):
@@ -20,6 +43,10 @@ class ReminderStatus(StrEnum):
     ACKNOWLEDGED = "acknowledged"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    WAITING_FOR_TRIGGER = "waiting_for_trigger"
+    INACTIVE_BEFORE_AVAILABLE_FROM = "inactive_before_available_from"
+    EXPIRED = "expired"
+    COMPLETED = "completed"
 
 
 class OccurrenceStatus(StrEnum):
@@ -152,6 +179,11 @@ class Occurrence:
     acknowledged_by: str | None = None
     snoozed: bool = False
     snoozed_at: datetime | None = None
+    trigger_type: str | None = None
+    trigger_summary: str | None = None
+    triggered_at: datetime | None = None
+    activation_cause: str | None = None
+    trigger_context: dict[str, Any] | None = None
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable occurrence."""
@@ -180,6 +212,13 @@ class Occurrence:
             "snoozed_at": (
                 _format_datetime(self.snoozed_at) if self.snoozed_at else None
             ),
+            "trigger_type": self.trigger_type,
+            "trigger_summary": self.trigger_summary,
+            "triggered_at": (
+                _format_datetime(self.triggered_at) if self.triggered_at else None
+            ),
+            "activation_cause": self.activation_cause,
+            "trigger_context": self.trigger_context,
         }
 
     @classmethod
@@ -212,6 +251,21 @@ class Occurrence:
             ),
             snoozed=bool(data.get("snoozed", False)),
             snoozed_at=_optional_datetime(data.get("snoozed_at")),
+            trigger_type=(
+                str(data["trigger_type"]) if data.get("trigger_type") else None
+            ),
+            trigger_summary=(
+                str(data["trigger_summary"]) if data.get("trigger_summary") else None
+            ),
+            triggered_at=_optional_datetime(data.get("triggered_at")),
+            activation_cause=(
+                str(data["activation_cause"]) if data.get("activation_cause") else None
+            ),
+            trigger_context=(
+                dict(data["trigger_context"])
+                if isinstance(data.get("trigger_context"), dict)
+                else None
+            ),
         )
 
 
@@ -222,7 +276,7 @@ class Reminder:
     id: str
     user_id: str
     title: str
-    due: datetime
+    due: datetime | None
     created_at: datetime
     updated_at: datetime
     message: str | None = None
@@ -239,6 +293,22 @@ class Reminder:
     current_occurrence_id: str | None = None
     current_occurrence_number: int = 1
     occurrence_history: tuple[Occurrence, ...] = ()
+    activation_type: ActivationType = ActivationType.TIME
+    trigger: TriggerDefinition | None = None
+    trigger_summary: str | None = None
+    trigger_description: str | None = None
+    repeat_policy: TriggerRepeatPolicy = TriggerRepeatPolicy.ONCE
+    fire_if_already_matching: bool = False
+    while_awaiting_acknowledgement: WhileAwaitingAcknowledgement = (
+        WhileAwaitingAcknowledgement.SKIP
+    )
+    cooldown_seconds: int = 0
+    available_from: datetime | None = None
+    expires_at: datetime | None = None
+    last_triggered_at: datetime | None = None
+    snoozed_until: datetime | None = None
+    immediate_evaluated: bool = False
+    cooldown_skip_count: int = 0
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable reminder."""
@@ -251,7 +321,7 @@ class Reminder:
             "user_id": self.user_id,
             "title": self.title,
             "message": self.message,
-            "due": _format_datetime(self.due),
+            "due": _format_datetime(self.due) if self.due else None,
             "created_at": _format_datetime(self.created_at),
             "updated_at": _format_datetime(self.updated_at),
             "status": self.status.value,
@@ -282,6 +352,32 @@ class Reminder:
             "current_occurrence_id": self.current_occurrence_id,
             "current_occurrence_number": self.current_occurrence_number,
             "occurrence_history": [item.to_dict() for item in self.occurrence_history],
+            "activation_type": self.activation_type.value,
+            "trigger": self.trigger.to_dict() if self.trigger else None,
+            "trigger_summary": self.trigger_summary,
+            "trigger_description": self.trigger_description,
+            "repeat_policy": self.repeat_policy.value,
+            "fire_if_already_matching": self.fire_if_already_matching,
+            "while_awaiting_acknowledgement": (
+                self.while_awaiting_acknowledgement.value
+            ),
+            "cooldown_seconds": self.cooldown_seconds,
+            "available_from": (
+                _format_datetime(self.available_from) if self.available_from else None
+            ),
+            "expires_at": (
+                _format_datetime(self.expires_at) if self.expires_at else None
+            ),
+            "last_triggered_at": (
+                _format_datetime(self.last_triggered_at)
+                if self.last_triggered_at
+                else None
+            ),
+            "snoozed_until": (
+                _format_datetime(self.snoozed_until) if self.snoozed_until else None
+            ),
+            "immediate_evaluated": self.immediate_evaluated,
+            "cooldown_skip_count": self.cooldown_skip_count,
         }
 
     @classmethod
@@ -289,12 +385,23 @@ class Reminder:
         """Deserialize and validate a reminder."""
         policy = data.get("delivery_policy")
         recurrence = data.get("recurrence")
+        activation_type = ActivationType(
+            data.get("activation_type", ActivationType.TIME)
+        )
+        trigger_data = data.get("trigger")
+        trigger = TriggerDefinition.from_dict(trigger_data) if trigger_data else None
+        if activation_type is ActivationType.TIME and data.get("due") is None:
+            raise ValueError("Time reminder requires due")
+        if activation_type is ActivationType.TRIGGER and trigger is None:
+            raise ValueError("Triggered reminder requires trigger")
+        if activation_type is ActivationType.TIME and trigger is not None:
+            raise ValueError("Time reminder cannot contain a trigger")
         return cls(
             id=str(data["id"]),
             user_id=str(data["user_id"]),
             title=str(data["title"]),
             message=str(data["message"]) if data.get("message") is not None else None,
-            due=_parse_datetime(data["due"]),
+            due=_optional_datetime(data.get("due")),
             created_at=_parse_datetime(data["created_at"]),
             updated_at=_parse_datetime(data["updated_at"]),
             status=ReminderStatus(data.get("status", ReminderStatus.PENDING)),
@@ -327,6 +434,33 @@ class Reminder:
                 Occurrence.from_dict(item)
                 for item in data.get("occurrence_history", [])
             ),
+            activation_type=activation_type,
+            trigger=trigger,
+            trigger_summary=(
+                str(data["trigger_summary"]) if data.get("trigger_summary") else None
+            ),
+            trigger_description=(
+                str(data["trigger_description"])
+                if data.get("trigger_description")
+                else None
+            ),
+            repeat_policy=TriggerRepeatPolicy(
+                data.get("repeat_policy", TriggerRepeatPolicy.ONCE)
+            ),
+            fire_if_already_matching=bool(data.get("fire_if_already_matching", False)),
+            while_awaiting_acknowledgement=WhileAwaitingAcknowledgement(
+                data.get(
+                    "while_awaiting_acknowledgement",
+                    WhileAwaitingAcknowledgement.SKIP,
+                )
+            ),
+            cooldown_seconds=int(data.get("cooldown_seconds", 0)),
+            available_from=_optional_datetime(data.get("available_from")),
+            expires_at=_optional_datetime(data.get("expires_at")),
+            last_triggered_at=_optional_datetime(data.get("last_triggered_at")),
+            snoozed_until=_optional_datetime(data.get("snoozed_until")),
+            immediate_evaluated=bool(data.get("immediate_evaluated", False)),
+            cooldown_skip_count=int(data.get("cooldown_skip_count", 0)),
         )
 
 

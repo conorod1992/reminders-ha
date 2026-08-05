@@ -24,12 +24,16 @@ from .const import DOMAIN
 from .manager import ReminderManager, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
+    ActivationType,
     QuietHoursPolicy,
     Reminder,
     ReminderStatus,
+    TriggerRepeatPolicy,
+    WhileAwaitingAcknowledgement,
 )
 from .recurrence import RecurrenceFrequency
 from .services import _parse_datetime, _recurrence_from_data
+from .triggers.models import TriggerDefinition
 
 ToolHandler = Callable[
     [HomeAssistant, dict[str, Any], llm.LLMContext], Awaitable[dict[str, Any]]
@@ -153,6 +157,31 @@ def _tools() -> list[llm.Tool]:
             _create_recurring,
         ),
         RemindersTool(
+            "create_triggered_reminder",
+            "Create a reminder activated by a supported state, numeric_state, zone, "
+            "event, or named trigger. Use exact Home Assistant entity IDs.",
+            vol.Schema(
+                {
+                    **create_common,
+                    vol.Required("trigger"): dict,
+                    vol.Optional("repeat_policy", default="once"): vol.In(
+                        tuple(TriggerRepeatPolicy)
+                    ),
+                    vol.Optional("fire_if_already_matching", default=False): cv.boolean,
+                    vol.Optional(
+                        "while_awaiting_acknowledgement", default="skip"
+                    ): vol.In(tuple(WhileAwaitingAcknowledgement)),
+                    vol.Optional("cooldown_seconds", default=0): vol.All(
+                        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+                    ),
+                    vol.Optional("available_from"): cv.string,
+                    vol.Optional("expires_at"): cv.string,
+                    vol.Optional("trigger_description"): cv.string,
+                }
+            ),
+            _create_triggered,
+        ),
+        RemindersTool(
             "list_reminders",
             "List upcoming reminders, optionally searching title/message or a "
             "due range.",
@@ -163,6 +192,7 @@ def _tools() -> list[llm.Tool]:
                     vol.Optional("due_after"): cv.string,
                     vol.Optional("due_before"): cv.string,
                     vol.Optional("recurring"): cv.boolean,
+                    vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
                     vol.Optional("limit", default=20): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=100)
                     ),
@@ -198,6 +228,19 @@ def _tools() -> list[llm.Tool]:
                             vol.Optional("quiet_hours_policy"): vol.In(
                                 tuple(QuietHoursPolicy)
                             ),
+                            vol.Optional("activation_type"): vol.In(
+                                tuple(ActivationType)
+                            ),
+                            vol.Optional("trigger"): dict,
+                            vol.Optional("repeat_policy"): vol.In(
+                                tuple(TriggerRepeatPolicy)
+                            ),
+                            vol.Optional("fire_if_already_matching"): cv.boolean,
+                            vol.Optional("cooldown_seconds"): vol.All(
+                                vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+                            ),
+                            vol.Optional("available_from"): vol.Any(None, cv.string),
+                            vol.Optional("expires_at"): vol.Any(None, cv.string),
                         }
                     ),
                     cv.has_at_least_one_key("reminder_id", "title"),
@@ -228,10 +271,11 @@ def _tools() -> list[llm.Tool]:
                             vol.Exclusive("minutes", "when"): vol.All(
                                 vol.Coerce(int), vol.Range(min=1)
                             ),
+                            vol.Exclusive("wait_for_next_trigger", "when"): cv.boolean,
                         }
                     ),
                     cv.has_at_least_one_key("reminder_id", "title"),
-                    cv.has_at_least_one_key("due", "minutes"),
+                    cv.has_at_least_one_key("due", "minutes", "wait_for_next_trigger"),
                 )
             ),
             _snooze,
@@ -249,6 +293,12 @@ def _tools() -> list[llm.Tool]:
                 )
             ),
             _acknowledge,
+        ),
+        RemindersTool(
+            "fire_named_reminder_trigger",
+            "Fire a named trigger for the authenticated user's reminders only.",
+            vol.Schema({vol.Required("trigger_id"): cv.string}),
+            _fire_named_trigger,
         ),
         RemindersTool(
             "query_reminder_history",
@@ -334,17 +384,51 @@ async def _create_recurring(
     return {"reminder": reminder.to_dict()}
 
 
+async def _create_triggered(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    actor, _ = await _identity(hass, context)
+    user_id = await async_resolve_target_user(hass, actor, args.get("user_id"))
+    reminder = await _manager(hass).async_create_triggered(
+        user_id=user_id,
+        title=args["title"],
+        message=args.get("message"),
+        trigger=TriggerDefinition.from_dict(args["trigger"]),
+        acknowledgement_policy=AcknowledgementPolicy(args["acknowledgement_policy"]),
+        quiet_hours_policy=QuietHoursPolicy(args["quiet_hours_policy"]),
+        repeat_policy=TriggerRepeatPolicy(args["repeat_policy"]),
+        fire_if_already_matching=args["fire_if_already_matching"],
+        while_awaiting_acknowledgement=WhileAwaitingAcknowledgement(
+            args["while_awaiting_acknowledgement"]
+        ),
+        cooldown_seconds=args["cooldown_seconds"],
+        available_from=(
+            _parse_datetime(hass, args["available_from"])
+            if "available_from" in args
+            else None
+        ),
+        expires_at=(
+            _parse_datetime(hass, args["expires_at"]) if "expires_at" in args else None
+        ),
+        trigger_description=args.get("trigger_description"),
+    )
+    return {"reminder": reminder.to_dict()}
+
+
 async def _list(
     hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
 ) -> dict[str, Any]:
     actor, _ = await _identity(hass, context)
     user_id = await async_resolve_list_user(hass, actor, args.get("user_id"))
-    reminders = await _manager(hass).async_list(
-        user_id=user_id,
-        statuses={
+    statuses = None
+    if "activation_type" not in args:
+        statuses = {
             ReminderStatus.PENDING,
             ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
-        },
+        }
+    reminders = await _manager(hass).async_list(
+        user_id=user_id,
+        statuses=statuses,
         query=args.get("query"),
         due_after=_parse_datetime(hass, args["due_after"])
         if "due_after" in args
@@ -353,6 +437,11 @@ async def _list(
         if "due_before" in args
         else None,
         recurring=args.get("recurring"),
+        activation_type=(
+            ActivationType(args["activation_type"])
+            if "activation_type" in args
+            else None
+        ),
         limit=args["limit"],
     )
     return {"reminders": [_compact_reminder(item) for item in reminders]}
@@ -384,7 +473,8 @@ async def _resolve_reminder(
                 {
                     "id": item.id,
                     "title": item.title,
-                    "due": item.due.isoformat(),
+                    "due": item.due.isoformat() if item.due else None,
+                    "trigger_summary": item.trigger_summary,
                     "recurring": item.recurrence is not None,
                 }
                 for item in matches[:10]
@@ -421,6 +511,20 @@ async def _update(
         )
     if "quiet_hours_policy" in args:
         changes["quiet_hours_policy"] = QuietHoursPolicy(args["quiet_hours_policy"])
+    if "activation_type" in args:
+        changes["activation_type"] = ActivationType(args["activation_type"])
+    if "trigger" in args:
+        changes["trigger"] = TriggerDefinition.from_dict(args["trigger"])
+    if "repeat_policy" in args:
+        changes["repeat_policy"] = TriggerRepeatPolicy(args["repeat_policy"])
+    for key in ("fire_if_already_matching", "cooldown_seconds"):
+        if key in args:
+            changes[key] = args[key]
+    for key in ("available_from", "expires_at"):
+        if key in args:
+            changes[key] = (
+                _parse_datetime(hass, args[key]) if args[key] is not None else None
+            )
     if not changes:
         raise ReminderValidationError("No reminder changes were provided")
     updated = await _manager(hass).async_update(reminder.id, **changes)
@@ -445,11 +549,14 @@ async def _snooze(
     if response is not None:
         return response
     assert reminder is not None
-    updated = await _manager(hass).async_snooze(
-        reminder.id,
-        due=_parse_datetime(hass, args["due"]) if "due" in args else None,
-        duration=timedelta(minutes=args["minutes"]) if "minutes" in args else None,
-    )
+    if args.get("wait_for_next_trigger"):
+        updated = await _manager(hass).async_wait_for_next_trigger(reminder.id)
+    else:
+        updated = await _manager(hass).async_snooze(
+            reminder.id,
+            due=_parse_datetime(hass, args["due"]) if "due" in args else None,
+            duration=timedelta(minutes=args["minutes"]) if "minutes" in args else None,
+        )
     return {"reminder": updated.to_dict()}
 
 
@@ -466,6 +573,16 @@ async def _acknowledge(
         acknowledged_by=actor.id,
     )
     return {"occurrence": occurrence.to_dict()}
+
+
+async def _fire_named_trigger(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    actor, user_id = await _identity(hass, context)
+    del actor
+    return await _manager(hass).async_fire_named_trigger(
+        args["trigger_id"], user_id=user_id
+    )
 
 
 async def _history(

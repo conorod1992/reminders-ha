@@ -44,6 +44,23 @@
       },
       "name": "Create recurring reminder"
     },
+    "create_triggered": {
+      "description": "Create a listener-backed reminder activated by a supported Home Assistant trigger.",
+      "fields": {
+        "trigger": {"description": "Structured state, numeric-state, zone, event, or named trigger.", "name": "Trigger"},
+        "repeat_policy": {"description": "Fire once, on every trigger, or after each acknowledgement.", "name": "Repeat policy"},
+        "fire_if_already_matching": {"description": "Evaluate an already-active state after arming; off by default.", "name": "Fire if already matching"},
+        "cooldown_seconds": {"description": "Minimum seconds between occurrence creation.", "name": "Cooldown"},
+        "available_from": {"description": "Optional time before which trigger hits are ignored.", "name": "Available from"},
+        "expires_at": {"description": "Optional time at which the reminder expires.", "name": "Expiry"}
+      },
+      "name": "Create triggered reminder"
+    },
+    "fire_trigger": {
+      "description": "Fire a named trigger for reminders owned by the authorized target user.",
+      "fields": {"trigger_id": {"description": "Canonical named trigger ID.", "name": "Trigger ID"}},
+      "name": "Fire named reminder trigger"
+    },
     "delete": {
       "description": "Delete a reminder.",
       "fields": {"reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}},
