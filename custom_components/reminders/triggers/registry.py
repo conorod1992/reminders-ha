@@ -122,7 +122,7 @@ class TriggerRegistry:
         }:
 
             def state_listener(event: Event[Any]) -> None:
-                self._hass.async_create_task(
+                self._hass.create_task(
                     self._async_state_changed(key, event),
                     f"reminders trigger {trigger.type.value}",
                 )
@@ -133,7 +133,7 @@ class TriggerRegistry:
         elif trigger.type is TriggerType.EVENT:
 
             def event_listener(event: Event[Any]) -> None:
-                self._hass.async_create_task(
+                self._hass.create_task(
                     self._async_event_fired(key, event),
                     "reminders event trigger",
                 )
