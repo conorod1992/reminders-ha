@@ -7,6 +7,7 @@ import {
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
+  suggestedStates,
 } from "../custom_components/reminders/frontend/reminders-utils.js";
 
 test("formats supported recurrence rules", () => {
@@ -35,4 +36,14 @@ test("creates quick choices in the configured timezone", () => {
 test("summarizes acknowledgement and finds actionable occurrences", () => {
   assert.equal(acknowledgementSummary({ acknowledgement_policy: "required" }), "Done required");
   assert.deepEqual(awaitingOccurrences({ occurrence_history: [{ id: "a", status: "awaiting_acknowledgement" }, { id: "b", status: "delivered" }] }).map((item) => item.id), ["a"]);
+});
+
+test("suggests domain and entity-specific states", () => {
+  const states = {
+    "light.study": { state: "on", attributes: {} },
+    "light.kitchen": { state: "off", attributes: {} },
+    "select.mode": { state: "home", attributes: { options: ["home", "away"] } },
+  };
+  assert.deepEqual(suggestedStates(states, "light.study"), ["on", "off"]);
+  assert.deepEqual(suggestedStates(states, "select.mode"), ["home", "away"]);
 });

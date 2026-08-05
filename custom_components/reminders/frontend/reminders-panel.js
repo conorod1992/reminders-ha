@@ -6,6 +6,7 @@ import {
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
+  suggestedStates,
   zonedInputParts,
 } from "./reminders-utils.js";
 
@@ -33,6 +34,7 @@ class RemindersManagementPanel extends HTMLElement {
 
   set hass(value) {
     this._hass = value;
+    for (const picker of this.shadowRoot?.querySelectorAll("ha-entity-picker") || []) picker.hass = value;
     if (this.isConnected && !this._started) this._start();
   }
   get hass() { return this._hass; }
@@ -103,7 +105,7 @@ class RemindersManagementPanel extends HTMLElement {
         *{box-sizing:border-box}.page{max-width:1080px;margin:auto;padding:24px}.top,.toolbar,.actions,.quick,.dialog-actions,.checkrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.top h1{margin:0 auto 0 0;font-size:28px}
         button{border:0;border-radius:8px;padding:10px 15px;background:var(--primary-color);color:var(--text-primary-color,#fff);font:inherit;cursor:pointer}button.secondary,.actions button,.quick button{background:transparent;color:var(--primary-color);border:1px solid var(--divider-color)}button.danger{color:var(--error-color);background:transparent;border:1px solid var(--error-color)}button:disabled{opacity:.55;cursor:wait}
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
-        select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}
+        select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}.picker-host,.picker-host ha-entity-picker,.picker-host select{display:block;width:100%}
         .list{display:grid;gap:12px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}
         .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
         dialog{width:min(680px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;border:0;border-radius:12px;padding:0;background:var(--card-background-color);color:var(--primary-text-color);box-shadow:0 8px 28px rgba(0,0,0,.35)}dialog::backdrop{background:rgba(0,0,0,.45)}.dialog{padding:22px}.dialog h2{margin:0 0 8px}.form{display:grid;gap:16px}.dialog-actions{justify-content:flex-end;margin-top:20px}.hidden{display:none!important}details{border-top:1px solid var(--divider-color);padding-top:12px}summary{cursor:pointer;color:var(--primary-color);margin-bottom:14px}.advanced{display:grid;gap:16px}.quick button.selected{background:var(--primary-color);color:#fff}.preview{padding:10px;border-radius:8px;background:var(--secondary-background-color)}
@@ -290,9 +292,9 @@ class RemindersManagementPanel extends HTMLElement {
         </div>
         <div id="trigger-activation" class="hidden">
           <label>Trigger type<select name="trigger_type"><option value="state">Entity changes state</option><option value="numeric_state">Numeric value enters a range</option><option value="zone">Enter or leave a zone</option><option value="event">Home Assistant event</option><option value="named">Named trigger</option></select></label>
-          <div class="trigger-fields state-fields"><label>Entity<select name="state_entity"></select></label><label>New state<input name="state_to" maxlength="255"></label></div>
-          <div class="trigger-fields numeric-fields hidden"><label>Entity<select name="numeric_entity"></select></label><div class="fieldrow"><label>Above<input name="numeric_above" type="number" step="any"></label><label>Below<input name="numeric_below" type="number" step="any"></label></div></div>
-          <div class="trigger-fields zone-fields hidden"><label>Person or tracker<select name="zone_entity"></select></label><label>Zone<select name="zone_zone"></select></label><label>Event<select name="zone_event"><option value="enter">Enters</option><option value="leave">Leaves</option></select></label></div>
+          <div class="trigger-fields state-fields"><label>Entity<span class="picker-host" data-picker="state_entity"></span><input name="state_entity" type="hidden"></label><label>New state<input name="state_to" list="state-options" maxlength="255" placeholder="Choose or type a state"><datalist id="state-options"></datalist></label></div>
+          <div class="trigger-fields numeric-fields hidden"><label>Entity<span class="picker-host" data-picker="numeric_entity"></span><input name="numeric_entity" type="hidden"></label><div class="fieldrow"><label>Above<input name="numeric_above" type="number" step="any"></label><label>Below<input name="numeric_below" type="number" step="any"></label></div></div>
+          <div class="trigger-fields zone-fields hidden"><label>Person or tracker<span class="picker-host" data-picker="zone_entity"></span><input name="zone_entity" type="hidden"></label><label>Zone<span class="picker-host" data-picker="zone_zone"></span><input name="zone_zone" type="hidden"></label><label>Event<select name="zone_event"><option value="enter">Enters</option><option value="leave">Leaves</option></select></label></div>
           <div class="trigger-fields event-fields hidden"><label>Event type<input name="event_type" maxlength="128"></label></div>
           <div class="trigger-fields named-fields hidden"><label>Trigger ID<input name="trigger_id" maxlength="128" pattern="[a-z0-9][a-z0-9_.-]*"></label><label>Friendly label (optional)<input name="trigger_description" maxlength="255"></label></div>
         </div>
@@ -307,8 +309,8 @@ class RemindersManagementPanel extends HTMLElement {
             <label>Timezone<input name="timezone"></label><button type="button" class="secondary preview-button">Preview next dates</button><div class="preview hidden"></div>
           </div>
           <div id="trigger-advanced" class="hidden">
-            <div class="state-advanced"><div class="fieldrow"><label>Previous state (optional)<input name="state_from"></label><label>Attribute (optional)<input name="state_attribute"></label></div></div>
-            <div class="numeric-advanced hidden"><label>Attribute (optional)<input name="numeric_attribute"></label></div>
+            <div class="state-advanced"><div class="fieldrow"><label>Previous state (optional)<input name="state_from" list="state-options" placeholder="Choose or type a state"></label><label>Attribute (optional)<input name="state_attribute" list="state-attribute-options"><datalist id="state-attribute-options"></datalist></label></div></div>
+            <div class="numeric-advanced hidden"><label>Attribute (optional)<input name="numeric_attribute" list="numeric-attribute-options"><datalist id="numeric-attribute-options"></datalist></label></div>
             <label class="duration-option">Must remain matching for (seconds)<input name="for_seconds" type="number" min="0" max="31536000" value="0"></label>
             <label><span><input name="fire_if_already_matching" type="checkbox"> Fire immediately if already matching</span><span class="hint">Off by default. When disabled, this waits for the next matching change rather than firing because it already matches after creation or restart.</span></label>
             <label>Repeat policy<select name="repeat_policy"><option value="once">Once</option><option value="every_trigger">Every trigger</option><option value="rearm_after_acknowledgement">Rearm after acknowledgement</option></select></label>
@@ -356,10 +358,12 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.quiet_hours_policy.value = source?.quiet_hours_policy || "respect";
     const trigger = source?.trigger || {};
     form.elements.trigger_type.value = trigger.type || "state";
-    this._populateEntitySelect(form.elements.state_entity, null, trigger.entity_id);
-    this._populateEntitySelect(form.elements.numeric_entity, null, trigger.entity_id);
-    this._populateEntitySelect(form.elements.zone_entity, ["person", "device_tracker"], trigger.entity_id);
-    this._populateEntitySelect(form.elements.zone_zone, ["zone"], trigger.zone_entity_id);
+    this._setupEntityPicker(form, "state_entity", null, trigger.entity_id, (entityId) => this._syncStateMetadata(form, entityId));
+    this._setupEntityPicker(form, "numeric_entity", null, trigger.entity_id, (entityId) => this._syncAttributeOptions(form, "numeric-attribute-options", entityId));
+    this._setupEntityPicker(form, "zone_entity", ["person", "device_tracker"], trigger.entity_id);
+    this._setupEntityPicker(form, "zone_zone", ["zone"], trigger.zone_entity_id);
+    this._syncStateMetadata(form, trigger.type === "state" ? trigger.entity_id : "");
+    this._syncAttributeOptions(form, "numeric-attribute-options", trigger.type === "numeric_state" ? trigger.entity_id : "");
     form.elements.state_to.value = trigger.type === "state" ? (trigger.to ?? "") : "";
     form.elements.state_from.value = trigger.from ?? "";
     form.elements.state_attribute.value = trigger.type === "state" ? (trigger.attribute ?? "") : "";
@@ -511,12 +515,14 @@ class RemindersManagementPanel extends HTMLElement {
     const trigger = { type };
     if (type === "state") {
       trigger.entity_id = form.elements.state_entity.value;
+      if (!trigger.entity_id) throw new Error("Choose an entity for the state trigger");
       if (form.elements.state_from.value !== "") trigger.from = form.elements.state_from.value;
       if (form.elements.state_to.value !== "") trigger.to = form.elements.state_to.value;
       if (form.elements.state_attribute.value.trim()) trigger.attribute = form.elements.state_attribute.value.trim();
       if (trigger.from === undefined && trigger.to === undefined && !trigger.attribute) throw new Error("State trigger needs a new state, previous state, or attribute");
     } else if (type === "numeric_state") {
       trigger.entity_id = form.elements.numeric_entity.value;
+      if (!trigger.entity_id) throw new Error("Choose an entity for the numeric trigger");
       if (form.elements.numeric_above.value !== "") trigger.above = Number(form.elements.numeric_above.value);
       if (form.elements.numeric_below.value !== "") trigger.below = Number(form.elements.numeric_below.value);
       if (trigger.above === undefined && trigger.below === undefined) throw new Error("Enter an Above or Below value");
@@ -524,6 +530,8 @@ class RemindersManagementPanel extends HTMLElement {
     } else if (type === "zone") {
       trigger.entity_id = form.elements.zone_entity.value;
       trigger.zone_entity_id = form.elements.zone_zone.value;
+      if (!trigger.entity_id) throw new Error("Choose a person or tracker");
+      if (!trigger.zone_entity_id) throw new Error("Choose a zone");
       trigger.event = form.elements.zone_event.value;
     } else if (type === "event") {
       trigger.event_type = form.elements.event_type.value.trim();
@@ -740,6 +748,53 @@ class RemindersManagementPanel extends HTMLElement {
     const select = document.createElement("select"); select.multiple = true;
     for (const [id, state] of Object.entries(this._hass.states || {}).filter(([id]) => id.startsWith(`${domain}.`))) select.add(new Option(state.attributes.friendly_name || id, id, false, selected.includes(id)));
     return select;
+  }
+
+  _setupEntityPicker(form, field, domains, selected = "", onChange = null) {
+    const host = form.querySelector(`[data-picker=${field}]`);
+    const input = form.elements[field];
+    input.value = selected || "";
+    const changed = (value) => {
+      input.value = value || "";
+      if (onChange) onChange(input.value);
+    };
+    if (customElements.get("ha-entity-picker")) {
+      const picker = document.createElement("ha-entity-picker");
+      picker.hass = this._hass;
+      picker.value = input.value;
+      if (domains) picker.includeDomains = domains;
+      picker.addEventListener("value-changed", (event) => changed(event.detail?.value ?? event.target.value));
+      host.replaceChildren(picker);
+      return;
+    }
+    const select = document.createElement("select");
+    this._populateEntitySelect(select, domains, input.value);
+    select.addEventListener("change", () => changed(select.value));
+    host.replaceChildren(select);
+  }
+
+  _syncStateMetadata(form, entityId) {
+    const list = form.querySelector("#state-options");
+    list.replaceChildren();
+    const stateObj = this._hass.states?.[entityId];
+    for (const value of suggestedStates(this._hass.states, entityId)) {
+      const option = document.createElement("option");
+      option.value = value;
+      try { option.label = this._hass.formatEntityState?.(stateObj, value) || value; }
+      catch { option.label = value; }
+      list.append(option);
+    }
+    this._syncAttributeOptions(form, "state-attribute-options", entityId);
+  }
+
+  _syncAttributeOptions(form, listId, entityId) {
+    const list = form.querySelector(`#${listId}`);
+    list.replaceChildren();
+    for (const attribute of Object.keys(this._hass.states?.[entityId]?.attributes || {}).sort()) {
+      const option = document.createElement("option");
+      option.value = attribute;
+      list.append(option);
+    }
   }
 
   _populateEntitySelect(select, domains = null, selected = "") {

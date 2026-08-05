@@ -17,7 +17,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .authorization import async_resolve_list_user
 from .const import DOMAIN
-from .models import OccurrenceStatus, Reminder, ReminderStatus
+from .models import ActivationType, OccurrenceStatus, Reminder, ReminderStatus
 from .services import _parse_datetime
 from .websocket_api import (
     _api_errors,
@@ -26,7 +26,9 @@ from .websocket_api import (
     websocket_acknowledge,
     websocket_create,
     websocket_create_recurring,
+    websocket_create_triggered,
     websocket_delete,
+    websocket_fire_trigger,
     websocket_get,
     websocket_get_preferences,
     websocket_history,
@@ -96,7 +98,15 @@ async def _failed_page(
         vol.Optional("scope", default="mine"): vol.In(("mine", "all", "user")),
         vol.Optional("user_id"): cv.string,
         vol.Optional("view", default="upcoming"): vol.In(
-            ("upcoming", "recurring", "failed", "all")
+            (
+                "upcoming",
+                "recurring",
+                "triggered",
+                "waiting_for_trigger",
+                "expired",
+                "failed",
+                "all",
+            )
         ),
         vol.Optional("due_after"): cv.string,
         vol.Optional("due_before"): cv.string,
@@ -139,20 +149,30 @@ async def websocket_list(
             offset=msg["offset"],
         )
     else:
-        statuses = (
-            {
+        statuses: set[ReminderStatus] | None = None
+        activation_type = None
+        recurring = None
+        if view == "upcoming":
+            statuses = {
                 ReminderStatus.PENDING,
                 ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
             }
-            if view == "upcoming"
-            else None
-        )
+            activation_type = ActivationType.TIME
+        elif view == "recurring":
+            recurring = True
+        elif view == "triggered":
+            activation_type = ActivationType.TRIGGER
+        elif view == "waiting_for_trigger":
+            statuses = {ReminderStatus.WAITING_FOR_TRIGGER}
+        elif view == "expired":
+            statuses = {ReminderStatus.EXPIRED}
         reminders = await manager.async_list(
             user_id=user_id,
             due_after=due_after,
             due_before=due_before,
             query=msg.get("query"),
-            recurring=True if view == "recurring" else None,
+            recurring=recurring,
+            activation_type=activation_type,
             statuses=statuses,
             limit=msg["limit"],
             offset=msg["offset"],
@@ -174,6 +194,8 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_get,
         websocket_create,
         websocket_create_recurring,
+        websocket_create_triggered,
+        websocket_fire_trigger,
         websocket_update,
         websocket_delete,
         websocket_snooze,

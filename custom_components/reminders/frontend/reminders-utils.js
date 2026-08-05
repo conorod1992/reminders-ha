@@ -2,6 +2,46 @@ export const WEEKDAYS = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 ];
 
+const DOMAIN_STATES = {
+  alarm_control_panel: ["disarmed", "armed_home", "armed_away", "armed_night", "armed_vacation", "armed_custom_bypass", "pending", "arming", "disarming", "triggered"],
+  automation: ["on", "off"],
+  binary_sensor: ["on", "off"],
+  button: [],
+  climate: ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"],
+  cover: ["open", "closed", "opening", "closing"],
+  device_tracker: ["home", "not_home"],
+  fan: ["on", "off"],
+  humidifier: ["on", "off"],
+  input_boolean: ["on", "off"],
+  lawn_mower: ["docked", "mowing", "paused", "returning", "error"],
+  light: ["on", "off"],
+  lock: ["locked", "unlocked", "locking", "unlocking", "jammed", "opening", "open"],
+  media_player: ["off", "on", "idle", "playing", "paused", "standby", "buffering"],
+  person: ["home", "not_home"],
+  remote: ["on", "off"],
+  siren: ["on", "off"],
+  sun: ["above_horizon", "below_horizon"],
+  switch: ["on", "off"],
+  update: ["on", "off"],
+  vacuum: ["cleaning", "docked", "paused", "idle", "returning", "error"],
+  valve: ["open", "closed", "opening", "closing"],
+  water_heater: ["off", "eco", "electric", "gas", "heat_pump", "high_demand", "performance"],
+};
+
+export function suggestedStates(states = {}, entityId = "") {
+  const stateObj = states[entityId];
+  if (!stateObj) return [];
+  const domain = entityId.split(".")[0];
+  const suggestions = new Set(DOMAIN_STATES[domain] || []);
+  for (const value of stateObj.attributes?.options || []) suggestions.add(String(value));
+  for (const value of stateObj.attributes?.hvac_modes || []) suggestions.add(String(value));
+  for (const [id, item] of Object.entries(states)) {
+    if (id.startsWith(`${domain}.`) && !["unknown", "unavailable"].includes(item.state)) suggestions.add(item.state);
+  }
+  if (!["unknown", "unavailable"].includes(stateObj.state)) suggestions.add(stateObj.state);
+  return [...suggestions];
+}
+
 const ordinal = (day) => {
   const mod100 = day % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${day}th`;
