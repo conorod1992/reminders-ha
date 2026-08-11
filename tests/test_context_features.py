@@ -10,12 +10,19 @@ from typing import Any
 import pytest
 from homeassistant.core import State
 
-from custom_components.reminders.manager import ReminderManager
+from custom_components.reminders.const import MOBILE_ACTION_PREFIX
+from custom_components.reminders.delivery import DeliveryResult
+from custom_components.reminders.manager import (
+    ReminderManager,
+    _automatic_completion_occurrence,
+)
 from custom_components.reminders.models import (
     AcknowledgementPolicy,
     DeliveryPolicy,
     EscalationPolicy,
+    Occurrence,
     OccurrenceStatus,
+    Reminder,
     ReminderStatus,
 )
 from custom_components.reminders.recurrence import RecurrenceFrequency, RecurrenceRule
@@ -60,6 +67,60 @@ async def _manager(
     manager = ReminderManager(hass, store, dispatcher)  # type: ignore[arg-type]
     await manager.async_load()
     return manager
+
+
+async def _recurring_snoozed_retry(
+    store: FakeStore, dispatcher: FakeDispatcher
+) -> tuple[ReminderManager, str, str, tuple[Any, ...]]:
+    """Create A as a scheduled retry while B remains the current occurrence."""
+    manager = await _manager(store, dispatcher)
+    anchor = (datetime.now(UTC) + timedelta(minutes=1)).replace(tzinfo=None)
+    reminder = await manager.async_create_recurring(
+        user_id="u1",
+        title="Complete the retry",
+        recurrence=RecurrenceRule(RecurrenceFrequency.DAILY, 1, "UTC", anchor),
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        escalation=EscalationPolicy(5, 5, 2),
+        complete_when={"type": "named", "trigger_id": "task_detected"},
+    )
+    await manager._async_process_due(reminder.due)  # type: ignore[arg-type]
+    snooze_action = next(
+        action["action"]
+        for action in dispatcher.calls[-1][0].notification_actions
+        if action["title"] == "Snooze 1 hour"
+    )
+    await manager._async_handle_mobile_action(snooze_action)
+    snoozed = await manager.async_get(reminder.id)
+    retry = next(
+        occurrence
+        for occurrence in snoozed.occurrence_history
+        if occurrence.id != snoozed.current_occurrence_id
+        and occurrence.snoozed
+        and occurrence.status is OccurrenceStatus.SCHEDULED
+    )
+    return manager, reminder.id, retry.id, _recurrence_snapshot(snoozed)
+
+
+def _recurrence_snapshot(reminder: Reminder) -> tuple[Any, ...]:
+    current = next(
+        occurrence
+        for occurrence in reminder.occurrence_history
+        if occurrence.id == reminder.current_occurrence_id
+    )
+    return (
+        reminder.current_occurrence_id,
+        reminder.due,
+        reminder.scheduled_due,
+        reminder.status,
+        reminder.current_occurrence_number,
+        current.status,
+        current.next_escalation_at,
+        current.context_eligible_at,
+        tuple(occurrence.id for occurrence in reminder.occurrence_history),
+        reminder.last_occurrence_due,
+        reminder.last_occurrence_status,
+        reminder.recurrence,
+    )
 
 
 async def test_due_context_current_match_delivers_immediately(
@@ -402,6 +463,171 @@ async def test_recurring_automatic_completion_acknowledges_delivered_occurrence_
     )
     assert completed_old.status is OccurrenceStatus.ACKNOWLEDGED
     assert completed_old.completion_source == "automatic"
+
+
+async def test_completion_cancels_scheduled_snoozed_retry_without_advancing_series(
+    fake_store: FakeStore, no_runtime_listeners: None
+) -> None:
+    manager, reminder_id, retry_id, series_snapshot = await _recurring_snoozed_retry(
+        fake_store, FakeDispatcher()
+    )
+    scheduled = next(
+        item
+        for item in (await manager.async_get(reminder_id)).occurrence_history
+        if item.id == retry_id
+    )
+    assert scheduled.notification_action_token is not None
+
+    assert (
+        await manager.async_complete_automatically(
+            reminder_id, cause="named_trigger_service", context={}
+        )
+        == "completed"
+    )
+    completed = await manager.async_get(reminder_id)
+    retry = next(item for item in completed.occurrence_history if item.id == retry_id)
+    assert retry.status is OccurrenceStatus.CANCELLED
+    assert retry.completion_source == "automatic"
+    assert retry.next_escalation_at is None
+    assert _recurrence_snapshot(completed) == series_snapshot
+    await manager._async_handle_mobile_action(
+        f"{MOBILE_ACTION_PREFIX}{scheduled.notification_action_token}:SNOOZE_10"
+    )
+    assert await manager.async_get(reminder_id) == completed
+
+
+async def test_completion_wins_snoozed_retry_delivery_race(
+    fake_store: FakeStore, no_runtime_listeners: None
+) -> None:
+    class GateDispatcher(FakeDispatcher):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def async_deliver(self, reminder: Any, policy: Any) -> DeliveryResult:
+            self.calls.append((reminder, policy))
+            if len(self.calls) > 1:
+                self.started.set()
+                await self.release.wait()
+            return DeliveryResult((policy.channels[0],), ())
+
+    dispatcher = GateDispatcher()
+    manager, reminder_id, retry_id, series_snapshot = await _recurring_snoozed_retry(
+        fake_store, dispatcher
+    )
+    retry = next(
+        item
+        for item in (await manager.async_get(reminder_id)).occurrence_history
+        if item.id == retry_id
+    )
+    delivery = asyncio.create_task(manager._async_process_due(retry.due))
+    await dispatcher.started.wait()
+    claimed = await manager.async_get(reminder_id)
+    assert (
+        next(item for item in claimed.occurrence_history if item.id == retry_id).status
+        is OccurrenceStatus.DELIVERING
+    )
+
+    await manager.async_complete_automatically(
+        reminder_id, cause="named_trigger_service", context={}
+    )
+    dispatcher.release.set()
+    await delivery
+
+    completed = await manager.async_get(reminder_id)
+    retry = next(item for item in completed.occurrence_history if item.id == retry_id)
+    assert retry.status is OccurrenceStatus.CANCELLED
+    assert retry.completion_source == "automatic"
+    assert _recurrence_snapshot(completed) == series_snapshot
+
+
+async def test_completion_acknowledges_redelivered_snoozed_retry_only(
+    fake_store: FakeStore, no_runtime_listeners: None
+) -> None:
+    dispatcher = FakeDispatcher()
+    manager, reminder_id, retry_id, series_snapshot = await _recurring_snoozed_retry(
+        fake_store, dispatcher
+    )
+    retry = next(
+        item
+        for item in (await manager.async_get(reminder_id)).occurrence_history
+        if item.id == retry_id
+    )
+    await manager._async_process_due(retry.due)
+    awaiting = next(
+        item
+        for item in (await manager.async_get(reminder_id)).occurrence_history
+        if item.id == retry_id
+    )
+    assert awaiting.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+    assert awaiting.next_escalation_at is not None
+
+    await manager.async_complete_automatically(
+        reminder_id, cause="named_trigger_service", context={}
+    )
+    completed = await manager.async_get(reminder_id)
+    retry = next(item for item in completed.occurrence_history if item.id == retry_id)
+    assert retry.status is OccurrenceStatus.ACKNOWLEDGED
+    assert retry.completion_source == "automatic"
+    assert retry.next_escalation_at is None
+    assert _recurrence_snapshot(completed) == series_snapshot
+
+
+async def test_completion_after_restart_resolves_snoozed_retry_only(
+    fake_store: FakeStore, no_runtime_listeners: None
+) -> None:
+    (
+        _manager_instance,
+        reminder_id,
+        retry_id,
+        series_snapshot,
+    ) = await _recurring_snoozed_retry(fake_store, FakeDispatcher())
+    restarted = await _manager(fake_store, FakeDispatcher())
+
+    await restarted.async_complete_automatically(
+        reminder_id, cause="named_trigger_service", context={}
+    )
+    completed = await restarted.async_get(reminder_id)
+    retry = next(item for item in completed.occurrence_history if item.id == retry_id)
+    assert retry.status is OccurrenceStatus.CANCELLED
+    assert retry.completion_source == "automatic"
+    assert _recurrence_snapshot(completed) == series_snapshot
+
+
+def test_multiple_snoozed_retries_select_earliest_due_not_history_order() -> None:
+    now = datetime.now(UTC)
+    current = Occurrence("current", now + timedelta(days=1), now + timedelta(days=1))
+    later = Occurrence(
+        "later",
+        now - timedelta(days=2),
+        now + timedelta(hours=2),
+        snoozed=True,
+    )
+    earlier = Occurrence(
+        "earlier",
+        now - timedelta(days=1),
+        now + timedelta(hours=1),
+        snoozed=True,
+    )
+    reminder = Reminder(
+        id="series",
+        user_id="u1",
+        title="Ordered retries",
+        due=current.due,
+        created_at=now,
+        updated_at=now,
+        recurrence=RecurrenceRule(
+            RecurrenceFrequency.DAILY,
+            1,
+            "UTC",
+            now.replace(tzinfo=None),
+        ),
+        current_occurrence_id=current.id,
+        occurrence_history=(later, current, earlier),
+    )
+
+    assert _automatic_completion_occurrence(reminder) == earlier
 
 
 @pytest.mark.parametrize(

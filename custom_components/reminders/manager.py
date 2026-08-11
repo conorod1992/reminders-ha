@@ -1200,25 +1200,7 @@ class ReminderManager:
             current = self._reminders.get(reminder_id)
             if current is None or current.complete_when is None:
                 return "inactive"
-            active = _find_occurrence(current, current.current_occurrence_id)
-            occurrence = (
-                active
-                if active is not None
-                and active.status
-                in {
-                    OccurrenceStatus.WAITING_FOR_CONTEXT,
-                    OccurrenceStatus.DELIVERING,
-                    OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
-                }
-                else next(
-                    (
-                        item
-                        for item in reversed(current.occurrence_history)
-                        if item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                    ),
-                    active,
-                )
-            )
+            occurrence = _automatic_completion_occurrence(current)
             if occurrence is None or occurrence.status not in {
                 OccurrenceStatus.SCHEDULED,
                 OccurrenceStatus.WAITING_FOR_CONTEXT,
@@ -2437,6 +2419,38 @@ def _find_occurrence(
         (item for item in reminder.occurrence_history if item.id == occurrence_id),
         None,
     )
+
+
+def _automatic_completion_occurrence(reminder: Reminder) -> Occurrence | None:
+    """Prefer the earliest active retry, then older awaiting work, then current."""
+    snoozed_retry_statuses = {
+        OccurrenceStatus.SCHEDULED,
+        OccurrenceStatus.DELIVERING,
+        OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+    }
+    snoozed_retries = [
+        occurrence
+        for occurrence in reminder.occurrence_history
+        if occurrence.id != reminder.current_occurrence_id
+        and occurrence.snoozed
+        and occurrence.status in snoozed_retry_statuses
+    ]
+    if snoozed_retries:
+        return min(snoozed_retries, key=_completion_order)
+    older_awaiting = [
+        occurrence
+        for occurrence in reminder.occurrence_history
+        if occurrence.id != reminder.current_occurrence_id
+        and occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+    ]
+    if older_awaiting:
+        return min(older_awaiting, key=_completion_order)
+    return _find_occurrence(reminder, reminder.current_occurrence_id)
+
+
+def _completion_order(occurrence: Occurrence) -> tuple[datetime, datetime, str]:
+    """Order competing historical completion targets without history-order bias."""
+    return occurrence.due, occurrence.scheduled_due, occurrence.id
 
 
 def _replace_occurrence(
