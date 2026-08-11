@@ -92,6 +92,21 @@ create:
               value: respect
             - label: Ignore quiet hours (urgent)
               value: ignore
+    deliver_when: &deliver_when
+      name: Deliver when
+      description: Optional bounded state, numeric_state, zone, event, or named context checked only after the due time.
+      selector:
+        object:
+    complete_when: &complete_when
+      name: Complete automatically when
+      description: Optional bounded trigger that resolves the relevant occurrence without claiming a user marked it Done.
+      selector:
+        object:
+    escalation: &escalation
+      name: Escalation
+      description: Optional initial_delay_minutes, repeat_minutes, and max_attempts for reminders requiring acknowledgement.
+      selector:
+        object:
 
 create_recurring:
   name: Create a recurring reminder
@@ -212,6 +227,9 @@ create_recurring:
     voice_targets: *voice_targets
     acknowledgement_policy: *ack_policy
     quiet_hours_policy: *quiet_policy
+    deliver_when: *deliver_when
+    complete_when: *complete_when
+    escalation: *escalation
 
 get:
   name: Get a reminder
@@ -270,6 +288,9 @@ update:
     voice_targets: *voice_targets
     acknowledgement_policy: *ack_policy
     quiet_hours_policy: *quiet_policy
+    deliver_when: *deliver_when
+    complete_when: *complete_when
+    escalation: *escalation
     first_reminder: *first_reminder
     frequency: *frequency
     interval: *interval
@@ -458,6 +479,8 @@ create_triggered:
     voice_targets: *voice_targets
     acknowledgement_policy: *ack_policy
     quiet_hours_policy: *quiet_policy
+    complete_when: *complete_when
+    escalation: *escalation
 
 fire_trigger:
   name: Fire a named reminder trigger

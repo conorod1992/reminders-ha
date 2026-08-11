@@ -44,6 +44,7 @@ class ReminderStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     WAITING_FOR_TRIGGER = "waiting_for_trigger"
+    WAITING_FOR_CONTEXT = "waiting_for_context"
     INACTIVE_BEFORE_AVAILABLE_FROM = "inactive_before_available_from"
     EXPIRED = "expired"
     COMPLETED = "completed"
@@ -53,6 +54,7 @@ class OccurrenceStatus(StrEnum):
     """Immutable-in-meaning lifecycle state for one scheduled occurrence."""
 
     SCHEDULED = "scheduled"
+    WAITING_FOR_CONTEXT = "waiting_for_context"
     DELIVERING = "delivering"
     DELIVERED = "delivered"
     AWAITING_ACKNOWLEDGEMENT = "awaiting_acknowledgement"
@@ -74,6 +76,63 @@ class QuietHoursPolicy(StrEnum):
 
     RESPECT = "respect"
     IGNORE = "ignore"
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationPolicy:
+    """Bounded redelivery policy for an unacknowledged occurrence."""
+
+    initial_delay_minutes: int = 30
+    repeat_minutes: int = 60
+    max_attempts: int = 3
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "initial_delay_minutes": self.initial_delay_minutes,
+            "repeat_minutes": self.repeat_minutes,
+            "max_attempts": self.max_attempts,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        return cls(
+            initial_delay_minutes=int(data.get("initial_delay_minutes", 30)),
+            repeat_minutes=int(data.get("repeat_minutes", 60)),
+            max_attempts=int(data.get("max_attempts", 3)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationAttempt:
+    """Persisted result of one escalation delivery attempt."""
+
+    number: int
+    attempted_at: datetime
+    succeeded_channels: tuple[str, ...] = ()
+    failed_channels: tuple[str, ...] = ()
+    delivery_errors: tuple[str, ...] = ()
+    suppressed_channels: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "number": self.number,
+            "attempted_at": _format_datetime(self.attempted_at),
+            "succeeded_channels": list(self.succeeded_channels),
+            "failed_channels": list(self.failed_channels),
+            "delivery_errors": list(self.delivery_errors),
+            "suppressed_channels": list(self.suppressed_channels),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        return cls(
+            number=int(data["number"]),
+            attempted_at=_parse_datetime(data["attempted_at"]),
+            succeeded_channels=tuple(data.get("succeeded_channels", ())),
+            failed_channels=tuple(data.get("failed_channels", ())),
+            delivery_errors=tuple(data.get("delivery_errors", ())),
+            suppressed_channels=tuple(data.get("suppressed_channels", ())),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +236,8 @@ class Occurrence:
     acknowledgement_required: bool = False
     acknowledged_at: datetime | None = None
     acknowledged_by: str | None = None
+    completion_source: str | None = None
+    completion_reason: str | None = None
     snoozed: bool = False
     snoozed_at: datetime | None = None
     trigger_type: str | None = None
@@ -184,6 +245,11 @@ class Occurrence:
     triggered_at: datetime | None = None
     activation_cause: str | None = None
     trigger_context: dict[str, Any] | None = None
+    context_eligible_at: datetime | None = None
+    notification_action_token: str | None = None
+    next_escalation_at: datetime | None = None
+    escalation_attempt_count: int = 0
+    escalation_history: tuple[EscalationAttempt, ...] = ()
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable occurrence."""
@@ -208,6 +274,8 @@ class Occurrence:
                 _format_datetime(self.acknowledged_at) if self.acknowledged_at else None
             ),
             "acknowledged_by": self.acknowledged_by,
+            "completion_source": self.completion_source,
+            "completion_reason": self.completion_reason,
             "snoozed": self.snoozed,
             "snoozed_at": (
                 _format_datetime(self.snoozed_at) if self.snoozed_at else None
@@ -219,6 +287,19 @@ class Occurrence:
             ),
             "activation_cause": self.activation_cause,
             "trigger_context": self.trigger_context,
+            "context_eligible_at": (
+                _format_datetime(self.context_eligible_at)
+                if self.context_eligible_at
+                else None
+            ),
+            "notification_action_token": self.notification_action_token,
+            "next_escalation_at": (
+                _format_datetime(self.next_escalation_at)
+                if self.next_escalation_at
+                else None
+            ),
+            "escalation_attempt_count": self.escalation_attempt_count,
+            "escalation_history": [item.to_dict() for item in self.escalation_history],
         }
 
     @classmethod
@@ -249,6 +330,16 @@ class Occurrence:
                 if data.get("acknowledged_by") is not None
                 else None
             ),
+            completion_source=(
+                str(data["completion_source"])
+                if data.get("completion_source")
+                else None
+            ),
+            completion_reason=(
+                str(data["completion_reason"])
+                if data.get("completion_reason")
+                else None
+            ),
             snoozed=bool(data.get("snoozed", False)),
             snoozed_at=_optional_datetime(data.get("snoozed_at")),
             trigger_type=(
@@ -265,6 +356,18 @@ class Occurrence:
                 dict(data["trigger_context"])
                 if isinstance(data.get("trigger_context"), dict)
                 else None
+            ),
+            context_eligible_at=_optional_datetime(data.get("context_eligible_at")),
+            notification_action_token=(
+                str(data["notification_action_token"])
+                if data.get("notification_action_token")
+                else None
+            ),
+            next_escalation_at=_optional_datetime(data.get("next_escalation_at")),
+            escalation_attempt_count=int(data.get("escalation_attempt_count", 0)),
+            escalation_history=tuple(
+                EscalationAttempt.from_dict(item)
+                for item in data.get("escalation_history", [])
             ),
         )
 
@@ -309,6 +412,14 @@ class Reminder:
     snoozed_until: datetime | None = None
     immediate_evaluated: bool = False
     cooldown_skip_count: int = 0
+    deliver_when: TriggerDefinition | None = None
+    deliver_when_summary: str | None = None
+    complete_when: TriggerDefinition | None = None
+    complete_when_summary: str | None = None
+    escalation: EscalationPolicy | None = None
+    notification_actions: tuple[dict[str, str], ...] = field(
+        default=(), compare=False, repr=False
+    )
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable reminder."""
@@ -378,6 +489,13 @@ class Reminder:
             ),
             "immediate_evaluated": self.immediate_evaluated,
             "cooldown_skip_count": self.cooldown_skip_count,
+            "deliver_when": self.deliver_when.to_dict() if self.deliver_when else None,
+            "deliver_when_summary": self.deliver_when_summary,
+            "complete_when": (
+                self.complete_when.to_dict() if self.complete_when else None
+            ),
+            "complete_when_summary": self.complete_when_summary,
+            "escalation": self.escalation.to_dict() if self.escalation else None,
         }
 
     @classmethod
@@ -390,6 +508,9 @@ class Reminder:
         )
         trigger_data = data.get("trigger")
         trigger = TriggerDefinition.from_dict(trigger_data) if trigger_data else None
+        deliver_when_data = data.get("deliver_when")
+        complete_when_data = data.get("complete_when")
+        escalation_data = data.get("escalation")
         if activation_type is ActivationType.TIME and data.get("due") is None:
             raise ValueError("Time reminder requires due")
         if activation_type is ActivationType.TRIGGER and trigger is None:
@@ -461,6 +582,29 @@ class Reminder:
             snoozed_until=_optional_datetime(data.get("snoozed_until")),
             immediate_evaluated=bool(data.get("immediate_evaluated", False)),
             cooldown_skip_count=int(data.get("cooldown_skip_count", 0)),
+            deliver_when=(
+                TriggerDefinition.from_dict(deliver_when_data)
+                if deliver_when_data
+                else None
+            ),
+            deliver_when_summary=(
+                str(data["deliver_when_summary"])
+                if data.get("deliver_when_summary")
+                else None
+            ),
+            complete_when=(
+                TriggerDefinition.from_dict(complete_when_data)
+                if complete_when_data
+                else None
+            ),
+            complete_when_summary=(
+                str(data["complete_when_summary"])
+                if data.get("complete_when_summary")
+                else None
+            ),
+            escalation=(
+                EscalationPolicy.from_dict(escalation_data) if escalation_data else None
+            ),
         )
 
 

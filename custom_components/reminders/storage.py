@@ -120,6 +120,25 @@ class ReminderStore(Store[StoredData]):
                     raw.setdefault("snoozed_until", None)
                     raw.setdefault("immediate_evaluated", False)
                     raw.setdefault("cooldown_skip_count", 0)
+            if old_minor_version < 5:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("deliver_when", None)
+                    raw.setdefault("deliver_when_summary", None)
+                    raw.setdefault("complete_when", None)
+                    raw.setdefault("complete_when_summary", None)
+                    raw.setdefault("escalation", None)
+                    for occurrence in raw.get("occurrence_history", []):
+                        if not isinstance(occurrence, dict):
+                            continue
+                        occurrence.setdefault("completion_source", None)
+                        occurrence.setdefault("completion_reason", None)
+                        occurrence.setdefault("context_eligible_at", None)
+                        occurrence.setdefault("notification_action_token", None)
+                        occurrence.setdefault("next_escalation_at", None)
+                        occurrence.setdefault("escalation_attempt_count", 0)
+                        occurrence.setdefault("escalation_history", [])
             return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."

@@ -56,17 +56,22 @@ class TriggerRegistry:
 
     def named_ids(self, trigger_id: str) -> frozenset[str]:
         """Return reminder IDs indexed for a canonical named trigger ID."""
+        return frozenset(
+            value for value in self._named.get(trigger_id, ()) if "::" not in value
+        )
+
+    def named_references(self, trigger_id: str) -> frozenset[str]:
+        """Return activation and contextual subscriptions for a named trigger."""
         return frozenset(self._named.get(trigger_id, ()))
 
     async def async_sync(self, reminders: Iterable[Reminder]) -> None:
         """Atomically reconcile runtime listeners with persisted reminders."""
         desired: dict[str, tuple[TriggerDefinition, set[str]]] = {}
         for reminder in reminders:
-            if not _should_listen(reminder) or reminder.trigger is None:
-                continue
-            key = canonical_trigger_key(reminder.trigger)
-            definition, ids = desired.setdefault(key, (reminder.trigger, set()))
-            ids.add(reminder.id)
+            for reference, definition in _subscriptions(reminder):
+                key = canonical_trigger_key(definition)
+                _definition, ids = desired.setdefault(key, (definition, set()))
+                ids.add(reference)
         for key in set(self._entries) - set(desired):
             self._remove(key)
         for key, (definition, ids) in desired.items():
@@ -107,9 +112,11 @@ class TriggerRegistry:
             state = self._hass.states.get(trigger.entity_id or "")
             return _numeric_matches(_number(state, trigger.attribute), trigger)
         if trigger.type is TriggerType.ZONE:
-            inside = self._zone_match(
-                trigger, self._hass.states.get(trigger.entity_id or "")
-            )
+            state = self._hass.states.get(trigger.entity_id or "")
+            zone_state = self._hass.states.get(trigger.zone_entity_id or "")
+            if state is None or zone_state is None:
+                return False
+            inside = self._zone_match(trigger, state)
             return inside if trigger.event is ZoneEvent.ENTER else not inside
         return False
 
@@ -280,6 +287,7 @@ class TriggerRegistry:
 
 
 def _should_listen(reminder: Reminder) -> bool:
+    """Return whether the legacy activation trigger remains armed."""
     return (
         reminder.activation_type is ActivationType.TRIGGER
         and reminder.trigger is not None
@@ -298,6 +306,26 @@ def _should_listen(reminder: Reminder) -> bool:
             ReminderStatus.DELIVERING,
         }
     )
+
+
+def _subscriptions(reminder: Reminder) -> list[tuple[str, TriggerDefinition]]:
+    """Build role-tagged subscriptions while preserving legacy activation IDs."""
+    result: list[tuple[str, TriggerDefinition]] = []
+    if _should_listen(reminder) and reminder.trigger is not None:
+        result.append((reminder.id, reminder.trigger))
+    if (
+        reminder.deliver_when is not None
+        and reminder.status is ReminderStatus.WAITING_FOR_CONTEXT
+    ):
+        result.append((f"{reminder.id}::deliver_when", reminder.deliver_when))
+    if reminder.complete_when is not None and reminder.status in {
+        ReminderStatus.PENDING,
+        ReminderStatus.WAITING_FOR_CONTEXT,
+        ReminderStatus.DELIVERING,
+        ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+    }:
+        result.append((f"{reminder.id}::complete_when", reminder.complete_when))
+    return result
 
 
 def _observed(state: State, attribute: str | None) -> Any:

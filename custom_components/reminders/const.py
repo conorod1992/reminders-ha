@@ -5,7 +5,10 @@ from typing import Final
 DOMAIN: Final = "reminders"
 STORAGE_KEY: Final = f"{DOMAIN}.storage"
 STORAGE_VERSION: Final = 1
-STORAGE_MINOR_VERSION: Final = 4
+STORAGE_MINOR_VERSION: Final = 5
+
+MOBILE_ACTION_EVENT: Final = "mobile_app_notification_action"
+MOBILE_ACTION_PREFIX: Final = "REMINDERS_"
 SAVE_DELAY: Final = 2.0
 
 SERVICE_CREATE: Final = "create"

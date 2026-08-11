@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from homeassistant.core import HomeAssistant
 
@@ -59,13 +59,18 @@ class NotifyProvider:
     async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
         if not policy.notify_targets:
             raise ValueError("Phone delivery has no configured notify targets")
+        service_data: dict[str, Any] = {
+            "title": reminder.title,
+            "message": reminder.message or reminder.title,
+        }
+        if reminder.notification_actions:
+            # Mobile-app notify providers consume this metadata; other notify
+            # entities safely ignore provider-specific action payloads.
+            service_data["data"] = {"actions": list(reminder.notification_actions)}
         await self._hass.services.async_call(
             "notify",
             "send_message",
-            {
-                "title": reminder.title,
-                "message": reminder.message or reminder.title,
-            },
+            service_data,
             target={"entity_id": list(policy.notify_targets)},
             blocking=True,
         )

@@ -211,8 +211,8 @@ class RemindersManagementPanel extends HTMLElement {
     const meta = document.createElement("div");
     meta.className = "meta";
     const values = reminder.activation_type === "trigger"
-      ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
-      : [recurrenceSummary(reminder, this._hass.locale?.language), deliverySummary(reminder), acknowledgementSummary(reminder)];
+      ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
+      : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean);
     if (reminder.owner_name) values.push(reminder.owner_name);
     meta.textContent = values.join(" · ");
     body.append(meta);
@@ -325,6 +325,9 @@ class RemindersManagementPanel extends HTMLElement {
           <div id="custom-delivery" class="hidden"><div class="checkrow channels"></div><label class="notify-label hidden">Phones</label><label class="voice-label hidden">Voice devices</label></div>
           <label>Completion tracking<select name="acknowledgement_policy"><option value="default">Use my default</option><option value="required">Require me to mark it done</option><option value="not_required">Do not require completion</option></select></label>
           <label>Quiet hours<select name="quiet_hours_policy"><option value="respect">Respect my quiet hours</option><option value="ignore">Ignore quiet hours (urgent)</option></select></label>
+          <div class="context-option"><label><span><input name="deliver_when_enabled" type="checkbox"> Wait for the right context after the scheduled time</span><span class="hint">Uses the same bounded state, numeric-state, zone, event, or named trigger format as triggered reminders.</span></label><label class="deliver-when-config hidden">Delivery context<textarea name="deliver_when_json" placeholder='{"type":"state","entity_id":"person.me","to":"home"}'></textarea></label></div>
+          <label><span><input name="complete_when_enabled" type="checkbox"> Complete automatically when Home Assistant detects it</span></label><label class="complete-when-config hidden">Completion context<textarea name="complete_when_json" placeholder='{"type":"event","event_type":"task_finished"}'></textarea></label>
+          <label><span><input name="escalation_enabled" type="checkbox"> Escalate until marked Done</span></label><div class="escalation-config fieldrow hidden"><label>First reminder after (minutes)<input name="escalation_initial" type="number" min="1" max="10080" value="30"></label><label>Repeat every (minutes)<input name="escalation_repeat" type="number" min="1" max="10080" value="60"></label><label>Maximum attempts<input name="escalation_max" type="number" min="1" max="20" value="3"></label></div>
         </div></details>
         <div class="form-error hidden" role="alert"></div>
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
@@ -356,6 +359,14 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.timezone.value = zone;
     form.elements.acknowledgement_policy.value = source?.acknowledgement_policy || "default";
     form.elements.quiet_hours_policy.value = source?.quiet_hours_policy || "respect";
+    form.elements.deliver_when_enabled.checked = Boolean(source?.deliver_when);
+    form.elements.deliver_when_json.value = source?.deliver_when ? JSON.stringify(source.deliver_when, null, 2) : "";
+    form.elements.complete_when_enabled.checked = Boolean(source?.complete_when);
+    form.elements.complete_when_json.value = source?.complete_when ? JSON.stringify(source.complete_when, null, 2) : "";
+    form.elements.escalation_enabled.checked = Boolean(source?.escalation);
+    form.elements.escalation_initial.value = source?.escalation?.initial_delay_minutes || 30;
+    form.elements.escalation_repeat.value = source?.escalation?.repeat_minutes || 60;
+    form.elements.escalation_max.value = source?.escalation?.max_attempts || 3;
     const trigger = source?.trigger || {};
     form.elements.trigger_type.value = trigger.type || "state";
     this._setupEntityPicker(form, "state_entity", null, trigger.entity_id, (entityId) => this._syncStateMetadata(form, entityId));
@@ -427,9 +438,15 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.frequency.onchange = () => this._syncRecurrence(form, true);
     form.elements.monthly_mode.onchange = () => this._syncRecurrence(form, true);
     form.elements.delivery_mode.onchange = () => this._syncDelivery(dialog);
+    for (const name of ["deliver_when_enabled", "complete_when_enabled"]) form.elements[name].onchange = () => this._syncAdvancedContexts(form);
+    form.elements.escalation_enabled.onchange = () => {
+      if (form.elements.escalation_enabled.checked) form.elements.acknowledgement_policy.value = "required";
+      this._syncAdvancedContexts(form);
+    };
     dialog.querySelector(".preview-button").onclick = () => this._previewRecurrence(form);
     this._syncRecurrence(form, recurring);
     this._syncActivation(form);
+    this._syncAdvancedContexts(form);
     this._syncDelivery(dialog);
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
@@ -459,6 +476,7 @@ class RemindersManagementPanel extends HTMLElement {
     if (triggered && form.elements.repeat) form.elements.repeat.checked = false;
     this._syncRecurrence(form, !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true"));
     this._syncTriggerType(form);
+    form.querySelector(".context-option").classList.toggle("hidden", triggered);
   }
 
   _syncTriggerType(form) {
@@ -546,6 +564,20 @@ class RemindersManagementPanel extends HTMLElement {
     return trigger;
   }
 
+  _syncAdvancedContexts(form) {
+    form.querySelector(".deliver-when-config").classList.toggle("hidden", !form.elements.deliver_when_enabled.checked);
+    form.querySelector(".complete-when-config").classList.toggle("hidden", !form.elements.complete_when_enabled.checked);
+    form.querySelector(".escalation-config").classList.toggle("hidden", !form.elements.escalation_enabled.checked);
+  }
+
+  _boundedTriggerJson(value, label) {
+    let trigger;
+    try { trigger = JSON.parse(value); } catch (_error) { throw new Error(`${label} must be valid JSON`); }
+    if (!trigger || Array.isArray(trigger) || typeof trigger !== "object") throw new Error(`${label} must be a trigger object`);
+    if (!["state", "numeric_state", "zone", "event", "named"].includes(trigger.type)) throw new Error(`${label} has an unsupported trigger type`);
+    return trigger;
+  }
+
   async _previewRecurrence(form) {
     const host = form.querySelector(".preview");
     host.classList.remove("hidden");
@@ -582,6 +614,12 @@ class RemindersManagementPanel extends HTMLElement {
       data.notify_targets = this._selected(form.elements.notify_targets);
       data.voice_targets = this._selected(form.elements.voice_targets);
     }
+    if (!triggered && form.elements.deliver_when_enabled.checked) data.deliver_when = this._boundedTriggerJson(form.elements.deliver_when_json.value, "Delivery context");
+    else if (reminder) data.deliver_when = null;
+    if (form.elements.complete_when_enabled.checked) data.complete_when = this._boundedTriggerJson(form.elements.complete_when_json.value, "Completion context");
+    else if (reminder) data.complete_when = null;
+    if (form.elements.escalation_enabled.checked) data.escalation = { initial_delay_minutes: Number(form.elements.escalation_initial.value), repeat_minutes: Number(form.elements.escalation_repeat.value), max_attempts: Number(form.elements.escalation_max.value) };
+    else if (reminder) data.escalation = null;
     if (triggered) {
       data.trigger = this._triggerData(form);
       data.repeat_policy = form.elements.repeat_policy.value;

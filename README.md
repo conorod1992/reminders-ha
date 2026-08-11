@@ -176,6 +176,92 @@ Quiet hours do **not** defer or move a reminder. The occurrence remains due at
 its scheduled instant and its history records suppressed channels. An advanced
 per-reminder `ignore` policy bypasses quiet hours for urgent reminders.
 
+## Context-aware delivery, automatic completion, and escalation
+
+Advanced options keep the normal **Title → When → Save** flow unchanged. A
+scheduled reminder may additionally define `deliver_when`, `complete_when`, and
+an acknowledgement escalation policy. These fields use the same bounded
+`state`, `numeric_state`, `zone`, `event`, and `named` trigger definitions as
+triggered reminders—never templates, arbitrary services, or condition trees.
+
+`deliver_when` makes the due time an eligibility boundary. State, numeric-state,
+and zone contexts that are already matching at that boundary deliver
+immediately (except duration conditions, which wait for a future qualifying
+transition). Event and named contexts always require a future event. Otherwise
+the occurrence is persisted as `waiting_for_context`; it is not considered
+overdue and is reconstructed after restart without polling or synthetic events.
+
+```yaml
+action: reminders.create
+data:
+  title: Take the parcel to the car
+  due: "2026-08-12 18:00:00"
+  deliver_when:
+    type: state
+    entity_id: person.conor
+    to: home
+```
+
+`complete_when` resolves the relevant occurrence when Home Assistant observes
+that the task happened. Before delivery this cancels that occurrence; while it
+is waiting for context it prevents delivery; and while it awaits Done it records
+an automatic acknowledgement with no impersonated Home Assistant user. Existing
+state at creation or restart is deliberately not treated as proof of completion;
+event and named completion always require a future event.
+
+```yaml
+action: reminders.create
+data:
+  title: Brush teeth
+  due: "2026-08-12 22:30:00"
+  acknowledgement_policy: required
+  complete_when:
+    type: event
+    event_type: personal_activity_event
+    event_data:
+      type: brushing_started
+```
+
+Escalation is opt-in and only runs while a successfully delivered occurrence
+still awaits acknowledgement. `max_attempts` counts escalation attempts, not
+the original delivery. Each attempt and provider result is retained on that
+bounded occurrence record. Done, automatic completion, snooze, edit, or delete
+invalidates the pending callback. Provider failure waits for the configured
+repeat delay, and each attempt resolves delivery targets and quiet hours again;
+only the existing `ignore` quiet-hours policy bypasses quiet hours.
+
+```yaml
+action: reminders.create
+data:
+  title: Check the back door
+  due: "2026-08-12 23:00:00"
+  acknowledgement_policy: required
+  escalation:
+    initial_delay_minutes: 30
+    repeat_minutes: 60
+    max_attempts: 3
+```
+
+Phone deliveries include **Done**, **Snooze 10 minutes**, and **Snooze 1 hour**
+actions when supported by the selected mobile-app notify provider. Done appears
+only when acknowledgement is required. The integration listens directly for
+mobile notification action events; no automation is needed. Each action uses a
+random persisted token scoped to the exact occurrence, contains no reminder or
+owner data, and is an idempotent no-op after that occurrence is resolved or
+deleted. Notify providers that ignore mobile action metadata continue to receive
+ordinary notifications.
+
+For recurring reminders, at most one scheduled/context-waiting occurrence is
+active. If later anchors pass while it waits, delivery or automatic completion
+advances from the anchored rule to the next future occurrence rather than
+creating a backlog. Snoozing a context-waiting occurrence moves its next
+eligibility check while retaining its original scheduled time in history.
+
+Hybrid examples include “tomorrow after 18:00, when I get home” by combining
+`due` and `deliver_when`, and “at 21:00 unless brushing is detected first” by
+combining `due` and `complete_when`. More complex external semantics can remain
+a bounded named trigger.
+
 ## Recurrence model
 
 All recurrence is anchored to **First reminder** in a named timezone. The anchor

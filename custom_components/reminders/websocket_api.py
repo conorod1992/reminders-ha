@@ -52,6 +52,11 @@ POLICY_SCHEMA: dict[Any, Any] = {
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
 }
+ADVANCED_SCHEMA: dict[Any, Any] = {
+    vol.Optional("deliver_when"): dict,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
+}
 RECURRENCE_SCHEMA: dict[Any, Any] = {
     vol.Required("first_reminder"): cv.string,
     vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
@@ -232,6 +237,7 @@ CREATE_SCHEMA: dict[Any, Any] = {
         tuple(QuietHoursPolicy)
     ),
     **POLICY_SCHEMA,
+    **ADVANCED_SCHEMA,
 }
 
 
@@ -250,6 +256,9 @@ async def websocket_create(
         delivery_policy=_policy_from_data(msg),
         acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        deliver_when=msg.get("deliver_when"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -267,6 +276,7 @@ CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     ),
     **RECURRENCE_SCHEMA,
     **POLICY_SCHEMA,
+    **ADVANCED_SCHEMA,
 }
 
 
@@ -285,6 +295,9 @@ async def websocket_create_recurring(
         delivery_policy=_policy_from_data(msg),
         acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        deliver_when=msg.get("deliver_when"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -313,6 +326,8 @@ CREATE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     vol.Optional("expires_at"): cv.string,
     vol.Optional("trigger_description"): cv.string,
     **POLICY_SCHEMA,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
 }
 
 
@@ -346,6 +361,8 @@ async def websocket_create_triggered(
             _parse_datetime(hass, msg["expires_at"]) if "expires_at" in msg else None
         ),
         trigger_description=msg.get("trigger_description"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -410,6 +427,9 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     ),
     vol.Optional("available_from"): vol.Any(None, cv.string),
     vol.Optional("expires_at"): vol.Any(None, cv.string),
+    vol.Optional("deliver_when"): vol.Any(None, dict),
+    vol.Optional("complete_when"): vol.Any(None, dict),
+    vol.Optional("escalation"): vol.Any(None, dict),
 }
 
 
@@ -444,6 +464,9 @@ async def websocket_update(
         "trigger_description",
         "fire_if_already_matching",
         "cooldown_seconds",
+        "deliver_when",
+        "complete_when",
+        "escalation",
     ):
         if key in msg:
             changes[key] = msg[key]

@@ -67,6 +67,11 @@ POLICY_FIELDS: dict[Any, Any] = {
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
 }
+ADVANCED_FIELDS: dict[Any, Any] = {
+    vol.Optional("deliver_when"): dict,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
+}
 
 CREATE_FIELDS: dict[Any, Any] = {
     vol.Required("title"): cv.string,
@@ -82,6 +87,7 @@ CREATE_FIELDS: dict[Any, Any] = {
     ),
 }
 CREATE_FIELDS.update(POLICY_FIELDS)
+CREATE_FIELDS.update(ADVANCED_FIELDS)
 CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
 CREATE_RECURRING_FIELDS: dict[Any, Any] = {
     vol.Required("title"): cv.string,
@@ -109,6 +115,7 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
     ),
 }
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
+CREATE_RECURRING_FIELDS.update(ADVANCED_FIELDS)
 CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
 CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
     vol.Required("title"): cv.string,
@@ -133,6 +140,8 @@ CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
     vol.Optional("available_from"): vol.Any(datetime, cv.string),
     vol.Optional("expires_at"): vol.Any(datetime, cv.string),
     vol.Optional("trigger_description"): cv.string,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
 }
 CREATE_TRIGGERED_FIELDS.update(POLICY_FIELDS)
 CREATE_TRIGGERED_SCHEMA = vol.Schema(CREATE_TRIGGERED_FIELDS)
@@ -180,6 +189,9 @@ UPDATE_FIELDS: dict[Any, Any] = {
     ),
     vol.Optional("available_from"): vol.Any(None, datetime, cv.string),
     vol.Optional("expires_at"): vol.Any(None, datetime, cv.string),
+    vol.Optional("deliver_when"): vol.Any(None, dict),
+    vol.Optional("complete_when"): vol.Any(None, dict),
+    vol.Optional("escalation"): vol.Any(None, dict),
 }
 UPDATE_FIELDS.update(POLICY_FIELDS)
 UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
@@ -266,6 +278,9 @@ def async_register_services(hass: HomeAssistant) -> None:
                 call.data["acknowledgement_policy"]
             ),
             quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
+            deliver_when=call.data.get("deliver_when"),
+            complete_when=call.data.get("complete_when"),
+            escalation=call.data.get("escalation"),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -289,6 +304,9 @@ def async_register_services(hass: HomeAssistant) -> None:
                 call.data["acknowledgement_policy"]
             ),
             quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
+            deliver_when=call.data.get("deliver_when"),
+            complete_when=call.data.get("complete_when"),
+            escalation=call.data.get("escalation"),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -322,6 +340,8 @@ def async_register_services(hass: HomeAssistant) -> None:
                 else None
             ),
             trigger_description=call.data.get("trigger_description"),
+            complete_when=call.data.get("complete_when"),
+            escalation=call.data.get("escalation"),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -386,6 +406,9 @@ def async_register_services(hass: HomeAssistant) -> None:
             "trigger_description",
             "fire_if_already_matching",
             "cooldown_seconds",
+            "deliver_when",
+            "complete_when",
+            "escalation",
         ):
             if key in call.data:
                 changes[key] = call.data[key]
