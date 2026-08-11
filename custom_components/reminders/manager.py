@@ -860,7 +860,7 @@ class ReminderManager:
         new_due = _normalize_due(now + duration)
         async with self._lock:
             current = self._reminders.get(reminder_id)
-            if current is None or current.status is ReminderStatus.DELIVERING:
+            if current is None:
                 return None
             target = _find_occurrence(current, occurrence_id)
             if target is None or target.status not in {
@@ -868,64 +868,104 @@ class ReminderManager:
                 OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
             }:
                 return None
+            if (
+                current.status is ReminderStatus.DELIVERING
+                and target.id == current.current_occurrence_id
+            ):
+                return None
             history = list(current.occurrence_history)
-            history = _replace_occurrence(
-                history,
-                target.updated(
-                    status=OccurrenceStatus.CANCELLED,
+            if (
+                current.recurrence is not None
+                and target.id != current.current_occurrence_id
+            ):
+                retry = target.updated(
+                    due=new_due,
+                    status=OccurrenceStatus.SCHEDULED,
+                    delivered_at=None,
+                    succeeded_channels=(),
+                    failed_channels=(),
+                    delivery_errors=(),
+                    suppressed_channels=(),
+                    acknowledgement_required=False,
+                    acknowledged_at=None,
+                    acknowledged_by=None,
+                    completion_source=None,
+                    completion_reason=None,
                     snoozed=True,
                     snoozed_at=now,
-                    completion_source="snooze",
-                    completion_reason="mobile_action",
+                    notification_action_token=secrets.token_urlsafe(24),
                     next_escalation_at=None,
-                ),
-            )
-            active = _find_occurrence(current, current.current_occurrence_id)
-            if (
-                active is not None
-                and active.id != target.id
-                and active.status
-                in {OccurrenceStatus.SCHEDULED, OccurrenceStatus.WAITING_FOR_CONTEXT}
-            ):
-                history = _replace_occurrence(
-                    history, active.updated(status=OccurrenceStatus.CANCELLED)
+                    redelivery_count=target.redelivery_count + 1,
                 )
-            snoozed = _new_occurrence(
-                new_due, scheduled_due=target.scheduled_due
-            ).updated(snoozed=True, snoozed_at=now)
-            history.append(snoozed)
-            updated = current.updated(
-                due=new_due,
-                scheduled_due=(
-                    target.scheduled_due
-                    if current.recurrence is not None
-                    else current.scheduled_due
-                ),
-                current_occurrence_number=(
-                    occurrence_number(current.recurrence, target.scheduled_due)
-                    if current.recurrence is not None
-                    else current.current_occurrence_number
-                ),
-                status=(
-                    ReminderStatus.WAITING_FOR_TRIGGER
-                    if current.activation_type is ActivationType.TRIGGER
-                    else ReminderStatus.PENDING
-                ),
-                current_occurrence_id=snoozed.id,
-                occurrence_history=tuple(history),
-                snoozed_until=(
-                    new_due
-                    if current.activation_type is ActivationType.TRIGGER
-                    else None
-                ),
-                delivered_at=None,
-                delivery_errors=(),
-                updated_at=now,
-            )
-            candidate = dict(self._reminders)
-            candidate[reminder_id] = updated
-            await self._async_persist_state(candidate, self._users)
-            self._reschedule(force=True)
+                history = _replace_occurrence(history, retry)
+                updated = current.updated(
+                    occurrence_history=tuple(history), updated_at=now
+                )
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = updated
+                await self._async_persist_state(candidate, self._users)
+                self._reschedule(force=True)
+            else:
+                history = _replace_occurrence(
+                    history,
+                    target.updated(
+                        status=OccurrenceStatus.CANCELLED,
+                        snoozed=True,
+                        snoozed_at=now,
+                        completion_source="snooze",
+                        completion_reason="mobile_action",
+                        next_escalation_at=None,
+                    ),
+                )
+                active = _find_occurrence(current, current.current_occurrence_id)
+                if (
+                    active is not None
+                    and active.id != target.id
+                    and active.status
+                    in {
+                        OccurrenceStatus.SCHEDULED,
+                        OccurrenceStatus.WAITING_FOR_CONTEXT,
+                    }
+                ):
+                    history = _replace_occurrence(
+                        history, active.updated(status=OccurrenceStatus.CANCELLED)
+                    )
+                snoozed = _new_occurrence(
+                    new_due, scheduled_due=target.scheduled_due
+                ).updated(snoozed=True, snoozed_at=now)
+                history.append(snoozed)
+                updated = current.updated(
+                    due=new_due,
+                    scheduled_due=(
+                        target.scheduled_due
+                        if current.recurrence is not None
+                        else current.scheduled_due
+                    ),
+                    current_occurrence_number=(
+                        occurrence_number(current.recurrence, target.scheduled_due)
+                        if current.recurrence is not None
+                        else current.current_occurrence_number
+                    ),
+                    status=(
+                        ReminderStatus.WAITING_FOR_TRIGGER
+                        if current.activation_type is ActivationType.TRIGGER
+                        else ReminderStatus.PENDING
+                    ),
+                    current_occurrence_id=snoozed.id,
+                    occurrence_history=tuple(history),
+                    snoozed_until=(
+                        new_due
+                        if current.activation_type is ActivationType.TRIGGER
+                        else None
+                    ),
+                    delivered_at=None,
+                    delivery_errors=(),
+                    updated_at=now,
+                )
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = updated
+                await self._async_persist_state(candidate, self._users)
+                self._reschedule(force=True)
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({current.user_id})
         return updated
@@ -1530,6 +1570,7 @@ class ReminderManager:
         effective_now = _normalize_due(effective_now)
         await self._async_process_trigger_temporal(effective_now)
         await self._async_process_escalations(effective_now)
+        await self._async_process_snoozed_retries(effective_now)
         due: list[Reminder] = []
         try:
             async with self._lock:
@@ -1622,6 +1663,131 @@ class ReminderManager:
         finally:
             async with self._lock:
                 self._reschedule(force=True)
+
+    async def _async_process_snoozed_retries(self, effective_now: datetime) -> None:
+        """Claim due retries without replacing a recurring series occurrence."""
+        claims: list[tuple[str, str]] = []
+        async with self._lock:
+            candidate = dict(self._reminders)
+            for reminder in self._reminders.values():
+                if reminder.recurrence is None:
+                    continue
+                history = list(reminder.occurrence_history)
+                changed = False
+                for occurrence in reminder.occurrence_history:
+                    if (
+                        occurrence.id == reminder.current_occurrence_id
+                        or not occurrence.snoozed
+                        or occurrence.status is not OccurrenceStatus.SCHEDULED
+                        or occurrence.due > effective_now
+                    ):
+                        continue
+                    history = _replace_occurrence(
+                        history,
+                        occurrence.updated(status=OccurrenceStatus.DELIVERING),
+                    )
+                    claims.append((reminder.id, occurrence.id))
+                    changed = True
+                if changed:
+                    candidate[reminder.id] = reminder.updated(
+                        occurrence_history=tuple(history), updated_at=effective_now
+                    )
+            if claims:
+                await self._async_persist_state(candidate, self._users)
+        for reminder_id, occurrence_id in claims:
+            await self._async_deliver_snoozed_retry(
+                reminder_id, occurrence_id, effective_now
+            )
+
+    async def _async_deliver_snoozed_retry(
+        self, reminder_id: str, occurrence_id: str, effective_now: datetime
+    ) -> None:
+        """Deliver one durably claimed retry while leaving the series anchor alone."""
+        async with self._lock:
+            claimed = self._reminders.get(reminder_id)
+            if claimed is None:
+                return
+            occurrence = _find_occurrence(claimed, occurrence_id)
+            if (
+                occurrence is None
+                or occurrence.status is not OccurrenceStatus.DELIVERING
+            ):
+                return
+            preferences = self._users.get(claimed.user_id, UserPreferences())
+            policy = claimed.delivery_policy or preferences.default_delivery_policy
+            delivery_policy, suppressed = self._delivery_plan(
+                claimed, policy, preferences, effective_now
+            )
+            ack_required = (
+                claimed.acknowledgement_policy is AcknowledgementPolicy.REQUIRED
+                or (
+                    claimed.acknowledgement_policy is AcknowledgementPolicy.DEFAULT
+                    and preferences.require_acknowledgement
+                )
+            )
+            token = occurrence.notification_action_token
+            if token is None:
+                token = secrets.token_urlsafe(24)
+                occurrence = occurrence.updated(notification_action_token=token)
+                history = _replace_occurrence(
+                    list(claimed.occurrence_history), occurrence
+                )
+                claimed = claimed.updated(occurrence_history=tuple(history))
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = claimed
+                await self._async_persist_state(candidate, self._users)
+            delivery_reminder = claimed.updated(
+                notification_actions=_notification_actions(token, ack_required)
+            )
+        result = await self._dispatcher.async_deliver(
+            delivery_reminder, delivery_policy
+        )
+        async with self._lock:
+            current = self._reminders.get(reminder_id)
+            if current is None:
+                return
+            occurrence = _find_occurrence(current, occurrence_id)
+            if (
+                occurrence is None
+                or occurrence.status is not OccurrenceStatus.DELIVERING
+            ):
+                return
+            status = (
+                OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                if result.succeeded and ack_required
+                else (
+                    OccurrenceStatus.DELIVERED
+                    if result.succeeded
+                    else OccurrenceStatus.FAILED
+                )
+            )
+            finished = occurrence.updated(
+                status=status,
+                delivered_at=effective_now if result.succeeded else None,
+                succeeded_channels=result.succeeded,
+                failed_channels=result.failed_channels,
+                delivery_errors=result.errors,
+                suppressed_channels=suppressed,
+                acknowledgement_required=ack_required,
+                next_escalation_at=(
+                    effective_now
+                    + timedelta(minutes=current.escalation.initial_delay_minutes)
+                    if result.succeeded and ack_required and current.escalation
+                    else None
+                ),
+            )
+            history = _replace_occurrence(list(current.occurrence_history), finished)
+            updated = _prune_history(
+                current.updated(
+                    occurrence_history=tuple(history), updated_at=effective_now
+                ),
+                preferences,
+                effective_now,
+            )
+            candidate = dict(self._reminders)
+            candidate[reminder_id] = updated
+            await self._async_persist_state(candidate, self._users)
+        self._notify_changed({claimed.user_id})
 
     async def _async_process_escalations(self, effective_now: datetime) -> None:
         """Claim due escalation attempts durably and redeliver without polling."""
@@ -1950,7 +2116,10 @@ class ReminderManager:
                     channels.append(fallback)
         return (
             DeliveryPolicy(
-                tuple(channels), policy.notify_targets, policy.voice_targets
+                channels=tuple(channels),
+                notify_targets=policy.notify_targets,
+                mobile_app_services=policy.mobile_app_services,
+                voice_targets=policy.voice_targets,
             ),
             suppressed,
         )
@@ -1969,6 +2138,15 @@ class ReminderManager:
                 if occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
                 and occurrence.next_escalation_at is not None
                 and occurrence.next_escalation_at > now
+            )
+            candidates.extend(
+                occurrence.due
+                for occurrence in reminder.occurrence_history
+                if reminder.recurrence is not None
+                and occurrence.id != reminder.current_occurrence_id
+                and occurrence.snoozed
+                and occurrence.status is OccurrenceStatus.SCHEDULED
+                and occurrence.due > now
             )
             if (
                 reminder.activation_type is ActivationType.TIME
@@ -2135,10 +2313,21 @@ def _validate_policy(policy: DeliveryPolicy | None) -> None:
     if any(not target.startswith("notify.") for target in policy.notify_targets):
         raise ReminderValidationError("Phone targets must be notify entities")
     if any(
+        not service.startswith("notify.mobile_app_") or service.count(".") != 1
+        for service in policy.mobile_app_services
+    ):
+        raise ReminderValidationError(
+            "Actionable phone targets must be registered notify.mobile_app services"
+        )
+    if any(
         not target.startswith("assist_satellite.") for target in policy.voice_targets
     ):
         raise ReminderValidationError("Voice targets must be Assist satellites")
-    if "phone" in policy.channels and not policy.notify_targets:
+    if (
+        "phone" in policy.channels
+        and not policy.notify_targets
+        and not policy.mobile_app_services
+    ):
         raise ReminderValidationError("Phone delivery needs at least one notify target")
     if "voice" in policy.channels and not policy.voice_targets:
         raise ReminderValidationError("Voice delivery needs at least one satellite")
@@ -2284,6 +2473,10 @@ def _prune_history(
             OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
             OccurrenceStatus.WAITING_FOR_CONTEXT,
         }
+        or (
+            item.snoozed
+            and item.status in {OccurrenceStatus.SCHEDULED, OccurrenceStatus.DELIVERING}
+        )
     }
     retained = [
         item

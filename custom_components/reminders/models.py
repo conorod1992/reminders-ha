@@ -141,6 +141,7 @@ class DeliveryPolicy:
 
     channels: tuple[str, ...]
     notify_targets: tuple[str, ...] = ()
+    mobile_app_services: tuple[str, ...] = ()
     voice_targets: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,6 +149,7 @@ class DeliveryPolicy:
         return {
             "channels": list(self.channels),
             "notify_targets": list(self.notify_targets),
+            "mobile_app_services": list(self.mobile_app_services),
             "voice_targets": list(self.voice_targets),
         }
 
@@ -158,6 +160,9 @@ class DeliveryPolicy:
             channels=tuple(str(value) for value in data.get("channels", [])),
             notify_targets=tuple(
                 str(value) for value in data.get("notify_targets", [])
+            ),
+            mobile_app_services=tuple(
+                str(value) for value in data.get("mobile_app_services", [])
             ),
             voice_targets=tuple(str(value) for value in data.get("voice_targets", [])),
         )
@@ -250,6 +255,7 @@ class Occurrence:
     next_escalation_at: datetime | None = None
     escalation_attempt_count: int = 0
     escalation_history: tuple[EscalationAttempt, ...] = ()
+    redelivery_count: int = 0
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable occurrence."""
@@ -300,6 +306,7 @@ class Occurrence:
             ),
             "escalation_attempt_count": self.escalation_attempt_count,
             "escalation_history": [item.to_dict() for item in self.escalation_history],
+            "redelivery_count": self.redelivery_count,
         }
 
     @classmethod
@@ -369,6 +376,7 @@ class Occurrence:
                 EscalationAttempt.from_dict(item)
                 for item in data.get("escalation_history", [])
             ),
+            redelivery_count=int(data.get("redelivery_count", 0)),
         )
 
 

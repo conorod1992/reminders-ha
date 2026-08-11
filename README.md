@@ -163,7 +163,8 @@ channels and selected targets.
 Supported channels are:
 
 - `persistent_notification`: built-in Home Assistant notification
-- `phone`: `notify.send_message` to selected notify entities
+- `phone`: ordinary `notify.send_message` to selected notify entities, plus
+  optional explicit `notify.mobile_app_*` services for Companion App actions
 - `voice`: `assist_satellite.announce` to selected Assist satellites
 
 Quiet hours are per user and follow Home Assistant's configured timezone. The
@@ -230,6 +231,13 @@ invalidates the pending callback. Provider failure waits for the configured
 repeat delay, and each attempt resolves delivery targets and quiet hours again;
 only the existing `ignore` quiet-hours policy bypasses quiet hours.
 
+Each escalation attempt is durably claimed before its provider call. Its attempt
+number is therefore at most once across interruption: after restart, a claimed
+attempt is not called again. A crash after the claim write but before (or during)
+the provider call can leave that attempt with an unknown result; the following
+configured attempt remains eligible. This deliberately avoids duplicating the
+same escalation call after an uncertain external side effect.
+
 ```yaml
 action: reminders.create
 data:
@@ -242,20 +250,25 @@ data:
     max_attempts: 3
 ```
 
-Phone deliveries include **Done**, **Snooze 10 minutes**, and **Snooze 1 hour**
-actions when supported by the selected mobile-app notify provider. Done appears
-only when acknowledgement is required. The integration listens directly for
-mobile notification action events; no automation is needed. Each action uses a
-random persisted token scoped to the exact occurrence, contains no reminder or
-owner data, and is an idempotent no-op after that occurrence is resolved or
-deleted. Notify providers that ignore mobile action metadata continue to receive
-ordinary notifications.
+Explicitly selected Companion App `notify.mobile_app_*` services receive
+**Done**, **Snooze 10 minutes**, and **Snooze 1 hour** actions. Done appears only
+when acknowledgement is required. Generic notify entities always receive only
+the standard title and message supported by the Notify entity API. If a selected
+Companion App service rejects the action payload, delivery retries that same
+service once as an ordinary notification without buttons. The integration
+listens directly for mobile notification action events; no automation is needed.
+Each action uses a random persisted token scoped to the exact occurrence,
+contains no reminder or owner data, and is an idempotent no-op after that
+occurrence is resolved or deleted.
 
 For recurring reminders, at most one scheduled/context-waiting occurrence is
 active. If later anchors pass while it waits, delivery or automatic completion
 advances from the anchored rule to the next future occurrence rather than
 creating a backlog. Snoozing a context-waiting occurrence moves its next
 eligibility check while retaining its original scheduled time in history.
+Snoozing an already delivered recurring occurrence does not replace the next
+anchored occurrence: the next occurrence remains current and unchanged while
+the older occurrence is scheduled as an independent, restart-safe retry.
 
 Hybrid examples include “tomorrow after 18:00, when I get home” by combining
 `due` and `deliver_when`, and “at 21:00 unless brushing is detected first” by
@@ -598,15 +611,14 @@ user IDs, targets, and history content are excluded.
 
 ## Deliberate limitations
 
-- The Done control is currently in the Reminders panel and actions/API; adding
-  provider-specific interactive buttons to every phone platform would require
-  platform-specific payloads and callback plumbing.
+- Notification actions require an explicitly selected Home Assistant Companion
+  App `notify.mobile_app_*` service; generic notify entities remain ordinary.
 - Conversation tools are available only to agents whose configuration opts into
   the Reminders LLM API, and authenticated behavior depends on the agent passing
   Home Assistant request context.
 - Raw RRULE import/export is not the primary UI and is deferred.
-- Automatic delivery retry/escalation is not included; failures remain visible
-  in bounded history.
+- Failed initial deliveries remain visible without an automatic retry loop;
+  acknowledgement escalation is an explicit per-reminder policy.
 - Quiet hours use Home Assistant's configured timezone because Home Assistant
   does not currently expose an independent timezone on each user record.
 - Home Assistant 2026.7's generic service selector schema rejects `user`, so

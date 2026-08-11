@@ -402,3 +402,104 @@ async def test_recurring_automatic_completion_acknowledges_delivered_occurrence_
     )
     assert completed_old.status is OccurrenceStatus.ACKNOWLEDGED
     assert completed_old.completion_source == "automatic"
+
+
+@pytest.mark.parametrize(
+    ("snooze_title", "expected_delay"),
+    [
+        ("Snooze 10 minutes", timedelta(minutes=10)),
+        ("Snooze 1 hour", timedelta(hours=1)),
+    ],
+)
+async def test_recurring_mobile_snooze_keeps_next_occurrence_and_retries_exactly(
+    fake_store: FakeStore,
+    no_runtime_listeners: None,
+    snooze_title: str,
+    expected_delay: timedelta,
+) -> None:
+    dispatcher = FakeDispatcher()
+    manager = await _manager(fake_store, dispatcher)
+    anchor = (datetime.now(UTC) + timedelta(minutes=1)).replace(tzinfo=None)
+    reminder = await manager.async_create_recurring(
+        user_id="u1",
+        title="Recurring action",
+        recurrence=RecurrenceRule(RecurrenceFrequency.DAILY, 1, "UTC", anchor),
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        escalation=EscalationPolicy(5, 5, 2),
+    )
+    await manager._async_process_due(reminder.due)  # type: ignore[arg-type]
+    advanced = await manager.async_get(reminder.id)
+    next_snapshot = (
+        advanced.current_occurrence_id,
+        advanced.due,
+        advanced.scheduled_due,
+        advanced.status,
+    )
+    original_payload = dispatcher.calls[-1][0]
+    snooze_action = next(
+        action["action"]
+        for action in original_payload.notification_actions
+        if action["title"] == snooze_title
+    )
+
+    before_snooze = datetime.now(UTC)
+    await manager._async_handle_mobile_action(snooze_action)
+    snoozed = await manager.async_get(reminder.id)
+    assert (
+        snoozed.current_occurrence_id,
+        snoozed.due,
+        snoozed.scheduled_due,
+        snoozed.status,
+    ) == next_snapshot
+    retry = next(
+        occurrence
+        for occurrence in snoozed.occurrence_history
+        if occurrence.id != snoozed.current_occurrence_id
+        and occurrence.status is OccurrenceStatus.SCHEDULED
+    )
+    assert before_snooze + expected_delay <= retry.due
+    assert retry.due <= datetime.now(UTC) + expected_delay + timedelta(seconds=1)
+    assert retry.redelivery_count == 1
+
+    # The first notification token was replaced, so a repeated/stale action is inert.
+    await manager._async_handle_mobile_action(snooze_action)
+    assert (await manager.async_get(reminder.id)) == snoozed
+
+    restarted_dispatcher = FakeDispatcher()
+    restarted = await _manager(fake_store, restarted_dispatcher)
+    restored = await restarted.async_get(reminder.id)
+    assert restored.current_occurrence_id == next_snapshot[0]
+    assert not restarted_dispatcher.calls
+
+    await restarted._async_process_due(retry.due)
+    redelivered = await restarted.async_get(reminder.id)
+    assert (
+        redelivered.current_occurrence_id,
+        redelivered.due,
+        redelivered.scheduled_due,
+        redelivered.status,
+    ) == next_snapshot
+    retried = next(
+        occurrence
+        for occurrence in redelivered.occurrence_history
+        if occurrence.id == retry.id
+    )
+    assert retried.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+    assert retried.next_escalation_at is not None
+    assert len(restarted_dispatcher.calls) == 1
+
+    done = next(
+        action["action"]
+        for action in restarted_dispatcher.calls[-1][0].notification_actions
+        if action["title"] == "Done"
+    )
+    await restarted._async_handle_mobile_action(done)
+    finished = await restarted.async_get(reminder.id)
+    retried = next(
+        occurrence
+        for occurrence in finished.occurrence_history
+        if occurrence.id == retry.id
+    )
+    assert retried.status is OccurrenceStatus.ACKNOWLEDGED
+    assert retried.next_escalation_at is None
+    assert finished.current_occurrence_id == next_snapshot[0]

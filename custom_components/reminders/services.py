@@ -65,6 +65,7 @@ from .triggers.models import TriggerDefinition, TriggerValidationError
 POLICY_FIELDS: dict[Any, Any] = {
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
 }
 ADVANCED_FIELDS: dict[Any, Any] = {
@@ -223,6 +224,9 @@ PREFERENCES_SCHEMA = vol.Schema(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -254,6 +258,9 @@ TEST_DELIVERY_FIELDS: dict[Any, Any] = {
     vol.Optional("user_id"): cv.string,
     vol.Required("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services", default=[]): vol.All(
+        cv.ensure_list, [cv.string]
+    ),
     vol.Optional("voice_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
 }
 TEST_DELIVERY_SCHEMA = vol.Schema(TEST_DELIVERY_FIELDS)
@@ -485,6 +492,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         policy = DeliveryPolicy(
             channels=tuple(call.data["channels"]),
             notify_targets=tuple(call.data["notify_targets"]),
+            mobile_app_services=tuple(call.data["mobile_app_services"]),
             voice_targets=tuple(call.data["voice_targets"]),
         )
         preferences = await manager.async_set_user_preferences(
@@ -523,9 +531,10 @@ def async_register_services(hass: HomeAssistant) -> None:
         manager = _manager(hass)
         user_id = await _resolve_user(hass, call, call.data.get("user_id"))
         policy = DeliveryPolicy(
-            tuple(call.data["channels"]),
-            tuple(call.data.get("notify_targets", ())),
-            tuple(call.data.get("voice_targets", ())),
+            channels=tuple(call.data["channels"]),
+            notify_targets=tuple(call.data.get("notify_targets", ())),
+            mobile_app_services=tuple(call.data.get("mobile_app_services", ())),
+            voice_targets=tuple(call.data.get("voice_targets", ())),
         )
         result = await manager.async_test_delivery(user_id=user_id, policy=policy)
         return {
@@ -654,6 +663,7 @@ def _policy_from_data(data: Any) -> DeliveryPolicy | None:
     return DeliveryPolicy(
         channels=channels,
         notify_targets=tuple(data.get("notify_targets", ())),
+        mobile_app_services=tuple(data.get("mobile_app_services", ())),
         voice_targets=tuple(data.get("voice_targets", ())),
     )
 

@@ -19,6 +19,7 @@
         "due": {"description": "When the reminder is due.", "name": "Due"},
         "message": {"description": "Optional longer reminder text.", "name": "Message"},
         "notify_targets": {"description": "Notify entities used by the phone channel.", "name": "Notify targets"},
+        "mobile_app_services": {"description": "Explicit notify.mobile_app services for actionable phone notifications.", "name": "Companion App services"},
         "title": {"description": "Short reminder title.", "name": "Title"},
         "user_id": {"description": "Recipient; defaults to the authenticated user.", "name": "User"},
         "voice_targets": {"description": "Assist satellites used by the voice channel.", "name": "Voice targets"}
@@ -36,6 +37,7 @@
         "interval": {"description": "Repeat every this many days, active weeks, or active months.", "name": "Every"},
         "message": {"description": "Optional longer reminder text.", "name": "Message"},
         "notify_targets": {"description": "Notify entities used by the phone channel.", "name": "Notify targets"},
+        "mobile_app_services": {"description": "Explicit notify.mobile_app services for actionable phone notifications.", "name": "Companion App services"},
         "timezone": {"description": "IANA timezone; defaults to Home Assistant's timezone.", "name": "Timezone"},
         "title": {"description": "Short reminder title.", "name": "Title"},
         "user_id": {"description": "Recipient; defaults to the authenticated user.", "name": "User"},
@@ -94,6 +96,7 @@
       "fields": {
         "channels": {"description": "Default logical channels.", "name": "Channels"},
         "notify_targets": {"description": "Notify entities for phone delivery.", "name": "Notify targets"},
+        "mobile_app_services": {"description": "Explicit Companion App notify services for actions.", "name": "Companion App services"},
         "user_id": {"description": "User; defaults to the authenticated user.", "name": "User"},
         "voice_targets": {"description": "Assist satellites for voice delivery.", "name": "Voice targets"}
       },
@@ -104,6 +107,7 @@
       "fields": {
         "channels": {"description": "Channels to test.", "name": "Channels"},
         "notify_targets": {"description": "Phone notify entities to test.", "name": "Phones"},
+        "mobile_app_services": {"description": "Companion App notify services to test.", "name": "Companion App services"},
         "user_id": {"description": "User; defaults to the authenticated user.", "name": "User"},
         "voice_targets": {"description": "Assist satellites to test.", "name": "Voice devices"}
       },
@@ -130,6 +134,7 @@
         "interval": {"description": "New recurrence interval.", "name": "Every"},
         "message": {"description": "New optional message.", "name": "Message"},
         "notify_targets": {"description": "Notify entities used by the phone channel.", "name": "Notify targets"},
+        "mobile_app_services": {"description": "Explicit notify.mobile_app services for actionable phone notifications.", "name": "Companion App services"},
         "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"},
         "title": {"description": "New title.", "name": "Title"},
         "timezone": {"description": "New recurrence timezone.", "name": "Timezone"},

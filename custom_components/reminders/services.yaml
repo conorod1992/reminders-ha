@@ -60,6 +60,13 @@ create:
           multiple: true
           filter:
             domain: notify
+    mobile_app_services: &mobile_app_services
+      name: Companion App services
+      description: Explicit notify.mobile_app services that support actionable notifications.
+      example: ["notify.mobile_app_my_phone"]
+      selector:
+        text:
+          multiple: true
     voice_targets: &voice_targets
       name: Voice devices
       description: Assist satellites used for voice announcements.
@@ -224,6 +231,7 @@ create_recurring:
     delivery_mode: *delivery_mode
     channels: *channels
     notify_targets: *notify_targets
+    mobile_app_services: *mobile_app_services
     voice_targets: *voice_targets
     acknowledgement_policy: *ack_policy
     quiet_hours_policy: *quiet_policy
@@ -285,6 +293,7 @@ update:
     delivery_mode: *delivery_mode
     channels: *channels
     notify_targets: *notify_targets
+    mobile_app_services: *mobile_app_services
     voice_targets: *voice_targets
     acknowledgement_policy: *ack_policy
     quiet_hours_policy: *quiet_policy
@@ -343,6 +352,7 @@ set_user_preferences:
     user_id: *user
     channels: *channels
     notify_targets: *notify_targets
+    mobile_app_services: *mobile_app_services
     voice_targets: *voice_targets
     require_acknowledgement:
       name: Require acknowledgement by default
@@ -418,6 +428,7 @@ test_delivery:
     user_id: *user
     channels: *channels
     notify_targets: *notify_targets
+    mobile_app_services: *mobile_app_services
     voice_targets: *voice_targets
 
 create_triggered:
@@ -476,6 +487,7 @@ create_triggered:
     delivery_mode: *delivery_mode
     channels: *channels
     notify_targets: *notify_targets
+    mobile_app_services: *mobile_app_services
     voice_targets: *voice_targets
     acknowledgement_policy: *ack_policy
     quiet_hours_policy: *quiet_policy

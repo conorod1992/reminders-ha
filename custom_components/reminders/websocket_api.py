@@ -50,6 +50,7 @@ POLICY_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
 }
 ADVANCED_SCHEMA: dict[Any, Any] = {
@@ -413,6 +414,7 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
     vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
     vol.Optional("trigger"): dict,
@@ -481,7 +483,13 @@ async def websocket_update(
             changes[key] = (
                 _parse_datetime(hass, msg[key]) if msg[key] is not None else None
             )
-    policy_keys = {"delivery_mode", "channels", "notify_targets", "voice_targets"}
+    policy_keys = {
+        "delivery_mode",
+        "channels",
+        "notify_targets",
+        "mobile_app_services",
+        "voice_targets",
+    }
     if policy_keys.intersection(msg):
         changes["delivery_policy"] = _policy_from_data(msg)
     recurrence_keys = {
@@ -688,6 +696,9 @@ async def websocket_get_preferences(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -719,9 +730,10 @@ async def websocket_set_preferences(
     preferences = await _manager(hass).async_set_user_preferences(
         user_id,
         DeliveryPolicy(
-            tuple(msg["channels"]),
-            tuple(msg["notify_targets"]),
-            tuple(msg["voice_targets"]),
+            channels=tuple(msg["channels"]),
+            notify_targets=tuple(msg["notify_targets"]),
+            mobile_app_services=tuple(msg["mobile_app_services"]),
+            voice_targets=tuple(msg["voice_targets"]),
         ),
         **{
             key: msg[key]
@@ -752,6 +764,9 @@ async def websocket_set_preferences(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -766,9 +781,10 @@ async def websocket_test_delivery(
     result = await _manager(hass).async_test_delivery(
         user_id=user_id,
         policy=DeliveryPolicy(
-            tuple(msg["channels"]),
-            tuple(msg["notify_targets"]),
-            tuple(msg["voice_targets"]),
+            channels=tuple(msg["channels"]),
+            notify_targets=tuple(msg["notify_targets"]),
+            mobile_app_services=tuple(msg["mobile_app_services"]),
+            voice_targets=tuple(msg["voice_targets"]),
         ),
     )
     connection.send_result(

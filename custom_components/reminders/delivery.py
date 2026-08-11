@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 
 from .const import (
     CHANNEL_PERSISTENT_NOTIFICATION,
@@ -49,7 +50,7 @@ class PersistentNotificationProvider:
 
 
 class NotifyProvider:
-    """Deliver through selected modern notify entities."""
+    """Deliver through generic entities and explicit Companion App services."""
 
     channel = CHANNEL_PHONE
 
@@ -57,23 +58,66 @@ class NotifyProvider:
         self._hass = hass
 
     async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
-        if not policy.notify_targets:
+        if not policy.notify_targets and not policy.mobile_app_services:
             raise ValueError("Phone delivery has no configured notify targets")
-        service_data: dict[str, Any] = {
+        ordinary_data: dict[str, Any] = {
             "title": reminder.title,
             "message": reminder.message or reminder.title,
         }
-        if reminder.notification_actions:
-            # Mobile-app notify providers consume this metadata; other notify
-            # entities safely ignore provider-specific action payloads.
-            service_data["data"] = {"actions": list(reminder.notification_actions)}
-        await self._hass.services.async_call(
-            "notify",
-            "send_message",
-            service_data,
-            target={"entity_id": list(policy.notify_targets)},
-            blocking=True,
-        )
+        succeeded = 0
+        errors: list[str] = []
+        if policy.notify_targets:
+            try:
+                # The generic NotifyEntity API supports message and title only.
+                await self._hass.services.async_call(
+                    "notify",
+                    "send_message",
+                    ordinary_data,
+                    target={"entity_id": list(policy.notify_targets)},
+                    blocking=True,
+                )
+            except Exception as err:
+                errors.append(f"generic notify: {type(err).__name__}")
+            else:
+                succeeded += len(policy.notify_targets)
+        for action_name in policy.mobile_app_services:
+            _domain, service = action_name.split(".", 1)
+            actionable_data = dict(ordinary_data)
+            if reminder.notification_actions:
+                actionable_data["data"] = {
+                    "actions": list(reminder.notification_actions)
+                }
+            try:
+                await self._hass.services.async_call(
+                    "notify", service, actionable_data, blocking=True
+                )
+            except ServiceValidationError as action_err:
+                if not reminder.notification_actions:
+                    errors.append(f"{action_name}: {type(action_err).__name__}")
+                    continue
+                # A registered target may stop supporting action metadata. Keep
+                # the reminder deliverable by retrying once without buttons.
+                try:
+                    await self._hass.services.async_call(
+                        "notify", service, ordinary_data, blocking=True
+                    )
+                except Exception as fallback_err:
+                    errors.append(
+                        f"{action_name}: {type(action_err).__name__}/"
+                        f"{type(fallback_err).__name__}"
+                    )
+                    continue
+            except Exception as err:
+                errors.append(f"{action_name}: {type(err).__name__}")
+                continue
+            succeeded += 1
+        if not succeeded:
+            raise RuntimeError("; ".join(errors) or "Phone delivery failed")
+        if errors:
+            _LOGGER.warning(
+                "Some phone targets failed after another target succeeded: %s",
+                "; ".join(errors),
+            )
 
 
 class VoiceProvider:
