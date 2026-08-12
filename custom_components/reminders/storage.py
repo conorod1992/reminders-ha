@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
-from .models import Reminder, ReminderStatus, UserPreferences
+from .models import OccurrenceStatus, Reminder, ReminderStatus, UserPreferences
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,6 +120,41 @@ class ReminderStore(Store[StoredData]):
                     raw.setdefault("snoozed_until", None)
                     raw.setdefault("immediate_evaluated", False)
                     raw.setdefault("cooldown_skip_count", 0)
+            if old_minor_version < 5:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("deliver_when", None)
+                    raw.setdefault("deliver_when_summary", None)
+                    raw.setdefault("complete_when", None)
+                    raw.setdefault("complete_when_summary", None)
+                    raw.setdefault("escalation", None)
+                    for occurrence in raw.get("occurrence_history", []):
+                        if not isinstance(occurrence, dict):
+                            continue
+                        occurrence.setdefault("completion_source", None)
+                        occurrence.setdefault("completion_reason", None)
+                        occurrence.setdefault("context_eligible_at", None)
+                        occurrence.setdefault("notification_action_token", None)
+                        occurrence.setdefault("next_escalation_at", None)
+                        occurrence.setdefault("escalation_attempt_count", 0)
+                        occurrence.setdefault("escalation_history", [])
+            if old_minor_version < 6:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    policy = raw.get("delivery_policy")
+                    if isinstance(policy, dict):
+                        policy.setdefault("mobile_app_services", [])
+                    for occurrence in raw.get("occurrence_history", []):
+                        if isinstance(occurrence, dict):
+                            occurrence.setdefault("redelivery_count", 0)
+                for raw in normalized["users"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    policy = raw.get("default_delivery_policy")
+                    if isinstance(policy, dict):
+                        policy.setdefault("mobile_app_services", [])
             return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."
@@ -151,6 +186,14 @@ def deserialize_storage(
                         else ReminderStatus.PENDING
                     )
                 )
+            recovered_history = tuple(
+                occurrence.updated(status=OccurrenceStatus.SCHEDULED)
+                if occurrence.status is OccurrenceStatus.DELIVERING
+                else occurrence
+                for occurrence in reminder.occurrence_history
+            )
+            if recovered_history != reminder.occurrence_history:
+                reminder = reminder.updated(occurrence_history=recovered_history)
             if reminder.recurrence and reminder.scheduled_due is None:
                 reminder = reminder.updated(scheduled_due=reminder.due)
             reminders[reminder_id] = reminder

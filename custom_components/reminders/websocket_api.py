@@ -50,7 +50,13 @@ POLICY_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+}
+ADVANCED_SCHEMA: dict[Any, Any] = {
+    vol.Optional("deliver_when"): dict,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
 }
 RECURRENCE_SCHEMA: dict[Any, Any] = {
     vol.Required("first_reminder"): cv.string,
@@ -232,6 +238,7 @@ CREATE_SCHEMA: dict[Any, Any] = {
         tuple(QuietHoursPolicy)
     ),
     **POLICY_SCHEMA,
+    **ADVANCED_SCHEMA,
 }
 
 
@@ -250,6 +257,9 @@ async def websocket_create(
         delivery_policy=_policy_from_data(msg),
         acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        deliver_when=msg.get("deliver_when"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -267,6 +277,7 @@ CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     ),
     **RECURRENCE_SCHEMA,
     **POLICY_SCHEMA,
+    **ADVANCED_SCHEMA,
 }
 
 
@@ -285,6 +296,9 @@ async def websocket_create_recurring(
         delivery_policy=_policy_from_data(msg),
         acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        deliver_when=msg.get("deliver_when"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -313,6 +327,8 @@ CREATE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     vol.Optional("expires_at"): cv.string,
     vol.Optional("trigger_description"): cv.string,
     **POLICY_SCHEMA,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
 }
 
 
@@ -346,6 +362,8 @@ async def websocket_create_triggered(
             _parse_datetime(hass, msg["expires_at"]) if "expires_at" in msg else None
         ),
         trigger_description=msg.get("trigger_description"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -396,6 +414,7 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
     vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
     vol.Optional("trigger"): dict,
@@ -410,6 +429,9 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     ),
     vol.Optional("available_from"): vol.Any(None, cv.string),
     vol.Optional("expires_at"): vol.Any(None, cv.string),
+    vol.Optional("deliver_when"): vol.Any(None, dict),
+    vol.Optional("complete_when"): vol.Any(None, dict),
+    vol.Optional("escalation"): vol.Any(None, dict),
 }
 
 
@@ -444,6 +466,9 @@ async def websocket_update(
         "trigger_description",
         "fire_if_already_matching",
         "cooldown_seconds",
+        "deliver_when",
+        "complete_when",
+        "escalation",
     ):
         if key in msg:
             changes[key] = msg[key]
@@ -458,7 +483,13 @@ async def websocket_update(
             changes[key] = (
                 _parse_datetime(hass, msg[key]) if msg[key] is not None else None
             )
-    policy_keys = {"delivery_mode", "channels", "notify_targets", "voice_targets"}
+    policy_keys = {
+        "delivery_mode",
+        "channels",
+        "notify_targets",
+        "mobile_app_services",
+        "voice_targets",
+    }
     if policy_keys.intersection(msg):
         changes["delivery_policy"] = _policy_from_data(msg)
     recurrence_keys = {
@@ -665,6 +696,9 @@ async def websocket_get_preferences(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -696,9 +730,10 @@ async def websocket_set_preferences(
     preferences = await _manager(hass).async_set_user_preferences(
         user_id,
         DeliveryPolicy(
-            tuple(msg["channels"]),
-            tuple(msg["notify_targets"]),
-            tuple(msg["voice_targets"]),
+            channels=tuple(msg["channels"]),
+            notify_targets=tuple(msg["notify_targets"]),
+            mobile_app_services=tuple(msg["mobile_app_services"]),
+            voice_targets=tuple(msg["voice_targets"]),
         ),
         **{
             key: msg[key]
@@ -729,6 +764,9 @@ async def websocket_set_preferences(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -743,9 +781,10 @@ async def websocket_test_delivery(
     result = await _manager(hass).async_test_delivery(
         user_id=user_id,
         policy=DeliveryPolicy(
-            tuple(msg["channels"]),
-            tuple(msg["notify_targets"]),
-            tuple(msg["voice_targets"]),
+            channels=tuple(msg["channels"]),
+            notify_targets=tuple(msg["notify_targets"]),
+            mobile_app_services=tuple(msg["mobile_app_services"]),
+            voice_targets=tuple(msg["voice_targets"]),
         ),
     )
     connection.send_result(

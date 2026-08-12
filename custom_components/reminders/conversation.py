@@ -108,15 +108,23 @@ def _tools() -> list[llm.Tool]:
             tuple(QuietHoursPolicy)
         ),
     }
+    scheduled_advanced: dict[Any, Any] = {
+        vol.Optional("deliver_when"): dict,
+        vol.Optional("complete_when"): dict,
+        vol.Optional("escalation"): dict,
+    }
     return [
         RemindersTool(
             "create_reminder",
-            "Create one one-time reminder. Provide due or a relative delay in minutes.",
+            "Create one reminder. Provide due or delay_minutes; deliver_when waits "
+            "for bounded context after that time, complete_when can resolve it, and "
+            "escalation can redeliver until Done.",
             vol.Schema(
                 vol.All(
                     vol.Schema(
                         {
                             **create_common,
+                            **scheduled_advanced,
                             vol.Exclusive("due", "when"): cv.string,
                             vol.Exclusive("delay_minutes", "when"): vol.All(
                                 vol.Coerce(int), vol.Range(min=1)
@@ -134,6 +142,7 @@ def _tools() -> list[llm.Tool]:
             vol.Schema(
                 {
                     **create_common,
+                    **scheduled_advanced,
                     vol.Required("first_reminder"): cv.string,
                     vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
                     vol.Optional("interval", default=1): vol.All(
@@ -177,6 +186,8 @@ def _tools() -> list[llm.Tool]:
                     vol.Optional("available_from"): cv.string,
                     vol.Optional("expires_at"): cv.string,
                     vol.Optional("trigger_description"): cv.string,
+                    vol.Optional("complete_when"): dict,
+                    vol.Optional("escalation"): dict,
                 }
             ),
             _create_triggered,
@@ -241,6 +252,9 @@ def _tools() -> list[llm.Tool]:
                             ),
                             vol.Optional("available_from"): vol.Any(None, cv.string),
                             vol.Optional("expires_at"): vol.Any(None, cv.string),
+                            vol.Optional("deliver_when"): vol.Any(None, dict),
+                            vol.Optional("complete_when"): vol.Any(None, dict),
+                            vol.Optional("escalation"): vol.Any(None, dict),
                         }
                     ),
                     cv.has_at_least_one_key("reminder_id", "title"),
@@ -364,6 +378,9 @@ async def _create(
         due=due,
         acknowledgement_policy=AcknowledgementPolicy(args["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(args["quiet_hours_policy"]),
+        deliver_when=args.get("deliver_when"),
+        complete_when=args.get("complete_when"),
+        escalation=args.get("escalation"),
     )
     return {"reminder": reminder.to_dict()}
 
@@ -380,6 +397,9 @@ async def _create_recurring(
         recurrence=_recurrence_from_data(hass, args),
         acknowledgement_policy=AcknowledgementPolicy(args["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(args["quiet_hours_policy"]),
+        deliver_when=args.get("deliver_when"),
+        complete_when=args.get("complete_when"),
+        escalation=args.get("escalation"),
     )
     return {"reminder": reminder.to_dict()}
 
@@ -411,6 +431,8 @@ async def _create_triggered(
             _parse_datetime(hass, args["expires_at"]) if "expires_at" in args else None
         ),
         trigger_description=args.get("trigger_description"),
+        complete_when=args.get("complete_when"),
+        escalation=args.get("escalation"),
     )
     return {"reminder": reminder.to_dict()}
 
@@ -517,7 +539,13 @@ async def _update(
         changes["trigger"] = TriggerDefinition.from_dict(args["trigger"])
     if "repeat_policy" in args:
         changes["repeat_policy"] = TriggerRepeatPolicy(args["repeat_policy"])
-    for key in ("fire_if_already_matching", "cooldown_seconds"):
+    for key in (
+        "fire_if_already_matching",
+        "cooldown_seconds",
+        "deliver_when",
+        "complete_when",
+        "escalation",
+    ):
         if key in args:
             changes[key] = args[key]
     for key in ("available_from", "expires_at"):

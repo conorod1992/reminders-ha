@@ -51,6 +51,25 @@ def test_reminder_form_displays_submission_errors_inside_dialog() -> None:
     assert 'errorHost.classList.remove("hidden")' in panel_source
 
 
+def test_context_conditions_use_visual_trigger_editors() -> None:
+    """Context conditions share typed controls rather than whole-trigger JSON."""
+    panel_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert "deliver_when_json" not in panel_source
+    assert "complete_when_json" not in panel_source
+    assert '_contextTriggerEditor("deliver_when"' in panel_source
+    assert '_contextTriggerEditor("complete_when"' in panel_source
+    assert 'this._triggerData(form, "deliver_when")' in panel_source
+    assert 'this._triggerData(form, "complete_when")' in panel_source
+    assert "_setupEntityPicker(form, `${prefix}_zone_zone`" in panel_source
+
+
 async def test_panel_registers_once_and_reloads_cleanly(
     monkeypatch: Any,
 ) -> None:

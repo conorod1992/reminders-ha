@@ -211,8 +211,8 @@ class RemindersManagementPanel extends HTMLElement {
     const meta = document.createElement("div");
     meta.className = "meta";
     const values = reminder.activation_type === "trigger"
-      ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
-      : [recurrenceSummary(reminder, this._hass.locale?.language), deliverySummary(reminder), acknowledgementSummary(reminder)];
+      ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
+      : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean);
     if (reminder.owner_name) values.push(reminder.owner_name);
     meta.textContent = values.join(" · ");
     body.append(meta);
@@ -269,6 +269,19 @@ class RemindersManagementPanel extends HTMLElement {
     return button;
   }
 
+  _contextTriggerEditor(prefix, label) {
+    return `<div class="${prefix}-config context-editor hidden" data-context-prefix="${prefix}">
+      <h3>${label}</h3>
+      <label>Trigger type<select name="${prefix}_trigger_type"><option value="state">Entity changes state</option><option value="numeric_state">Numeric value enters a range</option><option value="zone">Enter or leave a zone</option><option value="event">Home Assistant event</option><option value="named">Named trigger</option></select></label>
+      <div class="context-trigger-fields ${prefix}-state-fields"><label>Entity<span class="picker-host" data-picker="${prefix}_state_entity"></span><input name="${prefix}_state_entity" type="hidden"></label><div class="fieldrow"><label>Previous state (optional)<input name="${prefix}_state_from" maxlength="255"></label><label>New state (optional)<input name="${prefix}_state_to" maxlength="255"></label></div><label>Attribute (optional)<input name="${prefix}_state_attribute" maxlength="255"></label></div>
+      <div class="context-trigger-fields ${prefix}-numeric-fields hidden"><label>Entity<span class="picker-host" data-picker="${prefix}_numeric_entity"></span><input name="${prefix}_numeric_entity" type="hidden"></label><div class="fieldrow"><label>Above<input name="${prefix}_numeric_above" type="number" step="any"></label><label>Below<input name="${prefix}_numeric_below" type="number" step="any"></label></div><label>Attribute (optional)<input name="${prefix}_numeric_attribute" maxlength="255"></label></div>
+      <div class="context-trigger-fields ${prefix}-zone-fields hidden"><label>Person or tracker<span class="picker-host" data-picker="${prefix}_zone_entity"></span><input name="${prefix}_zone_entity" type="hidden"></label><label>Zone<span class="picker-host" data-picker="${prefix}_zone_zone"></span><input name="${prefix}_zone_zone" type="hidden"></label><label>Event<select name="${prefix}_zone_event"><option value="enter">Enters</option><option value="leave">Leaves</option></select></label></div>
+      <div class="context-trigger-fields ${prefix}-event-fields hidden"><label>Event type<input name="${prefix}_event_type" maxlength="128"></label><label>Event data (optional JSON object)<textarea name="${prefix}_event_data" placeholder='{"type":"printing_started"}'></textarea></label></div>
+      <div class="context-trigger-fields ${prefix}-named-fields hidden"><label>Trigger ID<input name="${prefix}_trigger_id" maxlength="128" pattern="[a-z0-9][a-z0-9_.-]*"></label></div>
+      <label class="${prefix}-duration-option">Must remain matching for (seconds)<input name="${prefix}_for_seconds" type="number" min="0" max="31536000" value="0"></label>
+    </div>`;
+  }
+
   _openReminderForm(reminder = null, duplicate = null) {
     const source = reminder || duplicate;
     const recurring = Boolean(source?.recurring);
@@ -322,9 +335,12 @@ class RemindersManagementPanel extends HTMLElement {
           </div>
           <div id="owner"></div>
           <label>Delivery<select name="delivery_mode"><option value="default">Use my defaults</option><option value="custom">Choose for this reminder</option></select></label>
-          <div id="custom-delivery" class="hidden"><div class="checkrow channels"></div><label class="notify-label hidden">Phones</label><label class="voice-label hidden">Voice devices</label></div>
+          <div id="custom-delivery" class="hidden"><div class="checkrow channels"></div><label class="notify-label hidden">Standard phone notifications</label><label class="mobile-app-label hidden">Companion App notifications with Snooze and Done actions<span class="hint">Choose registered mobile_app notify services. If a device rejects actions, the reminder is retried without buttons.</span></label><label class="voice-label hidden">Voice devices</label></div>
           <label>Completion tracking<select name="acknowledgement_policy"><option value="default">Use my default</option><option value="required">Require me to mark it done</option><option value="not_required">Do not require completion</option></select></label>
           <label>Quiet hours<select name="quiet_hours_policy"><option value="respect">Respect my quiet hours</option><option value="ignore">Ignore quiet hours (urgent)</option></select></label>
+          <div class="context-option"><label><span><input name="deliver_when_enabled" type="checkbox"> Wait for the right context after the scheduled time</span><span class="hint">Choose the same bounded trigger types used by triggered reminders.</span></label>${this._contextTriggerEditor("deliver_when", "Delivery context")}</div>
+          <label><span><input name="complete_when_enabled" type="checkbox"> Complete automatically when Home Assistant detects it</span></label>${this._contextTriggerEditor("complete_when", "Completion context")}
+          <label><span><input name="escalation_enabled" type="checkbox"> Escalate until marked Done</span></label><div class="escalation-config fieldrow hidden"><label>First reminder after (minutes)<input name="escalation_initial" type="number" min="1" max="10080" value="30"></label><label>Repeat every (minutes)<input name="escalation_repeat" type="number" min="1" max="10080" value="60"></label><label>Maximum attempts<input name="escalation_max" type="number" min="1" max="20" value="3"></label></div>
         </div></details>
         <div class="form-error hidden" role="alert"></div>
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
@@ -356,6 +372,14 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.timezone.value = zone;
     form.elements.acknowledgement_policy.value = source?.acknowledgement_policy || "default";
     form.elements.quiet_hours_policy.value = source?.quiet_hours_policy || "respect";
+    form.elements.deliver_when_enabled.checked = Boolean(source?.deliver_when);
+    form.elements.complete_when_enabled.checked = Boolean(source?.complete_when);
+    this._setupContextTrigger(form, "deliver_when", source?.deliver_when || {});
+    this._setupContextTrigger(form, "complete_when", source?.complete_when || {});
+    form.elements.escalation_enabled.checked = Boolean(source?.escalation);
+    form.elements.escalation_initial.value = source?.escalation?.initial_delay_minutes || 30;
+    form.elements.escalation_repeat.value = source?.escalation?.repeat_minutes || 60;
+    form.elements.escalation_max.value = source?.escalation?.max_attempts || 3;
     const trigger = source?.trigger || {};
     form.elements.trigger_type.value = trigger.type || "state";
     this._setupEntityPicker(form, "state_entity", null, trigger.entity_id, (entityId) => this._syncStateMetadata(form, entityId));
@@ -407,6 +431,9 @@ class RemindersManagementPanel extends HTMLElement {
     const notify = this._entitySelect("notify", policy?.notify_targets || []);
     notify.name = "notify_targets";
     dialog.querySelector(".notify-label").append(notify);
+    const mobileApps = this._mobileAppServiceSelect(policy?.mobile_app_services || []);
+    mobileApps.name = "mobile_app_services";
+    dialog.querySelector(".mobile-app-label").append(mobileApps);
     const voice = this._entitySelect("assist_satellite", policy?.voice_targets || []);
     voice.name = "voice_targets";
     dialog.querySelector(".voice-label").append(voice);
@@ -427,9 +454,15 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.frequency.onchange = () => this._syncRecurrence(form, true);
     form.elements.monthly_mode.onchange = () => this._syncRecurrence(form, true);
     form.elements.delivery_mode.onchange = () => this._syncDelivery(dialog);
+    for (const name of ["deliver_when_enabled", "complete_when_enabled"]) form.elements[name].onchange = () => this._syncAdvancedContexts(form);
+    form.elements.escalation_enabled.onchange = () => {
+      if (form.elements.escalation_enabled.checked) form.elements.acknowledgement_policy.value = "required";
+      this._syncAdvancedContexts(form);
+    };
     dialog.querySelector(".preview-button").onclick = () => this._previewRecurrence(form);
     this._syncRecurrence(form, recurring);
     this._syncActivation(form);
+    this._syncAdvancedContexts(form);
     this._syncDelivery(dialog);
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
@@ -459,6 +492,7 @@ class RemindersManagementPanel extends HTMLElement {
     if (triggered && form.elements.repeat) form.elements.repeat.checked = false;
     this._syncRecurrence(form, !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true"));
     this._syncTriggerType(form);
+    form.querySelector(".context-option").classList.toggle("hidden", triggered);
   }
 
   _syncTriggerType(form) {
@@ -488,6 +522,7 @@ class RemindersManagementPanel extends HTMLElement {
     dialog.querySelector("#custom-delivery").classList.toggle("hidden", !custom);
     const selected = [...form.querySelectorAll("[name=channel]:checked")].map((input) => input.value);
     dialog.querySelector(".notify-label").classList.toggle("hidden", !selected.includes("phone"));
+    dialog.querySelector(".mobile-app-label").classList.toggle("hidden", !selected.includes("phone"));
     dialog.querySelector(".voice-label").classList.toggle("hidden", !selected.includes("voice"));
   }
 
@@ -510,40 +545,84 @@ class RemindersManagementPanel extends HTMLElement {
     return data;
   }
 
-  _triggerData(form) {
-    const type = form.elements.trigger_type.value;
+  _triggerData(form, prefix = "") {
+    const field = (name) => form.elements[prefix ? `${prefix}_${name}` : name];
+    const type = field("trigger_type").value;
     const trigger = { type };
     if (type === "state") {
-      trigger.entity_id = form.elements.state_entity.value;
+      trigger.entity_id = field("state_entity").value;
       if (!trigger.entity_id) throw new Error("Choose an entity for the state trigger");
-      if (form.elements.state_from.value !== "") trigger.from = form.elements.state_from.value;
-      if (form.elements.state_to.value !== "") trigger.to = form.elements.state_to.value;
-      if (form.elements.state_attribute.value.trim()) trigger.attribute = form.elements.state_attribute.value.trim();
+      if (field("state_from").value !== "") trigger.from = field("state_from").value;
+      if (field("state_to").value !== "") trigger.to = field("state_to").value;
+      if (field("state_attribute").value.trim()) trigger.attribute = field("state_attribute").value.trim();
       if (trigger.from === undefined && trigger.to === undefined && !trigger.attribute) throw new Error("State trigger needs a new state, previous state, or attribute");
     } else if (type === "numeric_state") {
-      trigger.entity_id = form.elements.numeric_entity.value;
+      trigger.entity_id = field("numeric_entity").value;
       if (!trigger.entity_id) throw new Error("Choose an entity for the numeric trigger");
-      if (form.elements.numeric_above.value !== "") trigger.above = Number(form.elements.numeric_above.value);
-      if (form.elements.numeric_below.value !== "") trigger.below = Number(form.elements.numeric_below.value);
+      if (field("numeric_above").value !== "") trigger.above = Number(field("numeric_above").value);
+      if (field("numeric_below").value !== "") trigger.below = Number(field("numeric_below").value);
       if (trigger.above === undefined && trigger.below === undefined) throw new Error("Enter an Above or Below value");
-      if (form.elements.numeric_attribute.value.trim()) trigger.attribute = form.elements.numeric_attribute.value.trim();
+      if (field("numeric_attribute").value.trim()) trigger.attribute = field("numeric_attribute").value.trim();
     } else if (type === "zone") {
-      trigger.entity_id = form.elements.zone_entity.value;
-      trigger.zone_entity_id = form.elements.zone_zone.value;
+      trigger.entity_id = field("zone_entity").value;
+      trigger.zone_entity_id = field("zone_zone").value;
       if (!trigger.entity_id) throw new Error("Choose a person or tracker");
       if (!trigger.zone_entity_id) throw new Error("Choose a zone");
-      trigger.event = form.elements.zone_event.value;
+      trigger.event = field("zone_event").value;
     } else if (type === "event") {
-      trigger.event_type = form.elements.event_type.value.trim();
-      if (form.elements.event_data.value.trim()) {
-        trigger.event_data = JSON.parse(form.elements.event_data.value);
+      trigger.event_type = field("event_type").value.trim();
+      if (!trigger.event_type) throw new Error("Enter an event type");
+      if (field("event_data").value.trim()) {
+        trigger.event_data = JSON.parse(field("event_data").value);
         if (!trigger.event_data || Array.isArray(trigger.event_data) || typeof trigger.event_data !== "object") throw new Error("Event data must be a JSON object");
       }
     } else {
-      trigger.trigger_id = form.elements.trigger_id.value.trim().toLowerCase();
+      trigger.trigger_id = field("trigger_id").value.trim().toLowerCase();
+      if (!trigger.trigger_id) throw new Error("Enter a trigger ID");
     }
-    if (["state", "numeric_state"].includes(type) && Number(form.elements.for_seconds.value)) trigger.for_seconds = Number(form.elements.for_seconds.value);
+    if (["state", "numeric_state"].includes(type) && Number(field("for_seconds").value)) trigger.for_seconds = Number(field("for_seconds").value);
     return trigger;
+  }
+
+  _setupContextTrigger(form, prefix, trigger) {
+    const field = (name) => form.elements[`${prefix}_${name}`];
+    field("trigger_type").value = trigger.type || "state";
+    this._setupEntityPicker(form, `${prefix}_state_entity`, null, trigger.type === "state" ? trigger.entity_id : "");
+    this._setupEntityPicker(form, `${prefix}_numeric_entity`, null, trigger.type === "numeric_state" ? trigger.entity_id : "");
+    this._setupEntityPicker(form, `${prefix}_zone_entity`, ["person", "device_tracker"], trigger.type === "zone" ? trigger.entity_id : "");
+    this._setupEntityPicker(form, `${prefix}_zone_zone`, ["zone"], trigger.zone_entity_id || "");
+    field("state_from").value = trigger.from ?? "";
+    field("state_to").value = trigger.to ?? "";
+    field("state_attribute").value = trigger.type === "state" ? (trigger.attribute ?? "") : "";
+    field("numeric_above").value = trigger.above ?? "";
+    field("numeric_below").value = trigger.below ?? "";
+    field("numeric_attribute").value = trigger.type === "numeric_state" ? (trigger.attribute ?? "") : "";
+    field("zone_event").value = trigger.event || "enter";
+    field("event_type").value = trigger.event_type || "";
+    field("event_data").value = trigger.event_data ? JSON.stringify(trigger.event_data, null, 2) : "";
+    field("trigger_id").value = trigger.trigger_id || "";
+    field("for_seconds").value = trigger.for_seconds || 0;
+    field("trigger_type").onchange = () => this._syncContextTrigger(form, prefix);
+    this._syncContextTrigger(form, prefix);
+  }
+
+  _syncContextTrigger(form, prefix) {
+    const enabled = form.elements[`${prefix}_enabled`].checked;
+    const type = form.elements[`${prefix}_trigger_type`].value;
+    form.querySelector(`.${prefix}-config`).classList.toggle("hidden", !enabled);
+    for (const [name, value] of [["state", "state"], ["numeric", "numeric_state"], ["zone", "zone"], ["event", "event"], ["named", "named"]]) {
+      form.querySelector(`.${prefix}-${name}-fields`).classList.toggle("hidden", type !== value);
+    }
+    form.querySelector(`.${prefix}-duration-option`).classList.toggle("hidden", !["state", "numeric_state"].includes(type));
+    for (const [name, value] of [["state_entity", "state"], ["numeric_entity", "numeric_state"], ["zone_entity", "zone"], ["zone_zone", "zone"], ["event_type", "event"], ["trigger_id", "named"]]) {
+      form.elements[`${prefix}_${name}`].required = enabled && type === value;
+    }
+  }
+
+  _syncAdvancedContexts(form) {
+    this._syncContextTrigger(form, "deliver_when");
+    this._syncContextTrigger(form, "complete_when");
+    form.querySelector(".escalation-config").classList.toggle("hidden", !form.elements.escalation_enabled.checked);
   }
 
   async _previewRecurrence(form) {
@@ -580,8 +659,15 @@ class RemindersManagementPanel extends HTMLElement {
     if (data.delivery_mode === "custom") {
       data.channels = [...form.querySelectorAll("[name=channel]:checked")].map((input) => input.value);
       data.notify_targets = this._selected(form.elements.notify_targets);
+      data.mobile_app_services = this._selected(form.elements.mobile_app_services);
       data.voice_targets = this._selected(form.elements.voice_targets);
     }
+    if (!triggered && form.elements.deliver_when_enabled.checked) data.deliver_when = this._triggerData(form, "deliver_when");
+    else if (reminder) data.deliver_when = null;
+    if (form.elements.complete_when_enabled.checked) data.complete_when = this._triggerData(form, "complete_when");
+    else if (reminder) data.complete_when = null;
+    if (form.elements.escalation_enabled.checked) data.escalation = { initial_delay_minutes: Number(form.elements.escalation_initial.value), repeat_minutes: Number(form.elements.escalation_repeat.value), max_attempts: Number(form.elements.escalation_max.value) };
+    else if (reminder) data.escalation = null;
     if (triggered) {
       data.trigger = this._triggerData(form);
       data.repeat_policy = form.elements.repeat_policy.value;
@@ -653,7 +739,7 @@ class RemindersManagementPanel extends HTMLElement {
   async _openPreferences(firstRun) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     let target = this._hass.user.id;
-    dialog.innerHTML = `<div class="dialog"><h2>${firstRun ? "Set up reminder delivery" : "Reminder preferences"}</h2><p class="hint">Choose how reminders should reach you. Home Assistant notifications are the simplest reliable option; phone and voice are optional.</p><div class="form"><div id="preference-user"></div><div class="checkrow channels"></div><label class="notify-label">Phones<span class="hint">Devices shown by their friendly Home Assistant names.</span></label><label class="voice-label">Voice devices<span class="hint">Assist satellites that can announce reminders.</span></label><label><span><input type="checkbox" name="require_acknowledgement"> Require me to mark reminders done by default</span></label><details><summary>Quiet hours and history</summary><div class="advanced"><label><span><input type="checkbox" name="quiet_enabled"> Enable quiet hours for voice</span></label><div class="fieldrow"><label>Start<input type="time" name="quiet_start"></label><label>End<input type="time" name="quiet_end"></label></div><div class="fieldrow"><label>Keep history for days<input type="number" name="retention_days" min="1" max="3650"></label><label>Maximum occurrences<input type="number" name="retention_count" min="10" max="5000"></label></div></div></details><div class="quick tests"><button data-test="persistent_notification">Test notification</button><button data-test="phone">Test phone</button><button data-test="voice">Test voice</button><button data-test="all">Test configured delivery</button></div><div class="test-result hint" role="status"></div></div><div class="dialog-actions"><button class="secondary cancel">${firstRun ? "Use defaults" : "Cancel"}</button><button class="save">Save preferences</button></div></div>`;
+    dialog.innerHTML = `<div class="dialog"><h2>${firstRun ? "Set up reminder delivery" : "Reminder preferences"}</h2><p class="hint">Choose how reminders should reach you. Home Assistant notifications are the simplest reliable option; phone and voice are optional.</p><div class="form"><div id="preference-user"></div><div class="checkrow channels"></div><label class="notify-label">Standard phone notifications<span class="hint">Notify entities receive ordinary title and message fields.</span></label><label class="mobile-app-label">Companion App notifications with actions<span class="hint">Registered mobile_app notify services can show Snooze and Done buttons.</span></label><label class="voice-label">Voice devices<span class="hint">Assist satellites that can announce reminders.</span></label><label><span><input type="checkbox" name="require_acknowledgement"> Require me to mark reminders done by default</span></label><details><summary>Quiet hours and history</summary><div class="advanced"><label><span><input type="checkbox" name="quiet_enabled"> Enable quiet hours for voice</span></label><div class="fieldrow"><label>Start<input type="time" name="quiet_start"></label><label>End<input type="time" name="quiet_end"></label></div><div class="fieldrow"><label>Keep history for days<input type="number" name="retention_days" min="1" max="3650"></label><label>Maximum occurrences<input type="number" name="retention_count" min="10" max="5000"></label></div></div></details><div class="quick tests"><button data-test="persistent_notification">Test notification</button><button data-test="phone">Test phone</button><button data-test="voice">Test voice</button><button data-test="all">Test configured delivery</button></div><div class="test-result hint" role="status"></div></div><div class="dialog-actions"><button class="secondary cancel">${firstRun ? "Use defaults" : "Cancel"}</button><button class="save">Save preferences</button></div></div>`;
     if (this._hass.user.is_admin && !firstRun) {
       const label = document.createElement("label"); label.textContent = "Preferences for";
       const select = this._userSelect(target); label.append(select); dialog.querySelector("#preference-user").append(label);
@@ -688,6 +774,8 @@ class RemindersManagementPanel extends HTMLElement {
       const old = dialog.querySelector(`${selector} select`); if (old) old.remove();
       dialog.querySelector(selector).append(this._entitySelect(domain, selected));
     }
+    const oldMobile = dialog.querySelector(".mobile-app-label select"); if (oldMobile) oldMobile.remove();
+    dialog.querySelector(".mobile-app-label").append(this._mobileAppServiceSelect(prefs.default_delivery_policy.mobile_app_services || []));
     dialog.querySelector("[name=require_acknowledgement]").checked = prefs.require_acknowledgement;
     dialog.querySelector("[name=quiet_enabled]").checked = prefs.quiet_hours_enabled;
     dialog.querySelector("[name=quiet_start]").value = prefs.quiet_hours_start;
@@ -701,6 +789,7 @@ class RemindersManagementPanel extends HTMLElement {
       user_id: target,
       channels: [...dialog.querySelectorAll(".channels input:checked")].map((input) => input.value),
       notify_targets: this._selected(dialog.querySelector(".notify-label select")),
+      mobile_app_services: this._selected(dialog.querySelector(".mobile-app-label select")),
       voice_targets: this._selected(dialog.querySelector(".voice-label select")),
       require_acknowledgement: dialog.querySelector("[name=require_acknowledgement]").checked,
       configured: true,
@@ -728,6 +817,7 @@ class RemindersManagementPanel extends HTMLElement {
       user_id: target,
       channels: channel === "all" ? values.channels : [channel],
       notify_targets: values.notify_targets,
+      mobile_app_services: values.mobile_app_services,
       voice_targets: values.voice_targets,
     };
     const resultHost = dialog.querySelector(".test-result"); resultHost.textContent = "Sending test...";
@@ -747,6 +837,18 @@ class RemindersManagementPanel extends HTMLElement {
   _entitySelect(domain, selected = []) {
     const select = document.createElement("select"); select.multiple = true;
     for (const [id, state] of Object.entries(this._hass.states || {}).filter(([id]) => id.startsWith(`${domain}.`))) select.add(new Option(state.attributes.friendly_name || id, id, false, selected.includes(id)));
+    return select;
+  }
+
+  _mobileAppServiceSelect(selected = []) {
+    const select = document.createElement("select"); select.multiple = true;
+    const services = Object.keys(this._hass.services?.notify || {})
+      .filter((service) => service.startsWith("mobile_app_"))
+      .map((service) => `notify.${service}`);
+    for (const service of new Set([...services, ...selected])) {
+      const label = service.replace("notify.mobile_app_", "").replaceAll("_", " ");
+      select.add(new Option(label || service, service, false, selected.includes(service)));
+    }
     return select;
   }
 
