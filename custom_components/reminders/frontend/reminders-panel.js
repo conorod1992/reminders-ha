@@ -214,14 +214,17 @@ class RemindersManagementPanel extends HTMLElement {
       ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
       : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean);
     if (reminder.owner_name) values.push(reminder.owner_name);
+    if (reminder.managed_externally && reminder.source) values.push(`Managed by ${reminder.source}`);
     meta.textContent = values.join(" · ");
     body.append(meta);
     const actions = document.createElement("div");
     actions.className = "actions";
     const awaiting = awaitingOccurrences(reminder);
     if (awaiting.length) actions.append(this._action("Done", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
-    actions.append(
+    if (!reminder.managed_externally) actions.append(
       this._action("Edit", () => this._openReminderForm(reminder)),
+    );
+    actions.append(
       this._action("Duplicate", () => this._openReminderForm(null, reminder)),
       this._action("Snooze", () => this._openSnooze(reminder)),
       this._action("Delete", () => this._confirmDelete(reminder), "danger"),

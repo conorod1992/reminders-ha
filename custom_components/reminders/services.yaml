@@ -114,6 +114,27 @@ create:
       description: Optional initial_delay_minutes, repeat_minutes, and max_attempts for reminders requiring acknowledgement.
       selector:
         object:
+    source: &source
+      name: External source
+      description: Optional stable integration identifier that manages this reminder.
+      selector:
+        text:
+    source_id: &source_id
+      name: External source ID
+      description: Optional stable identifier of the source object.
+      selector:
+        text:
+    source_event: &source_event
+      name: External source event
+      description: Optional source milestone or event type.
+      selector:
+        text:
+    managed_externally: &managed_externally
+      name: Managed externally
+      description: Marks the reminder as managed by its source integration.
+      default: false
+      selector:
+        boolean:
 
 create_recurring:
   name: Create a recurring reminder
@@ -238,6 +259,10 @@ create_recurring:
     deliver_when: *deliver_when
     complete_when: *complete_when
     escalation: *escalation
+    source: *source
+    source_id: *source_id
+    source_event: *source_event
+    managed_externally: *managed_externally
 
 get:
   name: Get a reminder
@@ -276,6 +301,8 @@ list:
       description: Include reminders due at or before this time.
       selector:
         datetime:
+    source: *source
+    source_id: *source_id
 
 update:
   name: Update a reminder
@@ -300,6 +327,10 @@ update:
     deliver_when: *deliver_when
     complete_when: *complete_when
     escalation: *escalation
+    source: *source
+    source_id: *source_id
+    source_event: *source_event
+    managed_externally: *managed_externally
     first_reminder: *first_reminder
     frequency: *frequency
     interval: *interval
@@ -493,6 +524,10 @@ create_triggered:
     quiet_hours_policy: *quiet_policy
     complete_when: *complete_when
     escalation: *escalation
+    source: *source
+    source_id: *source_id
+    source_event: *source_event
+    managed_externally: *managed_externally
 
 fire_trigger:
   name: Fire a named reminder trigger

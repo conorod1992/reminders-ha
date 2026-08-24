@@ -73,6 +73,18 @@ ADVANCED_FIELDS: dict[Any, Any] = {
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
 }
+SOURCE_FIELDS: dict[Any, Any] = {
+    vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
+    vol.Optional("source_event"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("managed_externally"): cv.boolean,
+}
+SOURCE_UPDATE_FIELDS: dict[Any, Any] = {
+    vol.Optional("source"): vol.Any(None, cv.string),
+    vol.Optional("source_id"): vol.Any(None, cv.string),
+    vol.Optional("source_event"): vol.Any(None, cv.string),
+    vol.Optional("managed_externally"): cv.boolean,
+}
 
 CREATE_FIELDS: dict[Any, Any] = {
     vol.Required("title"): cv.string,
@@ -89,6 +101,7 @@ CREATE_FIELDS: dict[Any, Any] = {
 }
 CREATE_FIELDS.update(POLICY_FIELDS)
 CREATE_FIELDS.update(ADVANCED_FIELDS)
+CREATE_FIELDS.update(SOURCE_FIELDS)
 CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
 CREATE_RECURRING_FIELDS: dict[Any, Any] = {
     vol.Required("title"): cv.string,
@@ -117,6 +130,7 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
 }
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
 CREATE_RECURRING_FIELDS.update(ADVANCED_FIELDS)
+CREATE_RECURRING_FIELDS.update(SOURCE_FIELDS)
 CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
 CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
     vol.Required("title"): cv.string,
@@ -145,6 +159,7 @@ CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
     vol.Optional("escalation"): dict,
 }
 CREATE_TRIGGERED_FIELDS.update(POLICY_FIELDS)
+CREATE_TRIGGERED_FIELDS.update(SOURCE_FIELDS)
 CREATE_TRIGGERED_SCHEMA = vol.Schema(CREATE_TRIGGERED_FIELDS)
 FIRE_TRIGGER_SCHEMA = vol.Schema(
     {
@@ -194,6 +209,7 @@ UPDATE_FIELDS: dict[Any, Any] = {
     vol.Optional("complete_when"): vol.Any(None, dict),
     vol.Optional("escalation"): vol.Any(None, dict),
 }
+UPDATE_FIELDS.update(SOURCE_UPDATE_FIELDS)
 UPDATE_FIELDS.update(POLICY_FIELDS)
 UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
 LIST_SCHEMA = vol.Schema(
@@ -204,6 +220,8 @@ LIST_SCHEMA = vol.Schema(
         vol.Optional("due_before"): vol.Any(datetime, cv.string),
         vol.Optional("query"): cv.string,
         vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
+        vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+        vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
     }
 )
 SNOOZE_SCHEMA = vol.All(
@@ -288,6 +306,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             deliver_when=call.data.get("deliver_when"),
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
+            **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -314,6 +333,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             deliver_when=call.data.get("deliver_when"),
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
+            **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -349,6 +369,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             trigger_description=call.data.get("trigger_description"),
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
+            **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -384,6 +405,8 @@ def async_register_services(hass: HomeAssistant) -> None:
                 if "activation_type" in call.data
                 else None
             ),
+            source=call.data.get("source"),
+            source_id=call.data.get("source_id"),
         )
         return {"reminders": [item.to_dict() for item in reminders]}
 
@@ -416,6 +439,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             "deliver_when",
             "complete_when",
             "escalation",
+            "source",
+            "source_id",
+            "source_event",
+            "managed_externally",
         ):
             if key in call.data:
                 changes[key] = call.data[key]
@@ -646,6 +673,15 @@ async def _resolve_list_user(
         requested,
         all_users=actor is not None and actor.is_admin and requested is None,
     )
+
+
+def _source_from_data(data: Any) -> dict[str, Any]:
+    """Extract optional external-source metadata from a public request."""
+    return {
+        key: data[key]
+        for key in ("source", "source_id", "source_event", "managed_externally")
+        if key in data
+    }
 
 
 def _policy_from_data(data: Any) -> DeliveryPolicy | None:

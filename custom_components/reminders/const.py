@@ -9,6 +9,7 @@ STORAGE_MINOR_VERSION: Final = 6
 
 MOBILE_ACTION_EVENT: Final = "mobile_app_notification_action"
 MOBILE_ACTION_PREFIX: Final = "REMINDERS_"
+LIFECYCLE_EVENT: Final = f"{DOMAIN}_lifecycle"
 SAVE_DELAY: Final = 2.0
 
 SERVICE_CREATE: Final = "create"

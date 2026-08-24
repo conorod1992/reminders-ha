@@ -16,6 +16,7 @@ from homeassistant.helpers.event import async_call_later, async_track_point_in_u
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    LIFECYCLE_EVENT,
     MOBILE_ACTION_EVENT,
     MOBILE_ACTION_PREFIX,
     SAVE_DELAY,
@@ -149,6 +150,10 @@ class ReminderManager:
         deliver_when: TriggerDefinition | dict[str, Any] | None = None,
         complete_when: TriggerDefinition | dict[str, Any] | None = None,
         escalation: EscalationPolicy | dict[str, Any] | None = None,
+        source: str | None = None,
+        source_id: str | None = None,
+        source_event: str | None = None,
+        managed_externally: bool = False,
     ) -> Reminder:
         """Create and schedule a one-shot reminder."""
         due = _normalize_due(due)
@@ -157,6 +162,9 @@ class ReminderManager:
         delivery_trigger = _coerce_trigger(deliver_when)
         completion_trigger = _coerce_trigger(complete_when)
         escalation_policy = _coerce_escalation(escalation)
+        source, source_id, source_event = _validate_source_metadata(
+            source, source_id, source_event
+        )
         now = dt_util.utcnow()
         occurrence = _new_occurrence(due)
         reminder = Reminder(
@@ -181,6 +189,10 @@ class ReminderManager:
                 self._summary(completion_trigger) if completion_trigger else None
             ),
             escalation=escalation_policy,
+            source=source,
+            source_id=source_id,
+            source_event=source_event,
+            managed_externally=managed_externally,
         )
         await self._async_add(reminder)
         if due <= now:
@@ -201,6 +213,10 @@ class ReminderManager:
         deliver_when: TriggerDefinition | dict[str, Any] | None = None,
         complete_when: TriggerDefinition | dict[str, Any] | None = None,
         escalation: EscalationPolicy | dict[str, Any] | None = None,
+        source: str | None = None,
+        source_id: str | None = None,
+        source_event: str | None = None,
+        managed_externally: bool = False,
     ) -> Reminder:
         """Create and durably persist an anchored recurring reminder."""
         _validate_policy(delivery_policy)
@@ -208,6 +224,9 @@ class ReminderManager:
         delivery_trigger = _coerce_trigger(deliver_when)
         completion_trigger = _coerce_trigger(complete_when)
         escalation_policy = _coerce_escalation(escalation)
+        source, source_id, source_event = _validate_source_metadata(
+            source, source_id, source_event
+        )
         now = dt_util.utcnow()
         due = first_due(recurrence, now)
         occurrence = _new_occurrence(due)
@@ -236,6 +255,10 @@ class ReminderManager:
                 self._summary(completion_trigger) if completion_trigger else None
             ),
             escalation=escalation_policy,
+            source=source,
+            source_id=source_id,
+            source_event=source_event,
+            managed_externally=managed_externally,
         )
         await self._async_add(reminder)
         self._notify_changed({user_id})
@@ -262,6 +285,10 @@ class ReminderManager:
         trigger_description: str | None = None,
         complete_when: TriggerDefinition | dict[str, Any] | None = None,
         escalation: EscalationPolicy | dict[str, Any] | None = None,
+        source: str | None = None,
+        source_id: str | None = None,
+        source_event: str | None = None,
+        managed_externally: bool = False,
     ) -> Reminder:
         """Create and durably arm a listener-backed triggered reminder."""
         _validate_policy(delivery_policy)
@@ -276,6 +303,9 @@ class ReminderManager:
         _validate_trigger_options(cooldown_seconds, available, expiry)
         completion_trigger = _coerce_trigger(complete_when)
         escalation_policy = _coerce_escalation(escalation)
+        source, source_id, source_event = _validate_source_metadata(
+            source, source_id, source_event
+        )
         now = dt_util.utcnow()
         status = _trigger_waiting_status(now, available, expiry)
         reminder = Reminder(
@@ -307,6 +337,10 @@ class ReminderManager:
                 self._summary(completion_trigger) if completion_trigger else None
             ),
             escalation=escalation_policy,
+            source=source,
+            source_id=source_id,
+            source_event=source_event,
+            managed_externally=managed_externally,
         )
         await self._async_add(reminder)
         await self._async_evaluate_immediate({reminder.id})
@@ -340,6 +374,8 @@ class ReminderManager:
         recurring: bool | None = None,
         activation_type: ActivationType | None = None,
         statuses: set[ReminderStatus] | None = None,
+        source: str | None = None,
+        source_id: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> list[Reminder]:
@@ -367,6 +403,8 @@ class ReminderManager:
                     recurring is None or (reminder.recurrence is not None) is recurring
                 )
                 and (statuses is None or reminder.status in statuses)
+                and (source is None or reminder.source == source)
+                and (source_id is None or reminder.source_id == source_id)
                 and (
                     activation_type is None
                     or reminder.activation_type is activation_type
@@ -468,6 +506,10 @@ class ReminderManager:
                 "deliver_when",
                 "complete_when",
                 "escalation",
+                "source",
+                "source_id",
+                "source_event",
+                "managed_externally",
             }
             unknown = set(changes) - allowed
             if unknown:
@@ -475,6 +517,14 @@ class ReminderManager:
             if "title" in changes:
                 changes["title"] = str(changes["title"]).strip()
                 _validate_title(changes["title"])
+            if {"source", "source_id", "source_event"}.intersection(changes):
+                changes["source"], changes["source_id"], changes["source_event"] = (
+                    _validate_source_metadata(
+                        changes.get("source", current.source),
+                        changes.get("source_id", current.source_id),
+                        changes.get("source_event", current.source_event),
+                    )
+                )
             _validate_policy(changes.get("delivery_policy"))
             now = dt_util.utcnow()
             history = list(current.occurrence_history)
@@ -671,6 +721,7 @@ class ReminderManager:
             cancel()
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({reminder.user_id})
+        self._fire_lifecycle_event(reminder, "deleted")
 
     async def async_snooze(
         self,
@@ -807,6 +858,9 @@ class ReminderManager:
             await self._async_process_due(dt_util.utcnow())
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({current.user_id})
+        self._fire_lifecycle_event(
+            current, "snoozed", occurrence_id=current.current_occurrence_id
+        )
         return await self.async_get(updated.id)
 
     async def async_wait_for_next_trigger(self, reminder_id: str) -> Reminder:
@@ -968,6 +1022,7 @@ class ReminderManager:
                 self._reschedule(force=True)
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({current.user_id})
+        self._fire_lifecycle_event(current, "snoozed", occurrence_id=target.id)
         return updated
 
     async def async_acknowledge(
@@ -1034,6 +1089,15 @@ class ReminderManager:
             self._reschedule(force=True)
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({reminder.user_id})
+        self._fire_lifecycle_event(
+            reminder,
+            (
+                "acknowledged"
+                if completion_source != "automatic"
+                else "automatically_completed"
+            ),
+            occurrence_id=acknowledged.id,
+        )
         return acknowledged
 
     def _mobile_action_received(self, event: Event[Any]) -> None:
@@ -1284,6 +1348,9 @@ class ReminderManager:
             self._reschedule(force=True)
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({current.user_id})
+        self._fire_lifecycle_event(
+            current, "automatically_completed", occurrence_id=completed.id
+        )
         return "completed"
 
     async def async_activate_trigger(
@@ -2197,6 +2264,27 @@ class ReminderManager:
             except Exception:
                 _LOGGER.exception("Error notifying a reminder state subscriber")
 
+    def _fire_lifecycle_event(
+        self, reminder: Reminder, action: str, *, occurrence_id: str | None = None
+    ) -> None:
+        """Publish a durable lifecycle transition without reminder content."""
+        bus = getattr(self._hass, "bus", None)
+        fire = getattr(bus, "async_fire", None)
+        if not callable(fire):
+            return
+        fire(
+            LIFECYCLE_EVENT,
+            {
+                "reminder_id": reminder.id,
+                "occurrence_id": occurrence_id,
+                "user_id": reminder.user_id,
+                "source": reminder.source,
+                "source_id": reminder.source_id,
+                "source_event": reminder.source_event,
+                "action": action,
+            },
+        )
+
     def _require(self, reminder_id: str) -> Reminder:
         try:
             return self._reminders[reminder_id]
@@ -2233,6 +2321,30 @@ def _normalize_due(value: datetime) -> datetime:
 
 def _normalize_optional_time(value: datetime | None) -> datetime | None:
     return _normalize_due(value) if value is not None else None
+
+
+def _validate_source_metadata(
+    source: str | None, source_id: str | None, source_event: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Normalize bounded external correlation metadata."""
+    values = (
+        ("source", source, 128),
+        ("source_id", source_id, 255),
+        ("source_event", source_event, 128),
+    )
+    normalized: list[str | None] = []
+    for name, value, maximum in values:
+        if value is None:
+            normalized.append(None)
+            continue
+        if not isinstance(value, str) or not (item := value.strip()):
+            raise ReminderValidationError(f"{name} must be a non-empty string")
+        if len(item) > maximum:
+            raise ReminderValidationError(
+                f"{name} must be at most {maximum} characters"
+            )
+        normalized.append(item)
+    return tuple(normalized)  # type: ignore[return-value]
 
 
 def _validate_trigger_options(

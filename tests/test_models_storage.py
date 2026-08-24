@@ -77,6 +77,31 @@ def test_serialize_deserialize_round_trip() -> None:
     assert reminder.to_dict()["recurring"] is False
 
 
+def test_external_source_metadata_round_trips_and_legacy_records_default() -> None:
+    now = datetime(2026, 7, 26, 12, tzinfo=UTC)
+    reminder = Reminder(
+        id="external",
+        user_id="user-1",
+        title="Test",
+        due=now,
+        created_at=now,
+        updated_at=now,
+        source="expiry_tracker",
+        source_id="item-42",
+        source_event="warning_30",
+        managed_externally=True,
+    )
+    encoded = reminder.to_dict()
+    assert Reminder.from_dict(encoded) == reminder
+    for key in ("source", "source_id", "source_event", "managed_externally"):
+        encoded.pop(key)
+    legacy = Reminder.from_dict(encoded)
+    assert legacy.source is None
+    assert legacy.source_id is None
+    assert legacy.source_event is None
+    assert legacy.managed_externally is False
+
+
 def test_interrupted_delivery_is_recovered_as_pending() -> None:
     now = datetime(2026, 7, 26, 12, tzinfo=UTC)
     reminder = Reminder(

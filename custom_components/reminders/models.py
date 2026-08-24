@@ -428,6 +428,10 @@ class Reminder:
     notification_actions: tuple[dict[str, str], ...] = field(
         default=(), compare=False, repr=False
     )
+    source: str | None = None
+    source_id: str | None = None
+    source_event: str | None = None
+    managed_externally: bool = False
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable reminder."""
@@ -504,6 +508,10 @@ class Reminder:
             ),
             "complete_when_summary": self.complete_when_summary,
             "escalation": self.escalation.to_dict() if self.escalation else None,
+            "source": self.source,
+            "source_id": self.source_id,
+            "source_event": self.source_event,
+            "managed_externally": self.managed_externally,
         }
 
     @classmethod
@@ -613,6 +621,12 @@ class Reminder:
             escalation=(
                 EscalationPolicy.from_dict(escalation_data) if escalation_data else None
             ),
+            source=str(data["source"]) if data.get("source") else None,
+            source_id=str(data["source_id"]) if data.get("source_id") else None,
+            source_event=(
+                str(data["source_event"]) if data.get("source_event") else None
+            ),
+            managed_externally=bool(data.get("managed_externally", False)),
         )
 
 
