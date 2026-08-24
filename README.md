@@ -536,6 +536,19 @@ response_variable: delivery_test
 
 The response lists successful and failed channels and safe error summaries.
 
+### External integration metadata
+
+Other integrations can create and rediscover their reminders without importing
+Reminders internals. `create`, `create_recurring`, `create_triggered`, and
+`update` accept optional bounded `source`, `source_id`, `source_event`, and
+`managed_externally` fields. Use `list` (or `reminders/list`) with `source` and
+`source_id` to find them again; normal caller ownership rules still apply.
+
+Each durable acknowledgement, automatic completion, snooze, or deletion fires
+the `reminders_lifecycle` Home Assistant event. Its safe payload includes
+`action`, `reminder_id`, optional `occurrence_id`, `user_id`, and the source
+metadata, but never the reminder title or message.
+
 ## Structured conversation tools
 
 The integration registers an opt-in **Reminders** LLM API for Home Assistant

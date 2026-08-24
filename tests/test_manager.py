@@ -11,6 +11,7 @@ from custom_components.reminders.manager import (
     ReminderNotFoundError,
 )
 from custom_components.reminders.models import (
+    AcknowledgementPolicy,
     DeliveryPolicy,
     Reminder,
     ReminderStatus,
@@ -18,6 +19,14 @@ from custom_components.reminders.models import (
 from custom_components.reminders.storage import serialize_storage
 
 from .conftest import FakeDispatcher, FakeStore
+
+
+class EventBus:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    def async_fire(self, event_type: str, data: dict[str, Any]) -> None:
+        self.events.append((event_type, data))
 
 
 class Scheduler:
@@ -68,6 +77,43 @@ async def test_crud_and_user_isolation(
     await manager.async_delete(second.id)
     with pytest.raises(ReminderNotFoundError):
         await manager.async_get(second.id)
+
+
+async def test_external_metadata_filters_and_lifecycle_events(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    bus = EventBus()
+    manager = ReminderManager(SimpleNamespace(bus=bus), fake_store, FakeDispatcher())  # type: ignore[arg-type]
+    await manager.async_load()
+    reminder = await manager.async_create(
+        user_id="u1",
+        title="External",
+        due=datetime.now(UTC) - timedelta(seconds=1),
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        source="expiry_tracker",
+        source_id="milk",
+        source_event="urgent",
+        managed_externally=True,
+    )
+    assert await manager.async_list(source="expiry_tracker", source_id="milk") == [
+        reminder
+    ]
+    occurrence = (await manager.async_get(reminder.id)).occurrence_history[-1]
+    await manager.async_acknowledge(reminder.id, occurrence_id=occurrence.id)
+    assert bus.events == [
+        (
+            "reminders_lifecycle",
+            {
+                "reminder_id": reminder.id,
+                "occurrence_id": occurrence.id,
+                "user_id": "u1",
+                "source": "expiry_tracker",
+                "source_id": "milk",
+                "source_event": "urgent",
+                "action": "acknowledged",
+            },
+        )
+    ]
 
 
 async def test_earliest_only_and_intelligent_rescheduling(

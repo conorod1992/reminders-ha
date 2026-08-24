@@ -42,7 +42,12 @@ from .recurrence import (
     Weekday,
     preview_occurrences,
 )
-from .services import _parse_datetime, _policy_from_data, _recurrence_from_data
+from .services import (
+    _parse_datetime,
+    _policy_from_data,
+    _recurrence_from_data,
+    _source_from_data,
+)
 from .triggers.models import TriggerDefinition, TriggerValidationError
 
 COMMAND_PREFIX = f"{DOMAIN}/"
@@ -57,6 +62,18 @@ ADVANCED_SCHEMA: dict[Any, Any] = {
     vol.Optional("deliver_when"): dict,
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
+}
+SOURCE_SCHEMA: dict[Any, Any] = {
+    vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
+    vol.Optional("source_event"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("managed_externally"): cv.boolean,
+}
+SOURCE_UPDATE_SCHEMA: dict[Any, Any] = {
+    vol.Optional("source"): vol.Any(None, cv.string),
+    vol.Optional("source_id"): vol.Any(None, cv.string),
+    vol.Optional("source_event"): vol.Any(None, cv.string),
+    vol.Optional("managed_externally"): cv.boolean,
 }
 RECURRENCE_SCHEMA: dict[Any, Any] = {
     vol.Required("first_reminder"): cv.string,
@@ -135,6 +152,8 @@ async def _user_names(hass: HomeAssistant) -> dict[str, str]:
         vol.Optional("due_after"): cv.string,
         vol.Optional("due_before"): cv.string,
         vol.Optional("query"): cv.string,
+        vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+        vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
         vol.Optional("limit", default=500): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=1000)
         ),
@@ -165,6 +184,8 @@ async def websocket_list(
             _parse_datetime(hass, msg["due_before"]) if "due_before" in msg else None
         ),
         query=msg.get("query"),
+        source=msg.get("source"),
+        source_id=msg.get("source_id"),
         limit=msg["limit"],
         offset=msg["offset"],
     )
@@ -239,6 +260,7 @@ CREATE_SCHEMA: dict[Any, Any] = {
     ),
     **POLICY_SCHEMA,
     **ADVANCED_SCHEMA,
+    **SOURCE_SCHEMA,
 }
 
 
@@ -260,6 +282,7 @@ async def websocket_create(
         deliver_when=msg.get("deliver_when"),
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
+        **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -278,6 +301,7 @@ CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     **RECURRENCE_SCHEMA,
     **POLICY_SCHEMA,
     **ADVANCED_SCHEMA,
+    **SOURCE_SCHEMA,
 }
 
 
@@ -299,6 +323,7 @@ async def websocket_create_recurring(
         deliver_when=msg.get("deliver_when"),
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
+        **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -329,6 +354,7 @@ CREATE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     **POLICY_SCHEMA,
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
+    **SOURCE_SCHEMA,
 }
 
 
@@ -364,6 +390,7 @@ async def websocket_create_triggered(
         trigger_description=msg.get("trigger_description"),
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
+        **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
@@ -432,6 +459,7 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("deliver_when"): vol.Any(None, dict),
     vol.Optional("complete_when"): vol.Any(None, dict),
     vol.Optional("escalation"): vol.Any(None, dict),
+    **SOURCE_UPDATE_SCHEMA,
 }
 
 
@@ -469,6 +497,10 @@ async def websocket_update(
         "deliver_when",
         "complete_when",
         "escalation",
+        "source",
+        "source_id",
+        "source_event",
+        "managed_externally",
     ):
         if key in msg:
             changes[key] = msg[key]
