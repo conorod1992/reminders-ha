@@ -59,6 +59,7 @@ class OccurrenceStatus(StrEnum):
     DELIVERED = "delivered"
     AWAITING_ACKNOWLEDGEMENT = "awaiting_acknowledgement"
     ACKNOWLEDGED = "acknowledged"
+    COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
@@ -243,6 +244,11 @@ class Occurrence:
     acknowledged_by: str | None = None
     completion_source: str | None = None
     completion_reason: str | None = None
+    completed_at: datetime | None = None
+    completed_by: str | None = None
+    external_action_id: str | None = None
+    external_action_selected_at: datetime | None = None
+    external_action_selected_by: str | None = None
     snoozed: bool = False
     snoozed_at: datetime | None = None
     trigger_type: str | None = None
@@ -282,6 +288,17 @@ class Occurrence:
             "acknowledged_by": self.acknowledged_by,
             "completion_source": self.completion_source,
             "completion_reason": self.completion_reason,
+            "completed_at": (
+                _format_datetime(self.completed_at) if self.completed_at else None
+            ),
+            "completed_by": self.completed_by,
+            "external_action_id": self.external_action_id,
+            "external_action_selected_at": (
+                _format_datetime(self.external_action_selected_at)
+                if self.external_action_selected_at
+                else None
+            ),
+            "external_action_selected_by": self.external_action_selected_by,
             "snoozed": self.snoozed,
             "snoozed_at": (
                 _format_datetime(self.snoozed_at) if self.snoozed_at else None
@@ -345,6 +362,25 @@ class Occurrence:
             completion_reason=(
                 str(data["completion_reason"])
                 if data.get("completion_reason")
+                else None
+            ),
+            completed_at=_optional_datetime(data.get("completed_at")),
+            completed_by=(
+                str(data["completed_by"])
+                if data.get("completed_by") is not None
+                else None
+            ),
+            external_action_id=(
+                str(data["external_action_id"])
+                if data.get("external_action_id")
+                else None
+            ),
+            external_action_selected_at=_optional_datetime(
+                data.get("external_action_selected_at")
+            ),
+            external_action_selected_by=(
+                str(data["external_action_selected_by"])
+                if data.get("external_action_selected_by") is not None
                 else None
             ),
             snoozed=bool(data.get("snoozed", False)),
@@ -432,6 +468,8 @@ class Reminder:
     source_id: str | None = None
     source_event: str | None = None
     managed_externally: bool = False
+    allow_manual_completion: bool = False
+    external_actions: tuple[dict[str, str], ...] = ()
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable reminder."""
@@ -512,6 +550,8 @@ class Reminder:
             "source_id": self.source_id,
             "source_event": self.source_event,
             "managed_externally": self.managed_externally,
+            "allow_manual_completion": self.allow_manual_completion,
+            "external_actions": [dict(item) for item in self.external_actions],
         }
 
     @classmethod
@@ -627,6 +667,11 @@ class Reminder:
                 str(data["source_event"]) if data.get("source_event") else None
             ),
             managed_externally=bool(data.get("managed_externally", False)),
+            allow_manual_completion=bool(data.get("allow_manual_completion", False)),
+            external_actions=tuple(
+                {"id": str(item["id"]), "label": str(item["label"])}
+                for item in data.get("external_actions", [])
+            ),
         )
 
 

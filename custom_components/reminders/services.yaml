@@ -76,17 +76,17 @@ create:
           filter:
             domain: assist_satellite
     acknowledgement_policy: &ack_policy
-      name: Completion tracking
-      description: Inherit the user's current preference, explicitly require Done, or explicitly skip completion tracking.
+      name: Dismissal tracking
+      description: Inherit the user's preference, keep reminding until dismissed, or skip dismissal tracking.
       default: default
       selector:
         select:
           options:
             - label: Use the user's default
               value: default
-            - label: Require acknowledgement
+            - label: Keep reminding until dismissed
               value: required
-            - label: Do not require acknowledgement
+            - label: Do not require dismissal
               value: not_required
     quiet_hours_policy: &quiet_policy
       name: Quiet hours
@@ -111,9 +111,15 @@ create:
         object:
     escalation: &escalation
       name: Escalation
-      description: Optional initial_delay_minutes, repeat_minutes, and max_attempts for reminders requiring acknowledgement.
+      description: Optional initial_delay_minutes, repeat_minutes, and max_attempts for reminders awaiting dismissal.
       selector:
         object:
+    allow_manual_completion: &allow_manual_completion
+      name: Allow “Done”
+      description: Lets the user explicitly report that the underlying task was completed.
+      default: false
+      selector:
+        boolean:
     source: &source
       name: External source
       description: Optional stable integration identifier that manages this reminder.
@@ -135,6 +141,11 @@ create:
       default: false
       selector:
         boolean:
+    external_actions: &external_actions
+      name: External actions
+      description: Up to five inert id/label actions reported back through reminders_lifecycle. Only valid when managed externally.
+      selector:
+        object:
 
 create_recurring:
   name: Create a recurring reminder
@@ -259,10 +270,12 @@ create_recurring:
     deliver_when: *deliver_when
     complete_when: *complete_when
     escalation: *escalation
+    allow_manual_completion: *allow_manual_completion
     source: *source
     source_id: *source_id
     source_event: *source_event
     managed_externally: *managed_externally
+    external_actions: *external_actions
 
 get:
   name: Get a reminder
@@ -327,10 +340,12 @@ update:
     deliver_when: *deliver_when
     complete_when: *complete_when
     escalation: *escalation
+    allow_manual_completion: *allow_manual_completion
     source: *source
     source_id: *source_id
     source_event: *source_event
     managed_externally: *managed_externally
+    external_actions: *external_actions
     first_reminder: *first_reminder
     frequency: *frequency
     interval: *interval
@@ -366,13 +381,39 @@ snooze:
         duration:
 
 acknowledge:
-  name: Mark a reminder done
-  description: Acknowledges one successfully delivered occurrence that requires completion tracking.
+  name: Dismiss a reminder
+  description: Stops reminders for one occurrence without claiming the underlying task was completed.
   fields:
     reminder_id: *reminder_id
     occurrence_id:
       name: Occurrence ID
       description: Optional for a one-time reminder or when exactly one series occurrence awaits acknowledgement; otherwise required.
+      selector:
+        text:
+
+complete:
+  name: Complete a reminder task
+  description: Reports the underlying task completed when Allow “Done” is enabled.
+  fields:
+    reminder_id: *reminder_id
+    occurrence_id:
+      name: Occurrence ID
+      selector:
+        text:
+
+external_action:
+  name: Select an external reminder action
+  description: Reports one configured source-defined action to the owning integration.
+  fields:
+    reminder_id: *reminder_id
+    occurrence_id:
+      name: Occurrence ID
+      required: true
+      selector:
+        text:
+    external_action_id:
+      name: External action ID
+      required: true
       selector:
         text:
 
@@ -386,7 +427,7 @@ set_user_preferences:
     mobile_app_services: *mobile_app_services
     voice_targets: *voice_targets
     require_acknowledgement:
-      name: Require acknowledgement by default
+      name: Keep reminding until dismissed by default
       description: Applied at each occurrence's delivery time when its policy is Use my default.
       default: false
       selector:
@@ -524,10 +565,12 @@ create_triggered:
     quiet_hours_policy: *quiet_policy
     complete_when: *complete_when
     escalation: *escalation
+    allow_manual_completion: *allow_manual_completion
     source: *source
     source_id: *source_id
     source_event: *source_event
     managed_externally: *managed_externally
+    external_actions: *external_actions
 
 fire_trigger:
   name: Fire a named reminder trigger

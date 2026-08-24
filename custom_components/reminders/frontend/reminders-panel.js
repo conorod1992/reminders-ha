@@ -210,9 +210,10 @@ class RemindersManagementPanel extends HTMLElement {
     }
     const meta = document.createElement("div");
     meta.className = "meta";
+    const displayStatus = reminder.status === "acknowledged" ? "dismissed" : reminder.status === "awaiting_acknowledgement" ? "awaiting dismissal" : reminder.status.replaceAll("_", " ");
     const values = reminder.activation_type === "trigger"
-      ? [reminder.status.replaceAll("_", " "), reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
-      : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min if not marked Done` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean);
+      ? [displayStatus, reminder.repeat_policy === "once" ? "Once" : reminder.repeat_policy.replaceAll("_", " "), reminder.cooldown_seconds ? `Cooldown ${this._duration(reminder.cooldown_seconds)}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min until dismissed or completed` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
+      : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Escalates after ${reminder.escalation.initial_delay_minutes} min until dismissed or completed` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean);
     if (reminder.owner_name) values.push(reminder.owner_name);
     if (reminder.managed_externally && reminder.source) values.push(`Managed by ${reminder.source}`);
     meta.textContent = values.join(" · ");
@@ -220,13 +221,16 @@ class RemindersManagementPanel extends HTMLElement {
     const actions = document.createElement("div");
     actions.className = "actions";
     const awaiting = awaitingOccurrences(reminder);
-    if (awaiting.length) actions.append(this._action("Done", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
+    const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
+    if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
+    if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
     if (!reminder.managed_externally) actions.append(
       this._action("Edit", () => this._openReminderForm(reminder)),
     );
     actions.append(
       this._action("Duplicate", () => this._openReminderForm(null, reminder)),
       this._action("Snooze", () => this._openSnooze(reminder)),
+      ...(awaiting.length ? [this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id))] : []),
       this._action("Delete", () => this._confirmDelete(reminder), "danger"),
     );
     card.append(when, body, actions);
@@ -246,7 +250,7 @@ class RemindersManagementPanel extends HTMLElement {
     title.textContent = row.title;
     const status = document.createElement("span");
     status.className = `status ${occurrence.status}`;
-    status.textContent = occurrence.status.replaceAll("_", " ");
+    status.textContent = occurrence.status === "acknowledged" ? "dismissed" : occurrence.status === "awaiting_acknowledgement" ? "awaiting dismissal" : occurrence.status.replaceAll("_", " ");
     const details = document.createElement("div");
     details.className = "meta";
     const channelText = occurrence.succeeded_channels.length ? `Delivered by ${occurrence.succeeded_channels.join(", ")}` : "No channel succeeded";
@@ -259,7 +263,7 @@ class RemindersManagementPanel extends HTMLElement {
     body.append(title, status, details);
     const actions = document.createElement("div");
     actions.className = "actions";
-    if (occurrence.status === "awaiting_acknowledgement") actions.append(this._action("Done", () => this._acknowledge({ id: row.reminder_id }, occurrence.id)));
+    if (occurrence.status === "awaiting_acknowledgement") actions.append(this._action("Dismiss", () => this._acknowledge({ id: row.reminder_id }, occurrence.id)));
     card.append(when, body, actions);
     return card;
   }
@@ -330,7 +334,7 @@ class RemindersManagementPanel extends HTMLElement {
             <label class="duration-option">Must remain matching for (seconds)<input name="for_seconds" type="number" min="0" max="31536000" value="0"></label>
             <label><span><input name="fire_if_already_matching" type="checkbox"> Fire immediately if already matching</span><span class="hint">Off by default. When disabled, this waits for the next matching change rather than firing because it already matches after creation or restart.</span></label>
             <label>Repeat policy<select name="repeat_policy"><option value="once">Once</option><option value="every_trigger">Every trigger</option><option value="rearm_after_acknowledgement">Rearm after acknowledgement</option></select></label>
-            <label class="awaiting-option hidden">While awaiting acknowledgement<select name="while_awaiting_acknowledgement"><option value="skip">Skip new trigger</option><option value="deliver_new_occurrence">Deliver a new occurrence</option></select></label>
+            <label class="awaiting-option hidden">While awaiting dismissal<select name="while_awaiting_acknowledgement"><option value="skip">Skip new trigger</option><option value="deliver_new_occurrence">Deliver a new occurrence</option></select></label>
             <label>Cooldown<select name="cooldown_preset"><option value="0">No cooldown</option><option value="300">5 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="86400">1 day</option><option value="custom">Custom</option></select></label>
             <label class="cooldown-custom hidden">Custom cooldown (seconds)<input name="cooldown_seconds" type="number" min="0" max="31536000" value="0"></label>
             <div class="fieldrow"><label>Available from (optional)<input name="available_from" type="datetime-local"></label><label>Expiry (optional)<input name="expires_at" type="datetime-local"></label></div>
@@ -338,12 +342,13 @@ class RemindersManagementPanel extends HTMLElement {
           </div>
           <div id="owner"></div>
           <label>Delivery<select name="delivery_mode"><option value="default">Use my defaults</option><option value="custom">Choose for this reminder</option></select></label>
-          <div id="custom-delivery" class="hidden"><div class="checkrow channels"></div><label class="notify-label hidden">Standard phone notifications</label><label class="mobile-app-label hidden">Companion App notifications with Snooze and Done actions<span class="hint">Choose registered mobile_app notify services. If a device rejects actions, the reminder is retried without buttons.</span></label><label class="voice-label hidden">Voice devices</label></div>
-          <label>Completion tracking<select name="acknowledgement_policy"><option value="default">Use my default</option><option value="required">Require me to mark it done</option><option value="not_required">Do not require completion</option></select></label>
+          <div id="custom-delivery" class="hidden"><div class="checkrow channels"></div><label class="notify-label hidden">Standard phone notifications</label><label class="mobile-app-label hidden">Companion App notifications with Snooze, Done, and Dismiss actions<span class="hint">Choose registered mobile_app notify services. If a device rejects actions, the reminder is retried without buttons.</span></label><label class="voice-label hidden">Voice devices</label></div>
+          <label>Dismissal tracking<select name="acknowledgement_policy"><option value="default">Use my default</option><option value="required">Keep reminding until dismissed</option><option value="not_required">Do not require dismissal</option></select></label>
           <label>Quiet hours<select name="quiet_hours_policy"><option value="respect">Respect my quiet hours</option><option value="ignore">Ignore quiet hours (urgent)</option></select></label>
           <div class="context-option"><label><span><input name="deliver_when_enabled" type="checkbox"> Wait for the right context after the scheduled time</span><span class="hint">Choose the same bounded trigger types used by triggered reminders.</span></label>${this._contextTriggerEditor("deliver_when", "Delivery context")}</div>
           <label><span><input name="complete_when_enabled" type="checkbox"> Complete automatically when Home Assistant detects it</span></label>${this._contextTriggerEditor("complete_when", "Completion context")}
-          <label><span><input name="escalation_enabled" type="checkbox"> Escalate until marked Done</span></label><div class="escalation-config fieldrow hidden"><label>First reminder after (minutes)<input name="escalation_initial" type="number" min="1" max="10080" value="30"></label><label>Repeat every (minutes)<input name="escalation_repeat" type="number" min="1" max="10080" value="60"></label><label>Maximum attempts<input name="escalation_max" type="number" min="1" max="20" value="3"></label></div>
+          <label><span><input name="allow_manual_completion" type="checkbox"> Allow “Done”</span><span class="hint">Done reports that the underlying task was completed. Dismiss only stops reminders.</span></label>
+          <label><span><input name="escalation_enabled" type="checkbox"> Escalate until dismissed or completed</span></label><div class="escalation-config fieldrow hidden"><label>First reminder after (minutes)<input name="escalation_initial" type="number" min="1" max="10080" value="30"></label><label>Repeat every (minutes)<input name="escalation_repeat" type="number" min="1" max="10080" value="60"></label><label>Maximum attempts<input name="escalation_max" type="number" min="1" max="20" value="3"></label></div>
         </div></details>
         <div class="form-error hidden" role="alert"></div>
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
@@ -377,6 +382,7 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.quiet_hours_policy.value = source?.quiet_hours_policy || "respect";
     form.elements.deliver_when_enabled.checked = Boolean(source?.deliver_when);
     form.elements.complete_when_enabled.checked = Boolean(source?.complete_when);
+    form.elements.allow_manual_completion.checked = Boolean(source?.allow_manual_completion);
     this._setupContextTrigger(form, "deliver_when", source?.deliver_when || {});
     this._setupContextTrigger(form, "complete_when", source?.complete_when || {});
     form.elements.escalation_enabled.checked = Boolean(source?.escalation);
@@ -657,6 +663,7 @@ class RemindersManagementPanel extends HTMLElement {
       acknowledgement_policy: form.elements.acknowledgement_policy.value,
       quiet_hours_policy: form.elements.quiet_hours_policy.value,
       delivery_mode: form.elements.delivery_mode.value,
+      allow_manual_completion: form.elements.allow_manual_completion.checked,
     };
     if (form.elements.user_id) data.user_id = form.elements.user_id.value;
     if (data.delivery_mode === "custom") {
@@ -728,6 +735,16 @@ class RemindersManagementPanel extends HTMLElement {
     catch (error) { this._showError(error); }
   }
 
+  async _complete(reminder, occurrenceId) {
+    try { await this._call("complete", { reminder_id: reminder.id, occurrence_id: occurrenceId }); await this._load(); }
+    catch (error) { this._showError(error); }
+  }
+
+  async _externalAction(reminder, occurrenceId, externalActionId) {
+    try { await this._call("external_action", { reminder_id: reminder.id, occurrence_id: occurrenceId, external_action_id: externalActionId }); await this._load(); }
+    catch (error) { this._showError(error); }
+  }
+
   _confirmDelete(reminder) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     dialog.innerHTML = `<div class="dialog"><h2>Delete reminder?</h2><p>${reminder.recurring ? "This removes the whole series and its retained history." : "This reminder will be permanently removed."}</p><div class="dialog-actions"><button class="secondary cancel">Cancel</button><button class="danger confirm">Delete</button></div></div>`;
@@ -742,7 +759,7 @@ class RemindersManagementPanel extends HTMLElement {
   async _openPreferences(firstRun) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     let target = this._hass.user.id;
-    dialog.innerHTML = `<div class="dialog"><h2>${firstRun ? "Set up reminder delivery" : "Reminder preferences"}</h2><p class="hint">Choose how reminders should reach you. Home Assistant notifications are the simplest reliable option; phone and voice are optional.</p><div class="form"><div id="preference-user"></div><div class="checkrow channels"></div><label class="notify-label">Standard phone notifications<span class="hint">Notify entities receive ordinary title and message fields.</span></label><label class="mobile-app-label">Companion App notifications with actions<span class="hint">Registered mobile_app notify services can show Snooze and Done buttons.</span></label><label class="voice-label">Voice devices<span class="hint">Assist satellites that can announce reminders.</span></label><label><span><input type="checkbox" name="require_acknowledgement"> Require me to mark reminders done by default</span></label><details><summary>Quiet hours and history</summary><div class="advanced"><label><span><input type="checkbox" name="quiet_enabled"> Enable quiet hours for voice</span></label><div class="fieldrow"><label>Start<input type="time" name="quiet_start"></label><label>End<input type="time" name="quiet_end"></label></div><div class="fieldrow"><label>Keep history for days<input type="number" name="retention_days" min="1" max="3650"></label><label>Maximum occurrences<input type="number" name="retention_count" min="10" max="5000"></label></div></div></details><div class="quick tests"><button data-test="persistent_notification">Test notification</button><button data-test="phone">Test phone</button><button data-test="voice">Test voice</button><button data-test="all">Test configured delivery</button></div><div class="test-result hint" role="status"></div></div><div class="dialog-actions"><button class="secondary cancel">${firstRun ? "Use defaults" : "Cancel"}</button><button class="save">Save preferences</button></div></div>`;
+    dialog.innerHTML = `<div class="dialog"><h2>${firstRun ? "Set up reminder delivery" : "Reminder preferences"}</h2><p class="hint">Choose how reminders should reach you. Home Assistant notifications are the simplest reliable option; phone and voice are optional.</p><div class="form"><div id="preference-user"></div><div class="checkrow channels"></div><label class="notify-label">Standard phone notifications<span class="hint">Notify entities receive ordinary title and message fields.</span></label><label class="mobile-app-label">Companion App notifications with actions<span class="hint">Registered mobile_app notify services can show Snooze, Done, and Dismiss buttons.</span></label><label class="voice-label">Voice devices<span class="hint">Assist satellites that can announce reminders.</span></label><label><span><input type="checkbox" name="require_acknowledgement"> Keep reminding until dismissed by default</span></label><details><summary>Quiet hours and history</summary><div class="advanced"><label><span><input type="checkbox" name="quiet_enabled"> Enable quiet hours for voice</span></label><div class="fieldrow"><label>Start<input type="time" name="quiet_start"></label><label>End<input type="time" name="quiet_end"></label></div><div class="fieldrow"><label>Keep history for days<input type="number" name="retention_days" min="1" max="3650"></label><label>Maximum occurrences<input type="number" name="retention_count" min="10" max="5000"></label></div></div></details><div class="quick tests"><button data-test="persistent_notification">Test notification</button><button data-test="phone">Test phone</button><button data-test="voice">Test voice</button><button data-test="all">Test configured delivery</button></div><div class="test-result hint" role="status"></div></div><div class="dialog-actions"><button class="secondary cancel">${firstRun ? "Use defaults" : "Cancel"}</button><button class="save">Save preferences</button></div></div>`;
     if (this._hass.user.is_admin && !firstRun) {
       const label = document.createElement("label"); label.textContent = "Preferences for";
       const select = this._userSelect(target); label.append(select); dialog.querySelector("#preference-user").append(label);

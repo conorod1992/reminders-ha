@@ -69,7 +69,8 @@ Assistant.” and do not create a reminder or history item.
 
 The default Add dialog shows only the title, quick time choices, exact date and
 time, and Save. Message, recurrence, recipient, custom delivery,
-acknowledgement, and urgent quiet-hours override are under **Advanced options**.
+dismissal, optional manual completion, and urgent quiet-hours override are under
+**Advanced options**.
 
 Quick choices populate the normal date/time fields in Home Assistant's
 configured timezone. They do not use a separate scheduler. The date/time fields
@@ -80,7 +81,8 @@ Each reminder card supports:
 - **Edit**
 - **Duplicate**
 - **Snooze**
-- **Done**, when a delivered occurrence awaits acknowledgement
+- **Done**, only when manual completion is enabled
+- **Dismiss**, when a delivered occurrence requires dismissal
 - **Delete**
 
 Duplicating opens an unsaved form. A one-time copy deliberately has no due time,
@@ -93,14 +95,14 @@ filter by owner using friendly display names while the API continues submitting
 immutable IDs. Upcoming, Recurring, History, and Failed views remain live via a
 privacy-preserving invalidation subscription; there is no polling.
 
-## Optional Done / acknowledgement
+## Dismissal and optional task completion
 
-Not every reminder needs completion tracking. Each user chooses **Require
-acknowledgement by default**, and each reminder has one of three policies:
+Not every reminder needs dismissal tracking. Each user chooses **Keep reminding
+until dismissed by default**, and each reminder has one of three policies:
 
 - `default`: use the owner's current preference
-- `required`: require acknowledgement for this reminder/series
-- `not_required`: never require acknowledgement for this reminder/series
+- `required`: keep reminding until this occurrence is dismissed
+- `not_required`: never require dismissal for this reminder/series
 
 Legacy users and reminders default to `false` and `default`, so upgrading does
 not suddenly require acknowledgement.
@@ -111,9 +113,11 @@ future deliveries, including future occurrences of an existing series, without
 rewriting reminder records. The resolved boolean is recorded on that occurrence
 so its historical meaning never changes later.
 
-A successful required delivery becomes `awaiting_acknowledgement`; successful
-delivery itself is not redefined as completion. Done records an acknowledgement
-timestamp and, for authenticated calls, the Home Assistant user ID that did it.
+A successful required delivery becomes `awaiting_acknowledgement`; the internal
+storage vocabulary is retained for compatibility. **Dismiss** records an
+acknowledgement timestamp without claiming task completion. With
+`allow_manual_completion: true`, **Done** instead records a distinct `completed`
+occurrence, completion timestamp, and authenticated Home Assistant user ID.
 For a recurring series, only the delivered occurrence is acknowledged. The
 series has already advanced to its next anchored occurrence and continues
 normally.
@@ -123,8 +127,9 @@ The lifecycle vocabulary is explicit:
 - scheduled
 - delivering (durable transient claim)
 - delivered
-- awaiting acknowledgement
-- acknowledged
+- awaiting acknowledgement (shown as awaiting dismissal)
+- acknowledged (shown as dismissed)
+- completed
 - failed
 - cancelled where a retained occurrence is replaced by a recurrence edit
 
@@ -251,8 +256,8 @@ data:
 ```
 
 Explicitly selected Companion App `notify.mobile_app_*` services receive
-**Done**, **Snooze 10 minutes**, and **Snooze 1 hour** actions. Done appears only
-when acknowledgement is required. Generic notify entities always receive only
+**Done** when manual completion is enabled, **Dismiss** when dismissal is
+required, and the existing snooze actions. Generic notify entities receive only
 the standard title and message supported by the Notify entity API. If a selected
 Companion App service rejects the action payload, delivery retries that same
 service once as an ordinary notification without buttons. The integration
@@ -544,10 +549,24 @@ Reminders internals. `create`, `create_recurring`, `create_triggered`, and
 `managed_externally` fields. Use `list` (or `reminders/list`) with `source` and
 `source_id` to find them again; normal caller ownership rules still apply.
 
-Each durable acknowledgement, automatic completion, snooze, or deletion fires
+Externally managed reminders may also provide up to five inert
+`external_actions`, each containing only a bounded `id` and `label`. These
+actions cannot call services, render templates, open URLs, or execute callbacks.
+They can coexist with Snooze and Dismiss; generic Done still requires
+`allow_manual_completion: true`.
+
+Each durable dismissal, manual completion, automatic completion, snooze,
+external action selection, or deletion fires
 the `reminders_lifecycle` Home Assistant event. Its safe payload includes
 `action`, `reminder_id`, optional `occurrence_id`, `user_id`, and the source
-metadata, but never the reminder title or message.
+metadata, but never the reminder title or message. An external selection uses
+`action: external_action` and adds `external_action_id`.
+
+An owning integration can therefore set `allow_manual_completion: false`, set
+`acknowledgement_policy: required`, provide (for example)
+`external_actions: [{"id": "renewed", "label": "Renewed"}]`, and listen for
+`reminders_lifecycle` events matching its `source`/`source_id` and
+`external_action_id`.
 
 ## Structured conversation tools
 
@@ -561,7 +580,8 @@ conversation agents. Select that API in an agent's configuration to expose:
 - update reminder
 - delete/cancel reminder
 - snooze reminder
-- acknowledge/mark done
+- dismiss an occurrence
+- complete a task when enabled
 - query history
 
 Tools use structured arguments and return structured reminder/history data.

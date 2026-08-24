@@ -107,6 +107,7 @@ def _tools() -> list[llm.Tool]:
         vol.Optional("quiet_hours_policy", default="respect"): vol.In(
             tuple(QuietHoursPolicy)
         ),
+        vol.Optional("allow_manual_completion", default=False): cv.boolean,
     }
     scheduled_advanced: dict[Any, Any] = {
         vol.Optional("deliver_when"): dict,
@@ -255,6 +256,7 @@ def _tools() -> list[llm.Tool]:
                             vol.Optional("deliver_when"): vol.Any(None, dict),
                             vol.Optional("complete_when"): vol.Any(None, dict),
                             vol.Optional("escalation"): vol.Any(None, dict),
+                            vol.Optional("allow_manual_completion"): cv.boolean,
                         }
                     ),
                     cv.has_at_least_one_key("reminder_id", "title"),
@@ -296,7 +298,7 @@ def _tools() -> list[llm.Tool]:
         ),
         RemindersTool(
             "acknowledge_reminder",
-            "Mark one delivered occurrence done; occurrence_id disambiguates "
+            "Dismiss one delivered occurrence; occurrence_id disambiguates "
             "series history.",
             vol.Schema(
                 vol.All(
@@ -307,6 +309,19 @@ def _tools() -> list[llm.Tool]:
                 )
             ),
             _acknowledge,
+        ),
+        RemindersTool(
+            "complete_reminder",
+            "Mark the underlying task completed when manual completion is enabled.",
+            vol.Schema(
+                vol.All(
+                    vol.Schema(
+                        {**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}
+                    ),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
+            _complete,
         ),
         RemindersTool(
             "fire_named_reminder_trigger",
@@ -381,6 +396,7 @@ async def _create(
         deliver_when=args.get("deliver_when"),
         complete_when=args.get("complete_when"),
         escalation=args.get("escalation"),
+        allow_manual_completion=args["allow_manual_completion"],
     )
     return {"reminder": reminder.to_dict()}
 
@@ -400,6 +416,7 @@ async def _create_recurring(
         deliver_when=args.get("deliver_when"),
         complete_when=args.get("complete_when"),
         escalation=args.get("escalation"),
+        allow_manual_completion=args["allow_manual_completion"],
     )
     return {"reminder": reminder.to_dict()}
 
@@ -433,6 +450,7 @@ async def _create_triggered(
         trigger_description=args.get("trigger_description"),
         complete_when=args.get("complete_when"),
         escalation=args.get("escalation"),
+        allow_manual_completion=args["allow_manual_completion"],
     )
     return {"reminder": reminder.to_dict()}
 
@@ -545,6 +563,7 @@ async def _update(
         "deliver_when",
         "complete_when",
         "escalation",
+        "allow_manual_completion",
     ):
         if key in args:
             changes[key] = args[key]
@@ -599,6 +618,21 @@ async def _acknowledge(
         reminder.id,
         occurrence_id=args.get("occurrence_id"),
         acknowledged_by=actor.id,
+    )
+    return {"occurrence": occurrence.to_dict()}
+
+
+async def _complete(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, actor = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    occurrence = await _manager(hass).async_complete(
+        reminder.id,
+        occurrence_id=args.get("occurrence_id"),
+        completed_by=actor.id,
     )
     return {"occurrence": occurrence.to_dict()}
 

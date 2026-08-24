@@ -9,10 +9,13 @@ import pytest
 from custom_components.reminders.manager import (
     ReminderManager,
     ReminderNotFoundError,
+    ReminderValidationError,
 )
 from custom_components.reminders.models import (
     AcknowledgementPolicy,
     DeliveryPolicy,
+    EscalationPolicy,
+    OccurrenceStatus,
     Reminder,
     ReminderStatus,
 )
@@ -111,6 +114,134 @@ async def test_external_metadata_filters_and_lifecycle_events(
                 "source_id": "milk",
                 "source_event": "urgent",
                 "action": "acknowledged",
+            },
+        )
+    ]
+
+
+async def test_manual_done_is_distinct_from_dismiss_and_is_opt_in(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    bus = EventBus()
+    dispatcher = FakeDispatcher()
+    manager = ReminderManager(SimpleNamespace(bus=bus), fake_store, dispatcher)  # type: ignore[arg-type]
+    await manager.async_load()
+    due = datetime.now(UTC) - timedelta(seconds=1)
+    disabled = await manager.async_create(user_id="u1", title="Legacy", due=due)
+    with pytest.raises(ReminderValidationError, match="not enabled"):
+        await manager.async_complete(disabled.id)
+
+    reminder = await manager.async_create(
+        user_id="u1",
+        title="Task",
+        due=due,
+        delivery_policy=DeliveryPolicy(("phone",), ("notify.phone",)),
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        allow_manual_completion=True,
+    )
+    titles = {item["title"] for item in dispatcher.calls[-1][0].notification_actions}
+    assert titles == {"Done", "Dismiss", "Snooze 10 minutes", "Snooze 1 hour"}
+    occurrence = reminder.occurrence_history[-1]
+    completed = await manager.async_complete(
+        reminder.id, occurrence_id=occurrence.id, completed_by="u1"
+    )
+    assert completed.status is OccurrenceStatus.COMPLETED
+    assert completed.completed_by == "u1"
+    assert completed.acknowledged_at is None
+    assert completed.next_escalation_at is None
+    assert bus.events[-1][1]["action"] == "completed"
+
+
+async def test_external_actions_are_bounded_round_trip_and_idempotent(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    bus = EventBus()
+    dispatcher = FakeDispatcher()
+    manager = ReminderManager(SimpleNamespace(bus=bus), fake_store, dispatcher)  # type: ignore[arg-type]
+    await manager.async_load()
+    due = datetime.now(UTC) - timedelta(seconds=1)
+    with pytest.raises(ReminderValidationError, match="only allowed"):
+        await manager.async_create(
+            user_id="u1",
+            title="Invalid",
+            due=due,
+            external_actions=[{"id": "renewed", "label": "Renewed"}],
+        )
+    with pytest.raises(ReminderValidationError, match="at most 5"):
+        await manager.async_create(
+            user_id="u1",
+            title="Invalid",
+            due=due,
+            managed_externally=True,
+            external_actions=[
+                {"id": str(index), "label": "Action"} for index in range(6)
+            ],
+        )
+
+    reminder = await manager.async_create(
+        user_id="u1",
+        title="Renew policy",
+        due=due,
+        delivery_policy=DeliveryPolicy(("phone",), ("notify.phone",)),
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        allow_manual_completion=True,
+        escalation=EscalationPolicy(1, 1, 2),
+        source="expiry_tracker",
+        source_id="car-insurance",
+        source_event="expiring",
+        managed_externally=True,
+        external_actions=[
+            {"id": "renewed", "label": "Renewed"},
+            {"id": "deferred", "label": "Deferred"},
+        ],
+    )
+    assert reminder.external_actions == (
+        {"id": "renewed", "label": "Renewed"},
+        {"id": "deferred", "label": "Deferred"},
+    )
+    payload = dispatcher.calls[-1][0]
+    assert {item["title"] for item in payload.notification_actions} == {
+        "Done",
+        "Dismiss",
+        "Snooze 10 minutes",
+        "Snooze 1 hour",
+        "Renewed",
+        "Deferred",
+    }
+    action = next(
+        item["action"]
+        for item in payload.notification_actions
+        if item["title"] == "Renewed"
+    )
+    await manager._async_handle_mobile_action(action)
+    await manager._async_handle_mobile_action(action)
+    selected = (await manager.async_get(reminder.id)).occurrence_history[-1]
+    assert selected.external_action_id == "renewed"
+    assert selected.next_escalation_at is not None
+    await manager._async_process_due(selected.next_escalation_at)
+    redelivery = dispatcher.calls[-1][0]
+    assert {item["title"] for item in redelivery.notification_actions} == {
+        "Done",
+        "Dismiss",
+        "Snooze 10 minutes",
+        "Snooze 1 hour",
+        "Deferred",
+    }
+    external_events = [
+        item for item in bus.events if item[1]["action"] == "external_action"
+    ]
+    assert external_events == [
+        (
+            "reminders_lifecycle",
+            {
+                "reminder_id": reminder.id,
+                "occurrence_id": selected.id,
+                "user_id": "u1",
+                "source": "expiry_tracker",
+                "source_id": "car-insurance",
+                "source_event": "expiring",
+                "action": "external_action",
+                "external_action_id": "renewed",
             },
         )
     ]
