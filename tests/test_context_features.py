@@ -233,6 +233,9 @@ async def test_escalation_attempts_stop_on_done(
         due=datetime.now(UTC) - timedelta(seconds=1),
         acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
         escalation=EscalationPolicy(1, 2, 2),
+        source="expiry_tracker",
+        source_id="front-door",
+        managed_externally=True,
     )
     delivered = await manager.async_get(reminder.id)
     occurrence = delivered.occurrence_history[-1]
@@ -245,6 +248,8 @@ async def test_escalation_attempts_stop_on_done(
     assert occurrence.escalation_attempt_count == 1
     assert occurrence.escalation_history[0].succeeded_channels
     assert len(dispatcher.calls) == 2
+    assert escalated.managed_externally is True
+    assert escalated.source == "expiry_tracker"
 
     await manager.async_acknowledge(reminder.id, occurrence_id=occurrence.id)
     acknowledged = await manager.async_get(reminder.id)
@@ -266,6 +271,9 @@ async def test_mobile_done_snooze_and_forged_actions_are_occurrence_scoped(
         due=datetime.now(UTC) - timedelta(seconds=1),
         delivery_policy=policy,
         acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        source="expiry_tracker",
+        source_id="snooze-item",
+        managed_externally=True,
     )
     delivered_payload = dispatcher.calls[-1][0]
     done = next(
@@ -288,6 +296,9 @@ async def test_mobile_done_snooze_and_forged_actions_are_occurrence_scoped(
         due=datetime.now(UTC) - timedelta(seconds=1),
         delivery_policy=policy,
         acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        source="expiry_tracker",
+        source_id="snooze-item",
+        managed_externally=True,
     )
     payload = dispatcher.calls[-1][0]
     snooze = next(
@@ -300,6 +311,7 @@ async def test_mobile_done_snooze_and_forged_actions_are_occurrence_scoped(
     assert updated.status is ReminderStatus.PENDING
     assert updated.occurrence_history[-1].snoozed
     assert updated.user_id == "u2"
+    assert updated.managed_externally is True
 
 
 async def test_event_context_before_due_is_ignored_and_waiting_survives_restart(
