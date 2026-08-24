@@ -1949,6 +1949,7 @@ class ReminderManager:
                     ack_required,
                     claimed.allow_manual_completion,
                     claimed.external_actions,
+                    occurrence.external_action_id,
                 )
             )
         result = await self._dispatcher.async_deliver(
@@ -2051,6 +2052,7 @@ class ReminderManager:
                             True,
                             reminder.allow_manual_completion,
                             reminder.external_actions,
+                            occurrence.external_action_id,
                         )
                     )
                     claims.append(
@@ -2189,6 +2191,7 @@ class ReminderManager:
                     ack_required,
                     claimed.allow_manual_completion,
                     claimed.external_actions,
+                    occurrence.external_action_id,
                 )
             )
         result = await self._dispatcher.async_deliver(
@@ -2710,6 +2713,7 @@ def _notification_actions(
     acknowledgement_required: bool,
     allow_manual_completion: bool = False,
     external_actions: tuple[dict[str, str], ...] = (),
+    selected_external_action_id: str | None = None,
 ) -> tuple[dict[str, str], ...]:
     if not token:
         return ()
@@ -2719,6 +2723,8 @@ def _notification_actions(
             {"action": f"{MOBILE_ACTION_PREFIX}{token}:DONE", "title": "Done"}
         )
     for item in external_actions:
+        if item["id"] == selected_external_action_id:
+            continue
         actions.append(
             {
                 "action": f"{MOBILE_ACTION_PREFIX}{token}:EXTERNAL_{item['id']}",

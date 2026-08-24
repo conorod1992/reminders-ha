@@ -14,6 +14,7 @@ from custom_components.reminders.manager import (
 from custom_components.reminders.models import (
     AcknowledgementPolicy,
     DeliveryPolicy,
+    EscalationPolicy,
     OccurrenceStatus,
     Reminder,
     ReminderStatus,
@@ -183,14 +184,30 @@ async def test_external_actions_are_bounded_round_trip_and_idempotent(
         due=due,
         delivery_policy=DeliveryPolicy(("phone",), ("notify.phone",)),
         acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        allow_manual_completion=True,
+        escalation=EscalationPolicy(1, 1, 2),
         source="expiry_tracker",
         source_id="car-insurance",
         source_event="expiring",
         managed_externally=True,
-        external_actions=[{"id": "renewed", "label": "Renewed"}],
+        external_actions=[
+            {"id": "renewed", "label": "Renewed"},
+            {"id": "deferred", "label": "Deferred"},
+        ],
     )
-    assert reminder.external_actions == ({"id": "renewed", "label": "Renewed"},)
+    assert reminder.external_actions == (
+        {"id": "renewed", "label": "Renewed"},
+        {"id": "deferred", "label": "Deferred"},
+    )
     payload = dispatcher.calls[-1][0]
+    assert {item["title"] for item in payload.notification_actions} == {
+        "Done",
+        "Dismiss",
+        "Snooze 10 minutes",
+        "Snooze 1 hour",
+        "Renewed",
+        "Deferred",
+    }
     action = next(
         item["action"]
         for item in payload.notification_actions
@@ -200,6 +217,16 @@ async def test_external_actions_are_bounded_round_trip_and_idempotent(
     await manager._async_handle_mobile_action(action)
     selected = (await manager.async_get(reminder.id)).occurrence_history[-1]
     assert selected.external_action_id == "renewed"
+    assert selected.next_escalation_at is not None
+    await manager._async_process_due(selected.next_escalation_at)
+    redelivery = dispatcher.calls[-1][0]
+    assert {item["title"] for item in redelivery.notification_actions} == {
+        "Done",
+        "Dismiss",
+        "Snooze 10 minutes",
+        "Snooze 1 hour",
+        "Deferred",
+    }
     external_events = [
         item for item in bus.events if item[1]["action"] == "external_action"
     ]
