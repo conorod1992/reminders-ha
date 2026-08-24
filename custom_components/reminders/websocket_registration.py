@@ -24,10 +24,12 @@ from .websocket_api import (
     _manager,
     _user_names,
     websocket_acknowledge,
+    websocket_complete,
     websocket_create,
     websocket_create_recurring,
     websocket_create_triggered,
     websocket_delete,
+    websocket_external_action,
     websocket_fire_trigger,
     websocket_get,
     websocket_get_preferences,
@@ -51,6 +53,10 @@ def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, A
         item.to_dict()
         for item in reminder.occurrence_history
         if item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+        or (
+            item.status is OccurrenceStatus.DELIVERED
+            and (reminder.allow_manual_completion or reminder.external_actions)
+        )
     ]
     if reminder.user_id in names:
         result["owner_name"] = names[reminder.user_id]
@@ -156,6 +162,7 @@ async def websocket_list(
             statuses = {
                 ReminderStatus.PENDING,
                 ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+                ReminderStatus.DELIVERED,
             }
             activation_type = ActivationType.TIME
         elif view == "recurring":
@@ -177,6 +184,14 @@ async def websocket_list(
             limit=msg["limit"],
             offset=msg["offset"],
         )
+        if view == "upcoming":
+            reminders = [
+                item
+                for item in reminders
+                if item.status is not ReminderStatus.DELIVERED
+                or item.allow_manual_completion
+                or bool(item.external_actions)
+            ]
     names = (
         await _user_names(hass) if connection.user.is_admin and scope != "mine" else {}
     )
@@ -200,6 +215,8 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_delete,
         websocket_snooze,
         websocket_acknowledge,
+        websocket_complete,
+        websocket_external_action,
         websocket_history,
         websocket_preview_recurrence,
         websocket_get_preferences,

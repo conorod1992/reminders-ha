@@ -200,7 +200,7 @@ async def test_completion_before_due_and_while_waiting(
     completed = await manager.async_get(reminder.id)
     occurrence = completed.occurrence_history[-1]
     assert completed.status is ReminderStatus.COMPLETED
-    assert occurrence.status is OccurrenceStatus.CANCELLED
+    assert occurrence.status is OccurrenceStatus.COMPLETED
     assert occurrence.completion_source == "automatic"
     await manager._async_process_due(future)
     assert not dispatcher.calls
@@ -259,7 +259,7 @@ async def test_escalation_attempts_stop_on_done(
     assert len(dispatcher.calls) == 2
 
 
-async def test_mobile_done_snooze_and_forged_actions_are_occurrence_scoped(
+async def test_mobile_dismiss_snooze_and_forged_actions_are_occurrence_scoped(
     fake_store: FakeStore, no_runtime_listeners: None
 ) -> None:
     dispatcher = FakeDispatcher()
@@ -276,16 +276,16 @@ async def test_mobile_done_snooze_and_forged_actions_are_occurrence_scoped(
         managed_externally=True,
     )
     delivered_payload = dispatcher.calls[-1][0]
-    done = next(
+    dismiss = next(
         item["action"]
         for item in delivered_payload.notification_actions
-        if item["title"] == "Done"
+        if item["title"] == "Dismiss"
     )
-    assert reminder.id not in done
-    assert "u1" not in done
-    await manager._async_handle_mobile_action("REMINDERS_forged:DONE")
-    await manager._async_handle_mobile_action(done)
-    await manager._async_handle_mobile_action(done)
+    assert reminder.id not in dismiss
+    assert "u1" not in dismiss
+    await manager._async_handle_mobile_action("REMINDERS_forged:DISMISS")
+    await manager._async_handle_mobile_action(dismiss)
+    await manager._async_handle_mobile_action(dismiss)
     acknowledged = await manager.async_get(reminder.id)
     assert acknowledged.occurrence_history[-1].status is OccurrenceStatus.ACKNOWLEDGED
     assert acknowledged.occurrence_history[-1].completion_source == "mobile_action"
@@ -385,7 +385,7 @@ async def test_completion_after_delivery_cancels_escalation_without_user_claim(
     )
     completed = await manager.async_get(reminder.id)
     occurrence = completed.occurrence_history[-1]
-    assert occurrence.status is OccurrenceStatus.ACKNOWLEDGED
+    assert occurrence.status is OccurrenceStatus.COMPLETED
     assert occurrence.acknowledged_by is None
     assert occurrence.completion_source == "automatic"
     assert occurrence.next_escalation_at is None
@@ -473,7 +473,7 @@ async def test_recurring_automatic_completion_acknowledges_delivered_occurrence_
     completed_old = next(
         item for item in completed.occurrence_history if item.id == awaiting.id
     )
-    assert completed_old.status is OccurrenceStatus.ACKNOWLEDGED
+    assert completed_old.status is OccurrenceStatus.COMPLETED
     assert completed_old.completion_source == "automatic"
 
 
@@ -498,7 +498,7 @@ async def test_completion_cancels_scheduled_snoozed_retry_without_advancing_seri
     )
     completed = await manager.async_get(reminder_id)
     retry = next(item for item in completed.occurrence_history if item.id == retry_id)
-    assert retry.status is OccurrenceStatus.CANCELLED
+    assert retry.status is OccurrenceStatus.COMPLETED
     assert retry.completion_source == "automatic"
     assert retry.next_escalation_at is None
     assert _recurrence_snapshot(completed) == series_snapshot
@@ -549,7 +549,7 @@ async def test_completion_wins_snoozed_retry_delivery_race(
 
     completed = await manager.async_get(reminder_id)
     retry = next(item for item in completed.occurrence_history if item.id == retry_id)
-    assert retry.status is OccurrenceStatus.CANCELLED
+    assert retry.status is OccurrenceStatus.COMPLETED
     assert retry.completion_source == "automatic"
     assert _recurrence_snapshot(completed) == series_snapshot
 
@@ -580,7 +580,7 @@ async def test_completion_acknowledges_redelivered_snoozed_retry_only(
     )
     completed = await manager.async_get(reminder_id)
     retry = next(item for item in completed.occurrence_history if item.id == retry_id)
-    assert retry.status is OccurrenceStatus.ACKNOWLEDGED
+    assert retry.status is OccurrenceStatus.COMPLETED
     assert retry.completion_source == "automatic"
     assert retry.next_escalation_at is None
     assert _recurrence_snapshot(completed) == series_snapshot
@@ -602,7 +602,7 @@ async def test_completion_after_restart_resolves_snoozed_retry_only(
     )
     completed = await restarted.async_get(reminder_id)
     retry = next(item for item in completed.occurrence_history if item.id == retry_id)
-    assert retry.status is OccurrenceStatus.CANCELLED
+    assert retry.status is OccurrenceStatus.COMPLETED
     assert retry.completion_source == "automatic"
     assert _recurrence_snapshot(completed) == series_snapshot
 
@@ -726,12 +726,12 @@ async def test_recurring_mobile_snooze_keeps_next_occurrence_and_retries_exactly
     assert retried.next_escalation_at is not None
     assert len(restarted_dispatcher.calls) == 1
 
-    done = next(
+    dismiss = next(
         action["action"]
         for action in restarted_dispatcher.calls[-1][0].notification_actions
-        if action["title"] == "Done"
+        if action["title"] == "Dismiss"
     )
-    await restarted._async_handle_mobile_action(done)
+    await restarted._async_handle_mobile_action(dismiss)
     finished = await restarted.async_get(reminder.id)
     retried = next(
         occurrence

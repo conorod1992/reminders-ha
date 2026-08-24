@@ -30,10 +30,12 @@ from .authorization import (
 from .const import (
     DOMAIN,
     SERVICE_ACKNOWLEDGE,
+    SERVICE_COMPLETE,
     SERVICE_CREATE,
     SERVICE_CREATE_RECURRING,
     SERVICE_CREATE_TRIGGERED,
     SERVICE_DELETE,
+    SERVICE_EXTERNAL_ACTION,
     SERVICE_FIRE_TRIGGER,
     SERVICE_GET,
     SERVICE_LIST,
@@ -72,18 +74,31 @@ ADVANCED_FIELDS: dict[Any, Any] = {
     vol.Optional("deliver_when"): dict,
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
 }
+EXTERNAL_ACTION_SCHEMA = vol.All(
+    cv.ensure_list,
+    vol.Length(max=5),
+    [
+        {
+            vol.Required("id"): vol.All(cv.string, vol.Match(r"^[A-Za-z0-9_-]{1,64}$")),
+            vol.Required("label"): vol.All(cv.string, vol.Length(min=1, max=64)),
+        }
+    ],
+)
 SOURCE_FIELDS: dict[Any, Any] = {
     vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
     vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
     vol.Optional("source_event"): vol.All(cv.string, vol.Length(min=1, max=128)),
     vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions"): EXTERNAL_ACTION_SCHEMA,
 }
 SOURCE_UPDATE_FIELDS: dict[Any, Any] = {
     vol.Optional("source"): vol.Any(None, cv.string),
     vol.Optional("source_id"): vol.Any(None, cv.string),
     vol.Optional("source_event"): vol.Any(None, cv.string),
     vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions"): EXTERNAL_ACTION_SCHEMA,
 }
 
 CREATE_FIELDS: dict[Any, Any] = {
@@ -157,6 +172,7 @@ CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
     vol.Optional("trigger_description"): cv.string,
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
 }
 CREATE_TRIGGERED_FIELDS.update(POLICY_FIELDS)
 CREATE_TRIGGERED_FIELDS.update(SOURCE_FIELDS)
@@ -208,6 +224,7 @@ UPDATE_FIELDS: dict[Any, Any] = {
     vol.Optional("deliver_when"): vol.Any(None, dict),
     vol.Optional("complete_when"): vol.Any(None, dict),
     vol.Optional("escalation"): vol.Any(None, dict),
+    vol.Optional("allow_manual_completion"): cv.boolean,
 }
 UPDATE_FIELDS.update(SOURCE_UPDATE_FIELDS)
 UPDATE_FIELDS.update(POLICY_FIELDS)
@@ -272,6 +289,14 @@ ACKNOWLEDGE_SCHEMA = vol.Schema(
         vol.Optional("occurrence_id"): cv.string,
     }
 )
+COMPLETE_SCHEMA = ACKNOWLEDGE_SCHEMA
+EXTERNAL_ACTION_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Required("reminder_id"): cv.string,
+        vol.Required("occurrence_id"): cv.string,
+        vol.Required("external_action_id"): cv.string,
+    }
+)
 TEST_DELIVERY_FIELDS: dict[Any, Any] = {
     vol.Optional("user_id"): cv.string,
     vol.Required("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
@@ -306,6 +331,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             deliver_when=call.data.get("deliver_when"),
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
+            allow_manual_completion=call.data["allow_manual_completion"],
             **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
@@ -333,6 +359,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             deliver_when=call.data.get("deliver_when"),
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
+            allow_manual_completion=call.data["allow_manual_completion"],
             **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
@@ -369,6 +396,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             trigger_description=call.data.get("trigger_description"),
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
+            allow_manual_completion=call.data["allow_manual_completion"],
             **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
@@ -443,6 +471,8 @@ def async_register_services(hass: HomeAssistant) -> None:
             "source_id",
             "source_event",
             "managed_externally",
+            "allow_manual_completion",
+            "external_actions",
         ):
             if key in call.data:
                 changes[key] = call.data[key]
@@ -554,6 +584,27 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
         return {"occurrence": occurrence.to_dict()} if call.return_response else None
 
+    async def complete(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
+        occurrence = await manager.async_complete(
+            reminder.id,
+            occurrence_id=call.data.get("occurrence_id"),
+            completed_by=call.context.user_id,
+        )
+        return {"occurrence": occurrence.to_dict()} if call.return_response else None
+
+    async def external_action(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
+        occurrence = await manager.async_select_external_action(
+            reminder.id,
+            call.data["external_action_id"],
+            occurrence_id=call.data["occurrence_id"],
+            selected_by=call.context.user_id,
+        )
+        return {"occurrence": occurrence.to_dict()} if call.return_response else None
+
     async def test_delivery(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         user_id = await _resolve_user(hass, call, call.data.get("user_id"))
@@ -599,6 +650,13 @@ def async_register_services(hass: HomeAssistant) -> None:
             SERVICE_ACKNOWLEDGE,
             acknowledge,
             ACKNOWLEDGE_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
+        (SERVICE_COMPLETE, complete, COMPLETE_SCHEMA, SupportsResponse.OPTIONAL),
+        (
+            SERVICE_EXTERNAL_ACTION,
+            external_action,
+            EXTERNAL_ACTION_SERVICE_SCHEMA,
             SupportsResponse.OPTIONAL,
         ),
         (
@@ -679,7 +737,13 @@ def _source_from_data(data: Any) -> dict[str, Any]:
     """Extract optional external-source metadata from a public request."""
     return {
         key: data[key]
-        for key in ("source", "source_id", "source_event", "managed_externally")
+        for key in (
+            "source",
+            "source_id",
+            "source_event",
+            "managed_externally",
+            "external_actions",
+        )
         if key in data
     }
 

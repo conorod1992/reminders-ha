@@ -70,6 +70,22 @@ def test_context_conditions_use_visual_trigger_editors() -> None:
     assert "_setupEntityPicker(form, `${prefix}_zone_zone`" in panel_source
 
 
+def test_panel_distinguishes_done_dismiss_and_external_actions() -> None:
+    panel_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'name="allow_manual_completion"' in panel_source
+    assert 'this._action("Done", () => this._complete' in panel_source
+    assert 'this._action("Dismiss", () => this._acknowledge' in panel_source
+    assert 'this._call("external_action"' in panel_source
+    assert "Keep reminding until dismissed" in panel_source
+
+
 async def test_panel_registers_once_and_reloads_cleanly(
     monkeypatch: Any,
 ) -> None:

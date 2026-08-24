@@ -133,8 +133,8 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
 export function acknowledgementSummary(reminder) {
   return {
     default: "Use my default",
-    required: "Done required",
-    not_required: "No completion needed",
+    required: "Keep reminding until dismissed",
+    not_required: "Dismissal not required",
   }[reminder?.acknowledgement_policy || "default"];
 }
 

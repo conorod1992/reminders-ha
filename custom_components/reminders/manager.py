@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
@@ -154,6 +155,8 @@ class ReminderManager:
         source_id: str | None = None,
         source_event: str | None = None,
         managed_externally: bool = False,
+        allow_manual_completion: bool = False,
+        external_actions: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
     ) -> Reminder:
         """Create and schedule a one-shot reminder."""
         due = _normalize_due(due)
@@ -164,6 +167,9 @@ class ReminderManager:
         escalation_policy = _coerce_escalation(escalation)
         source, source_id, source_event = _validate_source_metadata(
             source, source_id, source_event
+        )
+        source_actions = _validate_external_actions(
+            external_actions, managed_externally
         )
         now = dt_util.utcnow()
         occurrence = _new_occurrence(due)
@@ -193,6 +199,8 @@ class ReminderManager:
             source_id=source_id,
             source_event=source_event,
             managed_externally=managed_externally,
+            allow_manual_completion=allow_manual_completion,
+            external_actions=source_actions,
         )
         await self._async_add(reminder)
         if due <= now:
@@ -217,6 +225,8 @@ class ReminderManager:
         source_id: str | None = None,
         source_event: str | None = None,
         managed_externally: bool = False,
+        allow_manual_completion: bool = False,
+        external_actions: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
     ) -> Reminder:
         """Create and durably persist an anchored recurring reminder."""
         _validate_policy(delivery_policy)
@@ -226,6 +236,9 @@ class ReminderManager:
         escalation_policy = _coerce_escalation(escalation)
         source, source_id, source_event = _validate_source_metadata(
             source, source_id, source_event
+        )
+        source_actions = _validate_external_actions(
+            external_actions, managed_externally
         )
         now = dt_util.utcnow()
         due = first_due(recurrence, now)
@@ -259,6 +272,8 @@ class ReminderManager:
             source_id=source_id,
             source_event=source_event,
             managed_externally=managed_externally,
+            allow_manual_completion=allow_manual_completion,
+            external_actions=source_actions,
         )
         await self._async_add(reminder)
         self._notify_changed({user_id})
@@ -289,6 +304,8 @@ class ReminderManager:
         source_id: str | None = None,
         source_event: str | None = None,
         managed_externally: bool = False,
+        allow_manual_completion: bool = False,
+        external_actions: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
     ) -> Reminder:
         """Create and durably arm a listener-backed triggered reminder."""
         _validate_policy(delivery_policy)
@@ -305,6 +322,9 @@ class ReminderManager:
         escalation_policy = _coerce_escalation(escalation)
         source, source_id, source_event = _validate_source_metadata(
             source, source_id, source_event
+        )
+        source_actions = _validate_external_actions(
+            external_actions, managed_externally
         )
         now = dt_util.utcnow()
         status = _trigger_waiting_status(now, available, expiry)
@@ -341,6 +361,8 @@ class ReminderManager:
             source_id=source_id,
             source_event=source_event,
             managed_externally=managed_externally,
+            allow_manual_completion=allow_manual_completion,
+            external_actions=source_actions,
         )
         await self._async_add(reminder)
         await self._async_evaluate_immediate({reminder.id})
@@ -510,6 +532,8 @@ class ReminderManager:
                 "source_id",
                 "source_event",
                 "managed_externally",
+                "allow_manual_completion",
+                "external_actions",
             }
             unknown = set(changes) - allowed
             if unknown:
@@ -524,6 +548,11 @@ class ReminderManager:
                         changes.get("source_id", current.source_id),
                         changes.get("source_event", current.source_event),
                     )
+                )
+            if "managed_externally" in changes or "external_actions" in changes:
+                changes["external_actions"] = _validate_external_actions(
+                    changes.get("external_actions", current.external_actions),
+                    bool(changes.get("managed_externally", current.managed_externally)),
                 )
             _validate_policy(changes.get("delivery_policy"))
             now = dt_util.utcnow()
@@ -1100,6 +1129,127 @@ class ReminderManager:
         )
         return acknowledged
 
+    async def async_complete(
+        self,
+        reminder_id: str,
+        *,
+        occurrence_id: str | None = None,
+        completed_by: str | None = None,
+        completion_source: str = "manual",
+    ) -> Occurrence:
+        """Record that a user explicitly completed the underlying task."""
+        async with self._lock:
+            reminder = self._require(reminder_id)
+            if not reminder.allow_manual_completion:
+                raise ReminderValidationError("Manual completion is not enabled")
+            candidates = [
+                item
+                for item in reminder.occurrence_history
+                if item.status
+                in {
+                    OccurrenceStatus.DELIVERED,
+                    OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+                }
+                and (occurrence_id is None or item.id == occurrence_id)
+            ]
+            if len(candidates) != 1:
+                raise ReminderValidationError(
+                    "Exactly one matching delivered occurrence is required"
+                )
+            now = dt_util.utcnow()
+            completed = candidates[0].updated(
+                status=OccurrenceStatus.COMPLETED,
+                completed_at=now,
+                completed_by=completed_by,
+                completion_source=completion_source,
+                completion_reason="done",
+                next_escalation_at=None,
+            )
+            history = _replace_occurrence(list(reminder.occurrence_history), completed)
+            status = reminder.status
+            current_occurrence_id = reminder.current_occurrence_id
+            if (
+                completed.id == reminder.current_occurrence_id
+                and reminder.recurrence is None
+            ):
+                if (
+                    reminder.activation_type is ActivationType.TRIGGER
+                    and reminder.repeat_policy is not TriggerRepeatPolicy.ONCE
+                ):
+                    status = _trigger_waiting_status(
+                        now, reminder.available_from, reminder.expires_at
+                    )
+                    current_occurrence_id = None
+                else:
+                    status = ReminderStatus.COMPLETED
+            updated = reminder.updated(
+                occurrence_history=tuple(history),
+                status=status,
+                current_occurrence_id=current_occurrence_id,
+                updated_at=now,
+            )
+            candidate = dict(self._reminders)
+            candidate[reminder.id] = updated
+            await self._async_persist_state(candidate, self._users)
+            self._reschedule(force=True)
+        await self._trigger_registry.async_sync(self._reminders.values())
+        self._notify_changed({reminder.user_id})
+        self._fire_lifecycle_event(reminder, "completed", occurrence_id=completed.id)
+        return completed
+
+    async def async_select_external_action(
+        self,
+        reminder_id: str,
+        external_action_id: str,
+        *,
+        occurrence_id: str | None = None,
+        selected_by: str | None = None,
+    ) -> Occurrence:
+        """Persist and report one bounded source-defined action selection."""
+        async with self._lock:
+            reminder = self._require(reminder_id)
+            valid_ids = {item["id"] for item in reminder.external_actions}
+            if not reminder.managed_externally or external_action_id not in valid_ids:
+                raise ReminderValidationError("Unknown external action")
+            candidates = [
+                item
+                for item in reminder.occurrence_history
+                if item.status
+                in {
+                    OccurrenceStatus.DELIVERED,
+                    OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+                }
+                and item.external_action_id is None
+                and (occurrence_id is None or item.id == occurrence_id)
+            ]
+            if len(candidates) != 1:
+                raise ReminderValidationError(
+                    "Exactly one unresolved delivered occurrence is required"
+                )
+            now = dt_util.utcnow()
+            selected = candidates[0].updated(
+                external_action_id=external_action_id,
+                external_action_selected_at=now,
+                external_action_selected_by=selected_by,
+            )
+            updated = reminder.updated(
+                occurrence_history=tuple(
+                    _replace_occurrence(list(reminder.occurrence_history), selected)
+                ),
+                updated_at=now,
+            )
+            candidate = dict(self._reminders)
+            candidate[reminder.id] = updated
+            await self._async_persist_state(candidate, self._users)
+        self._notify_changed({reminder.user_id})
+        self._fire_lifecycle_event(
+            reminder,
+            "external_action",
+            occurrence_id=selected.id,
+            external_action_id=external_action_id,
+        )
+        return selected
+
     def _mobile_action_received(self, event: Event[Any]) -> None:
         """Dispatch an opaque mobile action token without exposing owner data."""
         action = event.data.get("action")
@@ -1130,12 +1280,25 @@ class ReminderManager:
         reminder_id, occurrence_id = match
         try:
             if operation == "DONE":
+                await self.async_complete(
+                    reminder_id,
+                    occurrence_id=occurrence_id,
+                    completed_by=None,
+                    completion_source="mobile_action",
+                )
+            elif operation == "DISMISS":
                 await self.async_acknowledge(
                     reminder_id,
                     occurrence_id=occurrence_id,
                     acknowledged_by=None,
                     completion_source="mobile_action",
-                    completion_reason="done",
+                    completion_reason="dismissed",
+                )
+            elif operation.startswith("EXTERNAL_"):
+                await self.async_select_external_action(
+                    reminder_id,
+                    operation.removeprefix("EXTERNAL_"),
+                    occurrence_id=occurrence_id,
                 )
             elif operation == "SNOOZE_10":
                 await self.async_snooze_occurrence(
@@ -1272,15 +1435,10 @@ class ReminderManager:
                 OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
             }:
                 return "inactive"
-            completed_status = (
-                OccurrenceStatus.ACKNOWLEDGED
-                if occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                else OccurrenceStatus.CANCELLED
-            )
             completed = occurrence.updated(
-                status=completed_status,
-                acknowledged_at=now,
-                acknowledged_by=None,
+                status=OccurrenceStatus.COMPLETED,
+                completed_at=now,
+                completed_by=None,
                 completion_source="automatic",
                 completion_reason=cause,
                 trigger_type=current.complete_when.type.value,
@@ -1786,7 +1944,12 @@ class ReminderManager:
                 candidate[reminder_id] = claimed
                 await self._async_persist_state(candidate, self._users)
             delivery_reminder = claimed.updated(
-                notification_actions=_notification_actions(token, ack_required)
+                notification_actions=_notification_actions(
+                    token,
+                    ack_required,
+                    claimed.allow_manual_completion,
+                    claimed.external_actions,
+                )
             )
         result = await self._dispatcher.async_deliver(
             delivery_reminder, delivery_policy
@@ -1884,7 +2047,10 @@ class ReminderManager:
                     history = _replace_occurrence(history, claimed_occurrence)
                     delivery_reminder = reminder.updated(
                         notification_actions=_notification_actions(
-                            occurrence.notification_action_token, True
+                            occurrence.notification_action_token,
+                            True,
+                            reminder.allow_manual_completion,
+                            reminder.external_actions,
                         )
                     )
                     claims.append(
@@ -2019,7 +2185,10 @@ class ReminderManager:
                 await self._async_persist_state(candidate, self._users)
             delivery_reminder = claimed.updated(
                 notification_actions=_notification_actions(
-                    occurrence.notification_action_token, ack_required
+                    occurrence.notification_action_token,
+                    ack_required,
+                    claimed.allow_manual_completion,
+                    claimed.external_actions,
                 )
             )
         result = await self._dispatcher.async_deliver(
@@ -2265,25 +2434,30 @@ class ReminderManager:
                 _LOGGER.exception("Error notifying a reminder state subscriber")
 
     def _fire_lifecycle_event(
-        self, reminder: Reminder, action: str, *, occurrence_id: str | None = None
+        self,
+        reminder: Reminder,
+        action: str,
+        *,
+        occurrence_id: str | None = None,
+        external_action_id: str | None = None,
     ) -> None:
         """Publish a durable lifecycle transition without reminder content."""
         bus = getattr(self._hass, "bus", None)
         fire = getattr(bus, "async_fire", None)
         if not callable(fire):
             return
-        fire(
-            LIFECYCLE_EVENT,
-            {
-                "reminder_id": reminder.id,
-                "occurrence_id": occurrence_id,
-                "user_id": reminder.user_id,
-                "source": reminder.source,
-                "source_id": reminder.source_id,
-                "source_event": reminder.source_event,
-                "action": action,
-            },
-        )
+        payload = {
+            "reminder_id": reminder.id,
+            "occurrence_id": occurrence_id,
+            "user_id": reminder.user_id,
+            "source": reminder.source,
+            "source_id": reminder.source_id,
+            "source_event": reminder.source_event,
+            "action": action,
+        }
+        if external_action_id is not None:
+            payload["external_action_id"] = external_action_id
+        fire(LIFECYCLE_EVENT, payload)
 
     def _require(self, reminder_id: str) -> Reminder:
         try:
@@ -2345,6 +2519,40 @@ def _validate_source_metadata(
             )
         normalized.append(item)
     return tuple(normalized)  # type: ignore[return-value]
+
+
+def _validate_external_actions(
+    actions: list[dict[str, str]] | tuple[dict[str, str], ...],
+    managed_externally: bool,
+) -> tuple[dict[str, str], ...]:
+    """Validate inert, bounded action identifiers and labels."""
+    if actions and not managed_externally:
+        raise ReminderValidationError(
+            "External actions are only allowed on externally managed reminders"
+        )
+    if not isinstance(actions, (list, tuple)) or len(actions) > 5:
+        raise ReminderValidationError("External actions must contain at most 5 items")
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in actions:
+        if not isinstance(item, dict) or set(item) != {"id", "label"}:
+            raise ReminderValidationError("External actions require only id and label")
+        action_id = item["id"].strip() if isinstance(item["id"], str) else ""
+        label = item["label"].strip() if isinstance(item["label"], str) else ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", action_id):
+            raise ReminderValidationError(
+                "External action IDs must be 1-64 letters, numbers, "
+                "underscores, or hyphens"
+            )
+        if not label or len(label) > 64:
+            raise ReminderValidationError(
+                "External action labels must be 1-64 characters"
+            )
+        if action_id in seen:
+            raise ReminderValidationError("External action IDs must be unique")
+        seen.add(action_id)
+        result.append({"id": action_id, "label": label})
+    return tuple(result)
 
 
 def _validate_trigger_options(
@@ -2498,14 +2706,28 @@ def _new_occurrence(
 
 
 def _notification_actions(
-    token: str | None, acknowledgement_required: bool
+    token: str | None,
+    acknowledgement_required: bool,
+    allow_manual_completion: bool = False,
+    external_actions: tuple[dict[str, str], ...] = (),
 ) -> tuple[dict[str, str], ...]:
     if not token:
         return ()
     actions: list[dict[str, str]] = []
-    if acknowledgement_required:
+    if allow_manual_completion:
         actions.append(
             {"action": f"{MOBILE_ACTION_PREFIX}{token}:DONE", "title": "Done"}
+        )
+    for item in external_actions:
+        actions.append(
+            {
+                "action": f"{MOBILE_ACTION_PREFIX}{token}:EXTERNAL_{item['id']}",
+                "title": item["label"],
+            }
+        )
+    if acknowledgement_required:
+        actions.append(
+            {"action": f"{MOBILE_ACTION_PREFIX}{token}:DISMISS", "title": "Dismiss"}
         )
     actions.extend(
         (
@@ -2578,6 +2800,7 @@ def _reminder_status(status: OccurrenceStatus) -> ReminderStatus:
             ReminderStatus.AWAITING_ACKNOWLEDGEMENT
         ),
         OccurrenceStatus.ACKNOWLEDGED: ReminderStatus.ACKNOWLEDGED,
+        OccurrenceStatus.COMPLETED: ReminderStatus.COMPLETED,
         OccurrenceStatus.FAILED: ReminderStatus.FAILED,
         OccurrenceStatus.CANCELLED: ReminderStatus.CANCELLED,
         OccurrenceStatus.SCHEDULED: ReminderStatus.PENDING,

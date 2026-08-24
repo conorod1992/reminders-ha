@@ -84,12 +84,29 @@
       "name": "List reminders"
     },
     "acknowledge": {
-      "description": "Mark one delivered reminder occurrence done.",
+      "description": "Dismiss one occurrence without claiming its task was completed.",
       "fields": {
         "occurrence_id": {"description": "Occurrence ID when a recurring series has more than one awaiting acknowledgement.", "name": "Occurrence ID"},
         "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}
       },
-      "name": "Mark reminder done"
+      "name": "Dismiss reminder"
+    },
+    "complete": {
+      "description": "Report an occurrence's underlying task completed when manual completion is enabled.",
+      "fields": {
+        "occurrence_id": {"description": "Occurrence to complete.", "name": "Occurrence ID"},
+        "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}
+      },
+      "name": "Complete reminder task"
+    },
+    "external_action": {
+      "description": "Report a configured source-defined reminder action.",
+      "fields": {
+        "external_action_id": {"description": "Configured external action ID.", "name": "External action ID"},
+        "occurrence_id": {"description": "Occurrence receiving the action.", "name": "Occurrence ID"},
+        "reminder_id": {"description": "Reminder UUID.", "name": "Reminder ID"}
+      },
+      "name": "Select external reminder action"
     },
     "set_user_preferences": {
       "description": "Set a user's live delivery, acknowledgement, quiet-hours, and history defaults.",

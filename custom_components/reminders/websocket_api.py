@@ -62,18 +62,31 @@ ADVANCED_SCHEMA: dict[Any, Any] = {
     vol.Optional("deliver_when"): dict,
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
 }
+EXTERNAL_ACTION_SCHEMA = vol.All(
+    cv.ensure_list,
+    vol.Length(max=5),
+    [
+        {
+            vol.Required("id"): vol.All(cv.string, vol.Match(r"^[A-Za-z0-9_-]{1,64}$")),
+            vol.Required("label"): vol.All(cv.string, vol.Length(min=1, max=64)),
+        }
+    ],
+)
 SOURCE_SCHEMA: dict[Any, Any] = {
     vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
     vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
     vol.Optional("source_event"): vol.All(cv.string, vol.Length(min=1, max=128)),
     vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions", default=[]): EXTERNAL_ACTION_SCHEMA,
 }
 SOURCE_UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("source"): vol.Any(None, cv.string),
     vol.Optional("source_id"): vol.Any(None, cv.string),
     vol.Optional("source_event"): vol.Any(None, cv.string),
     vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions"): EXTERNAL_ACTION_SCHEMA,
 }
 RECURRENCE_SCHEMA: dict[Any, Any] = {
     vol.Required("first_reminder"): cv.string,
@@ -282,6 +295,7 @@ async def websocket_create(
         deliver_when=msg.get("deliver_when"),
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
         **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
@@ -323,6 +337,7 @@ async def websocket_create_recurring(
         deliver_when=msg.get("deliver_when"),
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
         **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
@@ -354,6 +369,7 @@ CREATE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     **POLICY_SCHEMA,
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
     **SOURCE_SCHEMA,
 }
 
@@ -390,6 +406,7 @@ async def websocket_create_triggered(
         trigger_description=msg.get("trigger_description"),
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
         **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
@@ -459,6 +476,7 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("deliver_when"): vol.Any(None, dict),
     vol.Optional("complete_when"): vol.Any(None, dict),
     vol.Optional("escalation"): vol.Any(None, dict),
+    vol.Optional("allow_manual_completion"): cv.boolean,
     **SOURCE_UPDATE_SCHEMA,
 }
 
@@ -501,6 +519,8 @@ async def websocket_update(
         "source_id",
         "source_event",
         "managed_externally",
+        "allow_manual_completion",
+        "external_actions",
     ):
         if key in msg:
             changes[key] = msg[key]
@@ -621,6 +641,52 @@ async def websocket_acknowledge(
         reminder.id,
         occurrence_id=msg.get("occurrence_id"),
         acknowledged_by=connection.user.id,
+    )
+    connection.send_result(msg["id"], {"occurrence": occurrence.to_dict()})
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{COMMAND_PREFIX}complete",
+        vol.Required("reminder_id"): cv.string,
+        vol.Optional("occurrence_id"): cv.string,
+    }
+)
+@async_response
+@_api_errors
+async def websocket_complete(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    occurrence = await manager.async_complete(
+        reminder.id,
+        occurrence_id=msg.get("occurrence_id"),
+        completed_by=connection.user.id,
+    )
+    connection.send_result(msg["id"], {"occurrence": occurrence.to_dict()})
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{COMMAND_PREFIX}external_action",
+        vol.Required("reminder_id"): cv.string,
+        vol.Required("occurrence_id"): cv.string,
+        vol.Required("external_action_id"): cv.string,
+    }
+)
+@async_response
+@_api_errors
+async def websocket_external_action(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    occurrence = await manager.async_select_external_action(
+        reminder.id,
+        msg["external_action_id"],
+        occurrence_id=msg["occurrence_id"],
+        selected_by=connection.user.id,
     )
     connection.send_result(msg["id"], {"occurrence": occurrence.to_dict()})
 
@@ -875,6 +941,8 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_delete,
         websocket_snooze,
         websocket_acknowledge,
+        websocket_complete,
+        websocket_external_action,
         websocket_history,
         websocket_preview_recurrence,
         websocket_get_preferences,
