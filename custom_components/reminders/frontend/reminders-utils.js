@@ -138,6 +138,14 @@ export function acknowledgementSummary(reminder) {
   }[reminder?.acknowledgement_policy || "default"];
 }
 
+export function triggerRepeatSummary(reminder) {
+  return {
+    once: "Once",
+    every_trigger: "Every time it happens",
+    rearm_after_acknowledgement: "Trigger again after dismissal",
+  }[reminder?.repeat_policy || "once"];
+}
+
 export function awaitingOccurrences(reminder) {
   return (reminder?.occurrence_history || []).filter(
     (item) => item.status === "awaiting_acknowledgement",
