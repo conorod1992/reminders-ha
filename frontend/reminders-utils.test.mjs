@@ -8,6 +8,7 @@ import {
   quickTimeParts,
   recurrenceSummary,
   suggestedStates,
+  triggerRepeatSummary,
 } from "../custom_components/reminders/frontend/reminders-utils.js";
 
 test("formats supported recurrence rules", () => {
@@ -36,6 +37,12 @@ test("creates quick choices in the configured timezone", () => {
 test("summarizes acknowledgement and finds actionable occurrences", () => {
   assert.equal(acknowledgementSummary({ acknowledgement_policy: "required" }), "Keep reminding until dismissed");
   assert.deepEqual(awaitingOccurrences({ occurrence_history: [{ id: "a", status: "awaiting_acknowledgement" }, { id: "b", status: "delivered" }] }).map((item) => item.id), ["a"]);
+});
+
+test("uses user-friendly trigger repeat summaries without changing stored values", () => {
+  assert.equal(triggerRepeatSummary({ repeat_policy: "once" }), "Once");
+  assert.equal(triggerRepeatSummary({ repeat_policy: "every_trigger" }), "Every time it happens");
+  assert.equal(triggerRepeatSummary({ repeat_policy: "rearm_after_acknowledgement" }), "Trigger again after dismissal");
 });
 
 test("suggests domain and entity-specific states", () => {

@@ -86,6 +86,35 @@ def test_panel_distinguishes_done_dismiss_and_external_actions() -> None:
     assert "Keep reminding until dismissed" in panel_source
 
 
+def test_reminder_form_groups_advanced_options_and_keeps_common_fields_visible() -> (
+    None
+):
+    """Common fields stay in the main flow while advanced capabilities remain intact."""
+    panel_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+
+    notes_position = panel_source.index("Notes / message (optional)")
+    advanced_position = panel_source.index("<summary>Advanced options</summary>")
+    assert notes_position < advanced_position
+    assert panel_source.index("Repeat this reminder") < advanced_position
+    for heading in (
+        "Delivery",
+        "Completion &amp; dismissal",
+        "Conditions",
+        "Repeated reminders",
+        "Trigger behaviour",
+    ):
+        assert f"<summary>{heading}" in panel_source
+    assert 'value="rearm_after_acknowledgement"' in panel_source
+    assert 'value="deliver_new_occurrence"' in panel_source
+    assert "Home Assistant event (advanced)" in panel_source
+
+
 async def test_panel_registers_once_and_reloads_cleanly(
     monkeypatch: Any,
 ) -> None:
