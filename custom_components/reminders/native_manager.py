@@ -535,6 +535,4 @@ def _native_trigger_cause(run_variables: dict[str, Any]) -> str:
     if not isinstance(trigger, dict):
         return "home_assistant_trigger"
     value = trigger.get("platform") or trigger.get("trigger")
-    return (
-        f"home_assistant_{str(value)[:64]}" if value else "home_assistant_trigger"
-    )
+    return f"home_assistant_{str(value)[:64]}" if value else "home_assistant_trigger"
