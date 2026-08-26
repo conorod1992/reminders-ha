@@ -99,7 +99,9 @@ async def async_create_native_triggered(
         activation_type=ActivationType.TRIGGER,
         trigger=None,
         trigger_summary=_native_summary(activation_triggers),
-        trigger_description=(trigger_description.strip() if trigger_description else None),
+        trigger_description=(
+            trigger_description.strip() if trigger_description else None
+        ),
         activation_triggers=tuple(dict(item) for item in activation_triggers),
         repeat_policy=repeat_policy,
         fire_if_already_matching=False,
@@ -108,9 +110,7 @@ async def async_create_native_triggered(
         available_from=available,
         expires_at=expiry,
         immediate_evaluated=True,
-        completion_triggers=tuple(
-            dict(item) for item in (completion_triggers or ())
-        ),
+        completion_triggers=tuple(dict(item) for item in (completion_triggers or ())),
         escalation=escalation_policy,
         source=source,
         source_id=source_id,
@@ -162,7 +162,9 @@ async def async_update_native_triggered(
         if title is not None:
             title = title.strip()
             _validate_title(title)
-        policy = current.delivery_policy if delivery_policy is _UNSET else delivery_policy
+        policy = (
+            current.delivery_policy if delivery_policy is _UNSET else delivery_policy
+        )
         if policy is not None and not isinstance(policy, DeliveryPolicy):
             raise ReminderValidationError("Delivery policy is invalid")
         _validate_policy(policy)
@@ -176,7 +178,9 @@ async def async_update_native_triggered(
             if expires_at is _UNSET
             else _normalize_optional_time(expires_at)  # type: ignore[arg-type]
         )
-        cooldown = current.cooldown_seconds if cooldown_seconds is None else cooldown_seconds
+        cooldown = (
+            current.cooldown_seconds if cooldown_seconds is None else cooldown_seconds
+        )
         _validate_trigger_options(cooldown, available, expiry)
         next_escalation = (
             current.escalation
@@ -200,14 +204,22 @@ async def async_update_native_triggered(
             or current.trigger is not None
             or tuple(dict(item) for item in activation_triggers)
             != current.activation_triggers
-            or (repeat_policy is not None and repeat_policy is not current.repeat_policy)
+            or (
+                repeat_policy is not None
+                and repeat_policy is not current.repeat_policy
+            )
             or available != current.available_from
             or expiry != current.expires_at
         )
-        if rearm and active is not None and active.status in {
-            OccurrenceStatus.SCHEDULED,
-            OccurrenceStatus.WAITING_FOR_CONTEXT,
-        }:
+        if (
+            rearm
+            and active is not None
+            and active.status
+            in {
+                OccurrenceStatus.SCHEDULED,
+                OccurrenceStatus.WAITING_FOR_CONTEXT,
+            }
+        ):
             history = _replace_occurrence(
                 history,
                 active.updated(
@@ -224,7 +236,9 @@ async def async_update_native_triggered(
                         item.updated(
                             next_escalation_at=(
                                 now
-                                + timedelta(minutes=next_escalation.initial_delay_minutes)
+                                + timedelta(
+                                    minutes=next_escalation.initial_delay_minutes
+                                )
                                 if next_escalation is not None
                                 else None
                             ),
