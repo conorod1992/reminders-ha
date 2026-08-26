@@ -36,6 +36,13 @@ from .websocket_api import (
 )
 
 NATIVE_LIST = vol.All(cv.ensure_list, [dict])
+UPDATE_POLICY_SCHEMA: dict[Any, Any] = {
+    vol.Optional("delivery_mode"): vol.In(("default", "custom")),
+    vol.Optional("channels"): vol.All(cv.ensure_list, [cv.string]),
+    vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
+    vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+}
 
 
 def _native_manager(hass: HomeAssistant) -> NativeReminderManager:
@@ -70,9 +77,7 @@ async def websocket_set_native_rules(
 ) -> None:
     """Validate and replace native rules on an authorized reminder."""
     manager = _native_manager(hass)
-    reminder = await async_get_authorized(
-        manager, connection.user, msg["reminder_id"]
-    )
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     updated = await manager.async_set_native_rules(
         reminder.id,
         **{
@@ -148,9 +153,7 @@ async def websocket_create_native_triggered(
             else None
         ),
         expires_at=(
-            _parse_datetime(hass, msg["expires_at"])
-            if msg.get("expires_at")
-            else None
+            _parse_datetime(hass, msg["expires_at"]) if msg.get("expires_at") else None
         ),
         trigger_description=msg.get("trigger_description"),
         completion_triggers=msg["completion_triggers"],
@@ -181,7 +184,7 @@ UPDATE_NATIVE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     vol.Optional("available_from"): vol.Any(None, cv.string),
     vol.Optional("expires_at"): vol.Any(None, cv.string),
     vol.Optional("trigger_description"): vol.Any(None, cv.string),
-    **{key: value for key, value in POLICY_SCHEMA.items()},
+    **UPDATE_POLICY_SCHEMA,
     vol.Optional("escalation"): vol.Any(None, dict),
     vol.Optional("allow_manual_completion"): cv.boolean,
 }
@@ -195,9 +198,7 @@ async def websocket_update_native_triggered(
 ) -> None:
     """Update a native trigger-based reminder."""
     manager = _native_manager(hass)
-    reminder = await async_get_authorized(
-        manager, connection.user, msg["reminder_id"]
-    )
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     kwargs: dict[str, Any] = {
         "activation_triggers": msg["activation_triggers"],
     }
@@ -235,9 +236,7 @@ async def websocket_update_native_triggered(
         )
     if "expires_at" in msg:
         kwargs["expires_at"] = (
-            _parse_datetime(hass, msg["expires_at"])
-            if msg["expires_at"]
-            else None
+            _parse_datetime(hass, msg["expires_at"]) if msg["expires_at"] else None
         )
     if "escalation" in msg:
         kwargs["escalation"] = msg["escalation"]
@@ -251,9 +250,7 @@ async def websocket_update_native_triggered(
         )
     ):
         kwargs["delivery_policy"] = _policy_from_data(msg)
-    updated = await async_update_native_triggered(
-        manager, reminder.id, **kwargs
-    )
+    updated = await async_update_native_triggered(manager, reminder.id, **kwargs)
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
