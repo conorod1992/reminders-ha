@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
@@ -53,6 +55,7 @@ class NativeAutomationRuntime:
         self._callback = callback
         self._trigger_entries: dict[tuple[str, str], _TriggerEntry] = {}
         self._condition_entries: dict[str, _ConditionEntry] = {}
+        self._sync_lock = asyncio.Lock()
         self._unloaded = False
 
     @property
@@ -64,74 +67,34 @@ class NativeAutomationRuntime:
         """Reconcile native trigger listeners and compiled condition checkers."""
         if self._unloaded:
             return
-        reminder_list = list(reminders)
-        desired: dict[tuple[str, str], tuple[dict[str, Any], ...]] = {}
-        conditions: dict[str, tuple[dict[str, Any], ...]] = {}
-        for reminder in reminder_list:
-            if _native_activation_armed(reminder):
-                desired[(reminder.id, "activation")] = reminder.activation_triggers
-            if (
-                reminder.delivery_triggers
-                and reminder.status is ReminderStatus.WAITING_FOR_CONTEXT
-            ):
-                desired[(reminder.id, "delivery")] = reminder.delivery_triggers
-            if reminder.completion_triggers and _native_completion_armed(reminder):
-                desired[(reminder.id, "completion")] = reminder.completion_triggers
-            if reminder.delivery_conditions:
-                conditions[reminder.id] = reminder.delivery_conditions
+        async with self._sync_lock:
+            if self._unloaded:
+                return
+            reminder_list = list(reminders)
+            desired: dict[tuple[str, str], tuple[dict[str, Any], ...]] = {}
+            conditions: dict[str, tuple[dict[str, Any], ...]] = {}
+            for reminder in reminder_list:
+                if _native_activation_armed(reminder):
+                    desired[(reminder.id, "activation")] = reminder.activation_triggers
+                if (
+                    reminder.delivery_triggers
+                    and reminder.status is ReminderStatus.WAITING_FOR_CONTEXT
+                ):
+                    desired[(reminder.id, "delivery")] = reminder.delivery_triggers
+                if reminder.completion_triggers and _native_completion_armed(reminder):
+                    desired[(reminder.id, "completion")] = reminder.completion_triggers
+                if reminder.delivery_conditions:
+                    conditions[reminder.id] = reminder.delivery_conditions
 
-        for reference in set(self._trigger_entries) - set(desired):
-            self._remove_trigger(reference)
-        for reminder_id in set(self._condition_entries) - set(conditions):
-            self._remove_conditions(reminder_id)
+            for reference in set(self._trigger_entries) - set(desired):
+                self._remove_trigger(reference)
+            for reminder_id in set(self._condition_entries) - set(conditions):
+                self._remove_conditions(reminder_id)
 
-        for reference, configs in desired.items():
-            key = _config_key(configs)
-            current = self._trigger_entries.get(reference)
-            if current is not None and current.config_key == key:
-                continue
-            self._remove_trigger(reference)
-            try:
-                validated = await async_validate_native_triggers(self._hass, configs)
-                unsubscribe = await trigger_helper.async_initialize_triggers(
-                    self._hass,
-                    validated,
-                    self._action(reference),
-                    "reminders",
-                    f"reminder {reference[0]} {reference[1]}",
-                    self._log_callback,
-                )
-            except Exception:
-                _LOGGER.exception(
-                    "Unable to attach native %s triggers for reminder %s",
-                    reference[1],
-                    reference[0],
-                )
-                continue
-            if unsubscribe is not None:
-                self._trigger_entries[reference] = _TriggerEntry(key, unsubscribe)
-
-        for reminder_id, configs in conditions.items():
-            key = _config_key(configs)
-            current = self._condition_entries.get(reminder_id)
-            if current is not None and current.config_key == key:
-                continue
-            self._remove_conditions(reminder_id)
-            try:
-                validated = await async_validate_native_conditions(self._hass, configs)
-                checker = await condition_helper.async_conditions_from_config(
-                    self._hass,
-                    validated,
-                    _LOGGER,
-                    f"reminder {reminder_id} delivery conditions",
-                )
-            except Exception:
-                _LOGGER.exception(
-                    "Unable to prepare native delivery conditions for reminder %s",
-                    reminder_id,
-                )
-                continue
-            self._condition_entries[reminder_id] = _ConditionEntry(key, checker)
+            for reference, configs in desired.items():
+                await self._async_ensure_trigger_entry(reference, configs)
+            for reminder_id, configs in conditions.items():
+                await self._async_ensure_condition_entry(reminder_id, configs)
 
     async def async_conditions_match(self, reminder: Reminder) -> bool:
         """Evaluate a reminder's native delivery conditions using HA semantics."""
@@ -140,8 +103,13 @@ class NativeAutomationRuntime:
         key = _config_key(reminder.delivery_conditions)
         entry = self._condition_entries.get(reminder.id)
         if entry is None or entry.config_key != key:
-            await self.async_sync([reminder])
-            entry = self._condition_entries.get(reminder.id)
+            async with self._sync_lock:
+                if self._unloaded:
+                    return False
+                await self._async_ensure_condition_entry(
+                    reminder.id, reminder.delivery_conditions
+                )
+                entry = self._condition_entries.get(reminder.id)
         if entry is None:
             return False
         try:
@@ -155,11 +123,68 @@ class NativeAutomationRuntime:
 
     async def async_unload(self) -> None:
         """Detach native trigger listeners and condition resources."""
-        self._unloaded = True
-        for reference in tuple(self._trigger_entries):
-            self._remove_trigger(reference)
-        for reminder_id in tuple(self._condition_entries):
-            self._remove_conditions(reminder_id)
+        async with self._sync_lock:
+            self._unloaded = True
+            for reference in tuple(self._trigger_entries):
+                self._remove_trigger(reference)
+            for reminder_id in tuple(self._condition_entries):
+                self._remove_conditions(reminder_id)
+
+    async def _async_ensure_trigger_entry(
+        self,
+        reference: tuple[str, str],
+        configs: tuple[dict[str, Any], ...],
+    ) -> None:
+        key = _config_key(configs)
+        current = self._trigger_entries.get(reference)
+        if current is not None and current.config_key == key:
+            return
+        self._remove_trigger(reference)
+        try:
+            validated = await async_validate_native_triggers(self._hass, configs)
+            unsubscribe = await trigger_helper.async_initialize_triggers(
+                self._hass,
+                validated,
+                self._action(reference),
+                "reminders",
+                f"reminder {reference[0]} {reference[1]}",
+                self._log_callback,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Unable to attach native %s triggers for reminder %s",
+                reference[1],
+                reference[0],
+            )
+            return
+        if unsubscribe is not None:
+            self._trigger_entries[reference] = _TriggerEntry(key, unsubscribe)
+
+    async def _async_ensure_condition_entry(
+        self,
+        reminder_id: str,
+        configs: tuple[dict[str, Any], ...],
+    ) -> None:
+        key = _config_key(configs)
+        current = self._condition_entries.get(reminder_id)
+        if current is not None and current.config_key == key:
+            return
+        self._remove_conditions(reminder_id)
+        try:
+            validated = await async_validate_native_conditions(self._hass, configs)
+            checker = await condition_helper.async_conditions_from_config(
+                self._hass,
+                validated,
+                _LOGGER,
+                f"reminder {reminder_id} delivery conditions",
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Unable to prepare native delivery conditions for reminder %s",
+                reminder_id,
+            )
+            return
+        self._condition_entries[reminder_id] = _ConditionEntry(key, checker)
 
     def _action(
         self, reference: tuple[str, str]
@@ -243,8 +268,6 @@ def _native_completion_armed(reminder: Reminder) -> bool:
 
 def _config_key(configs: Iterable[dict[str, Any]]) -> tuple[str, ...]:
     """Create a stable comparison key without interpreting HA configuration."""
-    import json
-
     return tuple(
         json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
         for item in configs
