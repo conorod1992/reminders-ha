@@ -57,7 +57,7 @@ async def test_v1_migration_preserves_one_shot_and_preferences() -> None:
     assert users == {"u1": preferences}
 
 
-async def test_storage_1_6_migration_adds_durable_duration_defaults() -> None:
+async def test_storage_1_7_migration_converts_activation_duration_wait() -> None:
     now = datetime(2026, 7, 26, 12, tzinfo=UTC)
     reminder = Reminder(
         id="legacy-duration",
@@ -69,16 +69,24 @@ async def test_storage_1_6_migration_adds_durable_duration_defaults() -> None:
     )
     old = serialize_storage({reminder.id: reminder}, {})
     raw = old["reminders"][reminder.id]
-    raw.pop("trigger_duration_started_at")
-    raw.pop("trigger_duration_cause")
-    raw.pop("trigger_duration_context")
+    raw.pop("trigger_duration_waits")
+    raw["trigger_duration_started_at"] = now.isoformat()
+    raw["trigger_duration_cause"] = "future_transition"
+    raw["trigger_duration_context"] = {"entity_id": "sensor.work"}
     store = object.__new__(ReminderStore)
 
-    migrated = await store._async_migrate_func(1, 6, old)
+    migrated = await store._async_migrate_func(1, 7, old)
 
-    assert migrated["reminders"][reminder.id]["trigger_duration_started_at"] is None
-    assert migrated["reminders"][reminder.id]["trigger_duration_cause"] is None
-    assert migrated["reminders"][reminder.id]["trigger_duration_context"] is None
+    waits = migrated["reminders"][reminder.id]["trigger_duration_waits"]
+    assert waits == [
+        {
+            "role": "activation",
+            "started_at": now.isoformat(),
+            "cause": "future_transition",
+            "context": {"entity_id": "sensor.work"},
+            "observed_value": None,
+        }
+    ]
 
 
 def test_serialize_deserialize_round_trip() -> None:

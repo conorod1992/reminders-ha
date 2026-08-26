@@ -162,6 +162,31 @@ class ReminderStore(Store[StoredData]):
                     raw.setdefault("trigger_duration_started_at", None)
                     raw.setdefault("trigger_duration_cause", None)
                     raw.setdefault("trigger_duration_context", None)
+            if old_minor_version < 8:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    started_at = raw.pop("trigger_duration_started_at", None)
+                    cause = raw.pop("trigger_duration_cause", None)
+                    context = raw.pop("trigger_duration_context", None)
+                    raw.setdefault(
+                        "trigger_duration_waits",
+                        (
+                            [
+                                {
+                                    "role": "activation",
+                                    "started_at": started_at,
+                                    "cause": cause or "future_transition",
+                                    "context": context
+                                    if isinstance(context, dict)
+                                    else {},
+                                    "observed_value": None,
+                                }
+                            ]
+                            if started_at
+                            else []
+                        ),
+                    )
             return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."

@@ -417,6 +417,38 @@ class Occurrence:
 
 
 @dataclass(frozen=True, slots=True)
+class TriggerDurationWait:
+    """One durable duration wait for an activation or contextual trigger role."""
+
+    role: str
+    started_at: datetime
+    cause: str
+    context: dict[str, Any]
+    observed_value: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "started_at": _format_datetime(self.started_at),
+            "cause": self.cause,
+            "context": self.context,
+            "observed_value": self.observed_value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        return cls(
+            role=str(data["role"]),
+            started_at=_parse_datetime(data["started_at"]),
+            cause=str(data.get("cause", "future_transition")),
+            context=dict(data["context"])
+            if isinstance(data.get("context"), dict)
+            else {},
+            observed_value=data.get("observed_value"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Reminder:
     """A persistent one-shot reminder or recurring series."""
 
@@ -455,9 +487,7 @@ class Reminder:
     last_triggered_at: datetime | None = None
     snoozed_until: datetime | None = None
     immediate_evaluated: bool = False
-    trigger_duration_started_at: datetime | None = None
-    trigger_duration_cause: str | None = None
-    trigger_duration_context: dict[str, Any] | None = None
+    trigger_duration_waits: tuple[TriggerDurationWait, ...] = ()
     cooldown_skip_count: int = 0
     deliver_when: TriggerDefinition | None = None
     deliver_when_summary: str | None = None
@@ -541,13 +571,9 @@ class Reminder:
                 _format_datetime(self.snoozed_until) if self.snoozed_until else None
             ),
             "immediate_evaluated": self.immediate_evaluated,
-            "trigger_duration_started_at": (
-                _format_datetime(self.trigger_duration_started_at)
-                if self.trigger_duration_started_at
-                else None
-            ),
-            "trigger_duration_cause": self.trigger_duration_cause,
-            "trigger_duration_context": self.trigger_duration_context,
+            "trigger_duration_waits": [
+                item.to_dict() for item in self.trigger_duration_waits
+            ],
             "cooldown_skip_count": self.cooldown_skip_count,
             "deliver_when": self.deliver_when.to_dict() if self.deliver_when else None,
             "deliver_when_summary": self.deliver_when_summary,
@@ -647,18 +673,10 @@ class Reminder:
             last_triggered_at=_optional_datetime(data.get("last_triggered_at")),
             snoozed_until=_optional_datetime(data.get("snoozed_until")),
             immediate_evaluated=bool(data.get("immediate_evaluated", False)),
-            trigger_duration_started_at=_optional_datetime(
-                data.get("trigger_duration_started_at")
-            ),
-            trigger_duration_cause=(
-                str(data["trigger_duration_cause"])
-                if data.get("trigger_duration_cause")
-                else None
-            ),
-            trigger_duration_context=(
-                dict(data["trigger_duration_context"])
-                if isinstance(data.get("trigger_duration_context"), dict)
-                else None
+            trigger_duration_waits=tuple(
+                TriggerDurationWait.from_dict(item)
+                for item in data.get("trigger_duration_waits", [])
+                if isinstance(item, dict)
             ),
             cooldown_skip_count=int(data.get("cooldown_skip_count", 0)),
             deliver_when=(
