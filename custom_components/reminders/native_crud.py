@@ -37,6 +37,8 @@ from .models import (
 from .native_automation import async_validate_native_triggers
 from .native_manager import NativeReminderManager
 
+_UNSET = object()
+
 
 async def async_create_native_triggered(
     manager: NativeReminderManager,
@@ -129,7 +131,7 @@ async def async_update_native_triggered(
     *,
     activation_triggers: list[dict[str, Any]],
     title: str | None = None,
-    message: str | None | object = _UNSET := object(),
+    message: str | None | object = _UNSET,
     delivery_policy: DeliveryPolicy | None | object = _UNSET,
     user_id: str | None = None,
     acknowledgement_policy: AcknowledgementPolicy | None = None,
@@ -161,7 +163,9 @@ async def async_update_native_triggered(
             title = title.strip()
             _validate_title(title)
         policy = current.delivery_policy if delivery_policy is _UNSET else delivery_policy
-        _validate_policy(policy if isinstance(policy, DeliveryPolicy) else None)
+        if policy is not None and not isinstance(policy, DeliveryPolicy):
+            raise ReminderValidationError("Delivery policy is invalid")
+        _validate_policy(policy)
         available = (
             current.available_from
             if available_from is _UNSET
@@ -258,7 +262,9 @@ async def async_update_native_triggered(
                 status=_trigger_waiting_status(now, available, expiry),
                 current_occurrence_id=None,
                 trigger_duration_waits=tuple(
-                    wait for wait in current.trigger_duration_waits if wait.role != "activation"
+                    wait
+                    for wait in current.trigger_duration_waits
+                    if wait.role != "activation"
                 ),
             )
         if title is not None:
