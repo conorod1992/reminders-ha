@@ -8,6 +8,8 @@ import {
   recurrenceSummary,
   suggestedStates,
   triggerRepeatSummary,
+  upcomingBucket,
+  relativeTime,
   zonedInputParts,
 } from "./reminders-utils.js";
 
@@ -107,7 +109,8 @@ class RemindersManagementPanel extends HTMLElement {
         button{border:0;border-radius:8px;padding:10px 15px;background:var(--primary-color);color:var(--text-primary-color,#fff);font:inherit;cursor:pointer}button.secondary,.actions button,.quick button{background:transparent;color:var(--primary-color);border:1px solid var(--divider-color)}button.danger{color:var(--error-color);background:transparent;border:1px solid var(--error-color)}button:disabled{opacity:.55;cursor:wait}
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
         select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}.picker-host,.picker-host ha-entity-picker,.picker-host select{display:block;width:100%}
-        .list{display:grid;gap:12px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}
+        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}
+        .overflow{position:relative}.overflow>summary{list-style:none;margin:0;padding:7px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-color);font-size:20px;line-height:1;cursor:pointer}.overflow>summary::-webkit-details-marker{display:none}.overflow-menu{position:absolute;right:0;z-index:2;min-width:170px;display:grid;padding:6px;background:var(--card-background-color);border-radius:9px;box-shadow:0 5px 20px rgba(0,0,0,.3)}.overflow-menu button{border:0;text-align:left;color:var(--primary-text-color);background:transparent}.overflow-menu button.danger{color:var(--error-color)}.behavior-summary{padding:14px;border-radius:9px;background:var(--secondary-background-color)}.behavior-summary strong{display:block;margin-bottom:6px}.behavior-summary ul{margin:0;padding-left:20px}.expiry-custom.hidden{display:none}
         .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
         dialog{width:min(680px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;border:0;border-radius:12px;padding:0;background:var(--card-background-color);color:var(--primary-text-color);box-shadow:0 8px 28px rgba(0,0,0,.35)}dialog::backdrop{background:rgba(0,0,0,.45)}.dialog{padding:22px}.dialog h2{margin:0 0 8px}.form{display:grid;gap:16px}.dialog-actions{justify-content:flex-end;margin-top:20px}.hidden{display:none!important}details{border-top:1px solid var(--divider-color);padding-top:12px}summary{cursor:pointer;color:var(--primary-color);margin-bottom:14px}.advanced{display:grid;gap:16px}.quick button.selected{background:var(--primary-color);color:#fff}.preview{padding:10px;border-radius:8px;background:var(--secondary-background-color)}
         .activation-panel,#recurrence{display:grid;gap:14px}.repeat-toggle{margin-top:2px}.notes textarea{min-height:64px}.advanced{gap:10px}.option-group{border:1px solid var(--divider-color);border-radius:9px;padding:0}.option-group>summary{display:grid;gap:2px;padding:12px 14px;margin:0;color:var(--primary-text-color);font-weight:500}.option-group>summary .hint{margin:0;font-size:12px;font-weight:400}.option-content{display:grid;gap:16px;padding:4px 14px 14px}.option-content h3,.context-editor h3{font-size:15px;margin:4px 0 0}.trigger-fields,.context-trigger-fields,.context-editor{display:grid;gap:12px}.expert-note{padding:9px 10px;border-radius:7px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-size:13px}.hint{font-size:13px}
@@ -188,6 +191,21 @@ class RemindersManagementPanel extends HTMLElement {
       host.append(empty);
       return;
     }
+    if (this._view === "upcoming") {
+      const groups = new Map([["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []]]);
+      const ungrouped = [];
+      for (const item of values) {
+        if (item.activation_type === "time" && item.due) groups.get(upcomingBucket(item.due, this._hass.config.time_zone)).push(item);
+        else ungrouped.push(item);
+      }
+      for (const [label, items] of groups) {
+        if (!items.length) continue;
+        const heading = document.createElement("h2"); heading.className = "date-heading"; heading.textContent = label; host.append(heading);
+        for (const item of items) host.append(this._reminderCard(item));
+      }
+      for (const item of ungrouped) host.append(this._reminderCard(item));
+      return;
+    }
     for (const item of values) host.append(this._view === "history" ? this._historyCard(item) : this._reminderCard(item));
   }
 
@@ -198,7 +216,10 @@ class RemindersManagementPanel extends HTMLElement {
     when.className = "when";
     when.textContent = reminder.activation_type === "trigger"
       ? (reminder.trigger_summary || "Waiting for trigger")
-      : this._formatDate(reminder.due);
+      : reminder.paused ? "Series paused" : this._formatDate(reminder.due);
+    if (reminder.activation_type === "time" && reminder.due && !reminder.paused) {
+      const relative = document.createElement("span"); relative.className = "relative"; relative.textContent = relativeTime(reminder.due, this._hass.locale?.language); when.append(relative);
+    }
     const body = document.createElement("div");
     const title = document.createElement("div");
     title.className = "name";
@@ -226,15 +247,18 @@ class RemindersManagementPanel extends HTMLElement {
     const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
     if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
     if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
-    if (!reminder.managed_externally) actions.append(
-      this._action("Edit", () => this._openReminderForm(reminder)),
-    );
-    actions.append(
-      this._action("Duplicate", () => this._openReminderForm(null, reminder)),
-      this._action("Snooze", () => this._openSnooze(reminder)),
-      ...(awaiting.length ? [this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id))] : []),
-      this._action("Delete", () => this._confirmDelete(reminder), "danger"),
-    );
+    if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder)));
+    if (awaiting.length) actions.append(this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
+    const overflow = document.createElement("details"); overflow.className = "overflow"; overflow.innerHTML = '<summary aria-label="More actions">⋮</summary><div class="overflow-menu"></div>';
+    const menu = overflow.querySelector(".overflow-menu");
+    if (!reminder.managed_externally) menu.append(this._action("Edit", () => this._openReminderForm(reminder)));
+    menu.append(this._action("Duplicate", () => this._openReminderForm(null, reminder)));
+    if (reminder.recurring && (reminder.due || reminder.paused) && !reminder.managed_externally) {
+      menu.append(this._action(reminder.paused ? "Resume series" : "Pause series", () => this._seriesAction(reminder, reminder.paused ? "resume" : "pause")));
+      if (!reminder.paused) menu.append(this._action("Skip next", () => this._confirmSkip(reminder)));
+    }
+    menu.append(this._action("Delete", () => this._confirmDelete(reminder), "danger"));
+    actions.append(overflow);
     card.append(when, body, actions);
     return card;
   }
@@ -343,6 +367,7 @@ class RemindersManagementPanel extends HTMLElement {
           </div></details>
           <details class="option-group"><summary>Conditions<span class="hint">Wait for the right situation or limit when a trigger is active</span></summary><div class="option-content">
             <div class="context-option"><label><span><input name="deliver_when_enabled" type="checkbox"> Wait for the right context after the scheduled time</span><span class="hint">If the scheduled time is not suitable, wait until a condition is met. For example, a 6 pm reminder can wait until I arrive home.</span></label>${this._contextTriggerEditor("deliver_when", "Delivery condition")}</div>
+            <div class="context-option"><label>Stop waiting after<select name="expires_after_preset"><option value="">Never</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="10800">3 hours</option><option value="custom">Custom</option></select></label><label class="expiry-custom hidden">Custom duration (minutes)<input name="expires_after_minutes" type="number" min="1" max="525600"></label><span class="hint">If the delivery condition is still not met, this occurrence expires and a recurring series continues normally.</span></div>
             <div class="trigger-advanced hidden"><div class="fieldrow"><label>Active from (optional)<input name="available_from" type="datetime-local"></label><label>Stop waiting after (optional)<input name="expires_at" type="datetime-local"></label></div></div>
           </div></details>
           <details class="option-group"><summary>Repeated reminders<span class="hint">What happens after a trigger or when a reminder is not handled</span></summary><div class="option-content">
@@ -352,6 +377,7 @@ class RemindersManagementPanel extends HTMLElement {
               <label>Minimum time between reminders<select name="cooldown_preset"><option value="0">No minimum</option><option value="300">5 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="86400">1 day</option><option value="custom">Custom</option></select></label>
               <label class="cooldown-custom hidden">Custom minimum (seconds)<input name="cooldown_seconds" type="number" min="0" max="31536000" value="0"></label>
             </div>
+            <label class="series-advanced">If Home Assistant was offline when this was due<select name="missed_occurrence_policy"><option value="remind_on_startup">Remind me when Home Assistant comes back online</option><option value="skip">Skip the missed occurrence</option></select></label>
             <label><span><input name="escalation_enabled" type="checkbox"> Keep reminding me until handled</span><span class="hint">Send follow-up reminders until you choose Done or Dismiss.</span></label><div class="escalation-config fieldrow hidden"><label>First follow-up after (minutes)<input name="escalation_initial" type="number" min="1" max="10080" value="30"></label><label>Repeat every (minutes)<input name="escalation_repeat" type="number" min="1" max="10080" value="60"></label><label>Maximum attempts<input name="escalation_max" type="number" min="1" max="20" value="3"></label></div>
           </div></details>
           <details class="option-group trigger-advanced hidden"><summary>Trigger behaviour<span class="hint">Advanced matching controls for triggered reminders</span></summary><div class="option-content">
@@ -362,6 +388,7 @@ class RemindersManagementPanel extends HTMLElement {
             <label class="event-data hidden">Event data (advanced, optional JSON object)<textarea name="event_data" placeholder='{"type":"printing_started"}'></textarea></label>
           </div></details>
         </div></details>
+        <div class="behavior-summary" aria-live="polite"><strong>This reminder will:</strong><ul></ul></div>
         <div class="form-error hidden" role="alert"></div>
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
       </form></div>`;
@@ -430,6 +457,11 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.cooldown_seconds.value = cooldown;
     form.elements.available_from.value = this._localDateTimeValue(source?.available_from);
     form.elements.expires_at.value = this._localDateTimeValue(source?.expires_at);
+    const expiry = source?.expires_after_seconds;
+    const expiryPresets = [1800, 3600, 10800];
+    form.elements.expires_after_preset.value = expiry == null ? "" : expiryPresets.includes(expiry) ? String(expiry) : "custom";
+    form.elements.expires_after_minutes.value = expiry ? Math.ceil(expiry / 60) : 60;
+    form.elements.missed_occurrence_policy.value = source?.missed_occurrence_policy || "remind_on_startup";
     if (this._hass.user?.is_admin) {
       const label = document.createElement("label");
       label.textContent = "Recipient";
@@ -472,6 +504,7 @@ class RemindersManagementPanel extends HTMLElement {
     form.elements.trigger_type.onchange = () => this._syncTriggerType(form);
     form.elements.repeat_policy.onchange = () => this._syncTriggerType(form);
     form.elements.cooldown_preset.onchange = () => this._syncTriggerType(form);
+    form.elements.expires_after_preset.onchange = () => this._syncAdvancedContexts(form);
     form.elements.frequency.onchange = () => this._syncRecurrence(form, true);
     form.elements.monthly_mode.onchange = () => this._syncRecurrence(form, true);
     form.elements.delivery_mode.onchange = () => this._syncDelivery(dialog);
@@ -485,6 +518,10 @@ class RemindersManagementPanel extends HTMLElement {
     this._syncActivation(form);
     this._syncAdvancedContexts(form);
     this._syncDelivery(dialog);
+    const updateSummary = () => this._updateBehaviorSummary(form);
+    form.addEventListener("input", updateSummary);
+    form.addEventListener("change", updateSummary);
+    updateSummary();
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
     dialog.showModal();
@@ -500,6 +537,7 @@ class RemindersManagementPanel extends HTMLElement {
     form.querySelector(".day-field").classList.toggle("hidden", mode !== "day_of_month");
     form.querySelector(".week-field").classList.toggle("hidden", mode !== "nth_weekday");
     for (const item of form.querySelectorAll(".weekday-field")) item.classList.toggle("hidden", !["nth_weekday", "last_weekday"].includes(mode));
+    form.querySelector(".series-advanced")?.classList.toggle("hidden", !active);
   }
 
   _syncActivation(form) {
@@ -513,7 +551,7 @@ class RemindersManagementPanel extends HTMLElement {
     if (triggered && form.elements.repeat) form.elements.repeat.checked = false;
     this._syncRecurrence(form, !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true"));
     this._syncTriggerType(form);
-    form.querySelector(".context-option").classList.toggle("hidden", triggered);
+    for (const item of form.querySelectorAll(".context-option")) item.classList.toggle("hidden", triggered);
   }
 
   _syncTriggerType(form) {
@@ -564,6 +602,27 @@ class RemindersManagementPanel extends HTMLElement {
     if (form.elements.end_date.value) data.end_date = form.elements.end_date.value;
     if (form.elements.occurrence_count.value) data.occurrence_count = Number(form.elements.occurrence_count.value);
     return data;
+  }
+
+  _recurrenceChanged(data, rule) {
+    if (!rule) return true;
+    const stored = {
+      first_reminder: String(rule.anchor_local).slice(0, 19),
+      frequency: rule.frequency,
+      interval: rule.interval,
+      timezone: rule.timezone,
+    };
+    if (rule.frequency === "weekly") stored.weekdays = rule.weekdays;
+    if (rule.frequency === "monthly") {
+      stored.monthly_mode = rule.monthly_mode;
+      if (rule.monthly_mode === "day_of_month") stored.day_of_month = rule.day_of_month;
+      if (["nth_weekday", "last_weekday"].includes(rule.monthly_mode)) stored.monthly_weekday = rule.monthly_weekday;
+      if (rule.monthly_mode === "nth_weekday") stored.monthly_week = rule.monthly_week;
+    }
+    stored.end_date = rule.end_date || null;
+    stored.occurrence_count = rule.occurrence_count || null;
+    const selected = { ...data, first_reminder: String(data.first_reminder).slice(0, 19) };
+    return JSON.stringify(selected) !== JSON.stringify(stored);
   }
 
   _triggerData(form, prefix = "") {
@@ -644,6 +703,7 @@ class RemindersManagementPanel extends HTMLElement {
     this._syncContextTrigger(form, "deliver_when");
     this._syncContextTrigger(form, "complete_when");
     form.querySelector(".escalation-config").classList.toggle("hidden", !form.elements.escalation_enabled.checked);
+    form.querySelector(".expiry-custom").classList.toggle("hidden", form.elements.expires_after_preset.value !== "custom");
   }
 
   async _previewRecurrence(form) {
@@ -658,6 +718,27 @@ class RemindersManagementPanel extends HTMLElement {
     } catch (error) {
       host.textContent = error.message || String(error);
     }
+  }
+
+  _updateBehaviorSummary(form) {
+    const list = form.querySelector(".behavior-summary ul");
+    const triggered = form.elements.activation_type.value === "trigger";
+    const recurring = !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true");
+    const lines = [];
+    if (triggered) lines.push(`activate when the selected ${form.elements.trigger_type.value.replaceAll("_", " ")} condition happens`);
+    else if (form.elements.date.value && form.elements.time.value) lines.push(`remind you ${this._formatDate(localDateTime(form.elements.date.value, form.elements.time.value))}`);
+    if (recurring) {
+      const frequency = form.elements.frequency.value;
+      const interval = Number(form.elements.interval.value || 1);
+      lines.push(interval === 1 ? `repeat ${frequency}` : `repeat every ${interval} ${frequency.replace("daily", "days").replace("weekly", "weeks").replace("monthly", "months").replace("yearly", "years")}`);
+    }
+    lines.push(form.elements.delivery_mode.value === "default" ? "use your delivery defaults" : "use the selected delivery channels");
+    if (!triggered && form.elements.deliver_when_enabled.checked) lines.push("wait until the selected delivery condition is met");
+    if (form.elements.complete_when_enabled.checked) lines.push("mark itself Done when the completion condition is met");
+    if (form.elements.escalation_enabled.checked) lines.push(`remind you again after ${form.elements.escalation_initial.value} minutes, up to ${form.elements.escalation_max.value} times, until handled`);
+    const expiry = form.elements.expires_after_preset.value;
+    if (!triggered && expiry) lines.push(`stop waiting after ${expiry === "custom" ? `${form.elements.expires_after_minutes.value || 0} minutes` : this._duration(Number(expiry))}`);
+    list.replaceChildren(...lines.map((text) => { const item = document.createElement("li"); item.textContent = text; return item; }));
   }
 
   async _saveReminder(dialog, form, reminder) {
@@ -677,6 +758,11 @@ class RemindersManagementPanel extends HTMLElement {
       delivery_mode: form.elements.delivery_mode.value,
       allow_manual_completion: form.elements.allow_manual_completion.checked,
     };
+    const expiryPreset = form.elements.expires_after_preset.value;
+    if (!triggered && expiryPreset) data.expires_after_seconds = expiryPreset === "custom"
+      ? Number(form.elements.expires_after_minutes.value) * 60
+      : Number(expiryPreset);
+    else if (!triggered && reminder) data.expires_after_seconds = null;
     if (form.elements.user_id) data.user_id = form.elements.user_id.value;
     if (data.delivery_mode === "custom") {
       data.channels = [...form.querySelectorAll("[name=channel]:checked")].map((input) => input.value);
@@ -703,11 +789,15 @@ class RemindersManagementPanel extends HTMLElement {
       if (form.elements.expires_at.value) data.expires_at = form.elements.expires_at.value;
       else if (reminder) data.expires_at = null;
     } else {
-      Object.assign(data, recurring ? this._recurrenceData(form) : { due: localDateTime(form.elements.date.value, form.elements.time.value) });
-    }
-    if (reminder?.recurring) {
-      data.end_date = form.elements.end_date.value || null;
-      data.occurrence_count = form.elements.occurrence_count.value ? Number(form.elements.occurrence_count.value) : null;
+      if (recurring) {
+        const recurrenceData = this._recurrenceData(form);
+        if (reminder) {
+          recurrenceData.end_date = form.elements.end_date.value || null;
+          recurrenceData.occurrence_count = form.elements.occurrence_count.value ? Number(form.elements.occurrence_count.value) : null;
+        }
+        if (!reminder || this._recurrenceChanged(recurrenceData, reminder.recurrence)) Object.assign(data, recurrenceData);
+      } else data.due = localDateTime(form.elements.date.value, form.elements.time.value);
+      if (recurring) data.missed_occurrence_policy = form.elements.missed_occurrence_policy.value;
     }
       if (reminder) {
         data.reminder_id = reminder.id;
@@ -727,13 +817,16 @@ class RemindersManagementPanel extends HTMLElement {
   _openSnooze(reminder) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     const triggered = reminder.activation_type === "trigger";
-    dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint">${triggered ? "Matching triggers are ignored until the snooze ends; it will then wait for the next matching change." : reminder.recurring ? "Only this occurrence moves; the series stays anchored." : reminder.title}</p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button>${triggered ? '<button class="next-trigger">Wait for next trigger</button>' : ""}</div>${triggered ? "" : '<div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div>'}<div class="dialog-actions"><button class="secondary cancel">Cancel</button>${triggered ? "" : '<button class="custom">Snooze</button>'}</div></div>`;
+    dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint">${triggered ? "Matching triggers are ignored until the snooze ends; it will then wait for the next matching change." : reminder.recurring ? "Only this occurrence moves; the series stays anchored." : reminder.title}</p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button>${triggered ? '<button class="next-trigger">Wait for next trigger</button>' : '<button class="tomorrow">Tomorrow morning</button>'}</div>${triggered ? "" : '<div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div>'}<div class="dialog-actions"><button class="secondary cancel">Cancel</button>${triggered ? "" : '<button class="custom">Choose date/time…</button>'}</div></div>`;
     const parts = quickTimeParts("1h", this._hass.config.time_zone);
     const inputs = dialog.querySelectorAll("input"); if (!triggered) { inputs[0].value = parts.date; inputs[1].value = parts.time; }
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     for (const button of dialog.querySelectorAll("[data-seconds]")) button.onclick = () => this._doSnooze(dialog, reminder, { duration_seconds: Number(button.dataset.seconds) });
     if (triggered) dialog.querySelector(".next-trigger").onclick = () => this._doSnooze(dialog, reminder, { wait_for_next_trigger: true });
-    else dialog.querySelector(".custom").onclick = () => this._doSnooze(dialog, reminder, { due: localDateTime(inputs[0].value, inputs[1].value) });
+    else {
+      dialog.querySelector(".tomorrow").onclick = () => { const tomorrow = quickTimeParts("tomorrow", this._hass.config.time_zone); this._doSnooze(dialog, reminder, { due: localDateTime(tomorrow.date, tomorrow.time) }); };
+      dialog.querySelector(".custom").onclick = () => this._doSnooze(dialog, reminder, { due: localDateTime(inputs[0].value, inputs[1].value) });
+    }
     dialog.showModal();
   }
 
@@ -765,6 +858,19 @@ class RemindersManagementPanel extends HTMLElement {
       try { await this._call("delete", { reminder_id: reminder.id }); dialog.close(); await this._load(); }
       catch (error) { this._showError(error); }
     };
+    dialog.showModal();
+  }
+
+  async _seriesAction(reminder, action) {
+    try { await this._call(action, { reminder_id: reminder.id }); await this._load(); }
+    catch (error) { this._showError(error); }
+  }
+
+  _confirmSkip(reminder) {
+    const dialog = this.shadowRoot.querySelector("#dialog");
+    dialog.innerHTML = `<div class="dialog"><h2>Skip next occurrence?</h2><p>Skip <strong>${this._formatDate(reminder.scheduled_due || reminder.due)}</strong>?</p><p class="hint">The series will continue normally from the following scheduled occurrence.</p><div class="dialog-actions"><button class="secondary cancel">Cancel</button><button class="confirm">Skip next</button></div></div>`;
+    dialog.querySelector(".cancel").onclick = () => dialog.close();
+    dialog.querySelector(".confirm").onclick = async () => { await this._seriesAction(reminder, "skip_next"); dialog.close(); };
     dialog.showModal();
   }
 

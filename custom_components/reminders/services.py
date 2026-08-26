@@ -50,6 +50,7 @@ from .models import (
     AcknowledgementPolicy,
     ActivationType,
     DeliveryPolicy,
+    MissedOccurrencePolicy,
     QuietHoursPolicy,
     Reminder,
     TriggerRepeatPolicy,
@@ -75,6 +76,9 @@ ADVANCED_FIELDS: dict[Any, Any] = {
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
     vol.Optional("allow_manual_completion", default=False): cv.boolean,
+    vol.Optional("expires_after_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=60, max=31_536_000)
+    ),
 }
 EXTERNAL_ACTION_SCHEMA = vol.All(
     cv.ensure_list,
@@ -141,6 +145,9 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
     ),
     vol.Optional("quiet_hours_policy", default="respect"): vol.In(
         tuple(QuietHoursPolicy)
+    ),
+    vol.Optional("missed_occurrence_policy", default="remind_on_startup"): vol.In(
+        tuple(MissedOccurrencePolicy)
     ),
 }
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
@@ -225,6 +232,10 @@ UPDATE_FIELDS: dict[Any, Any] = {
     vol.Optional("complete_when"): vol.Any(None, dict),
     vol.Optional("escalation"): vol.Any(None, dict),
     vol.Optional("allow_manual_completion"): cv.boolean,
+    vol.Optional("missed_occurrence_policy"): vol.In(tuple(MissedOccurrencePolicy)),
+    vol.Optional("expires_after_seconds"): vol.Any(
+        None, vol.All(vol.Coerce(int), vol.Range(min=60, max=31_536_000))
+    ),
 }
 UPDATE_FIELDS.update(SOURCE_UPDATE_FIELDS)
 UPDATE_FIELDS.update(POLICY_FIELDS)
@@ -332,6 +343,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
             allow_manual_completion=call.data["allow_manual_completion"],
+            expires_after_seconds=call.data.get("expires_after_seconds"),
             **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
@@ -360,6 +372,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             complete_when=call.data.get("complete_when"),
             escalation=call.data.get("escalation"),
             allow_manual_completion=call.data["allow_manual_completion"],
+            missed_occurrence_policy=MissedOccurrencePolicy(
+                call.data["missed_occurrence_policy"]
+            ),
+            expires_after_seconds=call.data.get("expires_after_seconds"),
             **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
@@ -473,6 +489,8 @@ def async_register_services(hass: HomeAssistant) -> None:
             "managed_externally",
             "allow_manual_completion",
             "external_actions",
+            "missed_occurrence_policy",
+            "expires_after_seconds",
         ):
             if key in call.data:
                 changes[key] = call.data[key]

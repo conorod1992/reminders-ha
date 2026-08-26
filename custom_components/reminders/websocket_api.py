@@ -29,6 +29,7 @@ from .models import (
     AcknowledgementPolicy,
     ActivationType,
     DeliveryPolicy,
+    MissedOccurrencePolicy,
     OccurrenceStatus,
     QuietHoursPolicy,
     ReminderStatus,
@@ -63,6 +64,9 @@ ADVANCED_SCHEMA: dict[Any, Any] = {
     vol.Optional("complete_when"): dict,
     vol.Optional("escalation"): dict,
     vol.Optional("allow_manual_completion", default=False): cv.boolean,
+    vol.Optional("expires_after_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=60, max=31_536_000)
+    ),
 }
 EXTERNAL_ACTION_SCHEMA = vol.All(
     cv.ensure_list,
@@ -296,6 +300,7 @@ async def websocket_create(
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
         allow_manual_completion=msg["allow_manual_completion"],
+        expires_after_seconds=msg.get("expires_after_seconds"),
         **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
@@ -315,6 +320,9 @@ CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     **RECURRENCE_SCHEMA,
     **POLICY_SCHEMA,
     **ADVANCED_SCHEMA,
+    vol.Optional("missed_occurrence_policy", default="remind_on_startup"): vol.In(
+        tuple(MissedOccurrencePolicy)
+    ),
     **SOURCE_SCHEMA,
 }
 
@@ -338,6 +346,10 @@ async def websocket_create_recurring(
         complete_when=msg.get("complete_when"),
         escalation=msg.get("escalation"),
         allow_manual_completion=msg["allow_manual_completion"],
+        missed_occurrence_policy=MissedOccurrencePolicy(
+            msg["missed_occurrence_policy"]
+        ),
+        expires_after_seconds=msg.get("expires_after_seconds"),
         **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
@@ -477,6 +489,10 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("complete_when"): vol.Any(None, dict),
     vol.Optional("escalation"): vol.Any(None, dict),
     vol.Optional("allow_manual_completion"): cv.boolean,
+    vol.Optional("missed_occurrence_policy"): vol.In(tuple(MissedOccurrencePolicy)),
+    vol.Optional("expires_after_seconds"): vol.Any(
+        None, vol.All(vol.Coerce(int), vol.Range(min=60, max=31_536_000))
+    ),
     **SOURCE_UPDATE_SCHEMA,
 }
 
@@ -521,6 +537,8 @@ async def websocket_update(
         "managed_externally",
         "allow_manual_completion",
         "external_actions",
+        "missed_occurrence_policy",
+        "expires_after_seconds",
     ):
         if key in msg:
             changes[key] = msg[key]
@@ -580,6 +598,49 @@ async def websocket_delete(
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     await manager.async_delete(reminder.id)
     connection.send_result(msg["id"])
+
+
+def _series_action_schema(action: str) -> dict[Any, Any]:
+    return {
+        vol.Required("type"): f"{COMMAND_PREFIX}{action}",
+        vol.Required("reminder_id"): cv.string,
+    }
+
+
+@websocket_command(_series_action_schema("pause"))
+@async_response
+@_api_errors
+async def websocket_pause(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    updated = await manager.async_pause(reminder.id)
+    connection.send_result(msg["id"], {"reminder": updated.to_dict()})
+
+
+@websocket_command(_series_action_schema("resume"))
+@async_response
+@_api_errors
+async def websocket_resume(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    updated = await manager.async_resume(reminder.id)
+    connection.send_result(msg["id"], {"reminder": updated.to_dict()})
+
+
+@websocket_command(_series_action_schema("skip_next"))
+@async_response
+@_api_errors
+async def websocket_skip_next(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    updated = await manager.async_skip_next(reminder.id)
+    connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
 @websocket_command(
@@ -939,6 +1000,9 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_fire_trigger,
         websocket_update,
         websocket_delete,
+        websocket_pause,
+        websocket_resume,
+        websocket_skip_next,
         websocket_snooze,
         websocket_acknowledge,
         websocket_complete,

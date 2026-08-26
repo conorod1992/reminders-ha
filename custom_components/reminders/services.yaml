@@ -120,6 +120,15 @@ create:
       default: false
       selector:
         boolean:
+    expires_after_seconds: &expires_after_seconds
+      name: Stop waiting after
+      description: Optional number of seconds an occurrence may wait for its delivery condition before expiring.
+      selector:
+        number:
+          min: 60
+          max: 31536000
+          mode: box
+          unit_of_measurement: seconds
     source: &source
       name: External source
       description: Optional stable integration identifier that manages this reminder.
@@ -271,6 +280,17 @@ create_recurring:
     complete_when: *complete_when
     escalation: *escalation
     allow_manual_completion: *allow_manual_completion
+    expires_after_seconds: *expires_after_seconds
+    missed_occurrence_policy: &missed_occurrence_policy
+      name: If Home Assistant was offline when this was due
+      default: remind_on_startup
+      selector:
+        select:
+          options:
+            - label: Remind me when Home Assistant comes back online
+              value: remind_on_startup
+            - label: Skip the missed occurrence
+              value: skip
     source: *source
     source_id: *source_id
     source_event: *source_event
@@ -341,6 +361,8 @@ update:
     complete_when: *complete_when
     escalation: *escalation
     allow_manual_completion: *allow_manual_completion
+    expires_after_seconds: *expires_after_seconds
+    missed_occurrence_policy: *missed_occurrence_policy
     source: *source
     source_id: *source_id
     source_event: *source_event
