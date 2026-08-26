@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.core import Context
@@ -45,10 +45,7 @@ class NativeReminderManager(ReminderManager):
         self._native_change_unsub = self.async_subscribe(self._native_changed)
 
     async def async_load(self) -> None:
-        """Load legacy state, then arm native rules before processing due work."""
-        # Existing installations contain no native rules before this feature. Let
-        # the proven base recovery path run first, then attach native listeners.
-        # Native due semantics are intercepted by our _async_process_due override.
+        """Load legacy state, then arm native rules."""
         await super().async_load()
         await self._native_runtime.async_sync(self._reminders.values())
 
@@ -69,7 +66,7 @@ class NativeReminderManager(ReminderManager):
         delivery_conditions: list[dict[str, Any]] | None = None,
         completion_triggers: list[dict[str, Any]] | None = None,
     ) -> Reminder:
-        """Validate and atomically replace the native rules for one reminder."""
+        """Validate and atomically replace native rules on one reminder."""
         from .native_automation import (
             async_validate_native_conditions,
             async_validate_native_triggers,
@@ -83,7 +80,9 @@ class NativeReminderManager(ReminderManager):
             )
         if delivery_triggers is not None:
             await async_validate_native_triggers(self._hass, delivery_triggers)
-            values["delivery_triggers"] = tuple(dict(item) for item in delivery_triggers)
+            values["delivery_triggers"] = tuple(
+                dict(item) for item in delivery_triggers
+            )
         if delivery_conditions is not None:
             await async_validate_native_conditions(self._hass, delivery_conditions)
             values["delivery_conditions"] = tuple(
@@ -122,10 +121,10 @@ class NativeReminderManager(ReminderManager):
         return updated
 
     async def _async_process_due(
-        self, effective_now: Any, *, recover_missed: bool = False
+        self, effective_now: datetime, *, recover_missed: bool = False
     ) -> None:
         """Apply native delivery gates before the established due processor."""
-        effective_now = effective_now.astimezone(dt_util.UTC)
+        effective_now = effective_now.astimezone(UTC)
         candidates = [
             reminder
             for reminder in tuple(self._reminders.values())
@@ -136,28 +135,23 @@ class NativeReminderManager(ReminderManager):
             and (reminder.delivery_triggers or reminder.delivery_conditions)
         ]
         for reminder in candidates:
-            conditions_match = await self._native_runtime.async_conditions_match(reminder)
-            # Conditions already true at the due instant: normal delivery proceeds.
+            conditions_match = await self._native_runtime.async_conditions_match(
+                reminder
+            )
             if conditions_match and reminder.delivery_conditions:
                 continue
-            # A pure "wait for" rule, or failed conditions with re-check triggers,
-            # enters the existing durable context-wait lifecycle.
             if reminder.delivery_triggers:
                 await self._async_begin_native_delivery_wait(reminder.id, effective_now)
                 continue
-            # Native conditions without a wake-up trigger behave like automation
-            # conditions: if false when evaluated, this occurrence does not run.
             if reminder.delivery_conditions and not conditions_match:
                 await self._async_skip_native_condition_failure(
                     reminder.id, effective_now
                 )
-        await super()._async_process_due(
-            effective_now, recover_missed=recover_missed
-        )
+        await super()._async_process_due(effective_now, recover_missed=recover_missed)
         await self._native_runtime.async_sync(self._reminders.values())
 
     async def _async_begin_native_delivery_wait(
-        self, reminder_id: str, now: Any
+        self, reminder_id: str, now: datetime
     ) -> None:
         async with self._lock:
             reminder = self._reminders.get(reminder_id)
@@ -204,14 +198,17 @@ class NativeReminderManager(ReminderManager):
         self._notify_changed({reminder.user_id})
 
     async def _async_skip_native_condition_failure(
-        self, reminder_id: str, now: Any
+        self, reminder_id: str, now: datetime
     ) -> None:
         async with self._lock:
             reminder = self._reminders.get(reminder_id)
             if reminder is None or reminder.status is not ReminderStatus.PENDING:
                 return
             occurrence = _find_occurrence(reminder, reminder.current_occurrence_id)
-            if occurrence is None or occurrence.status is not OccurrenceStatus.SCHEDULED:
+            if (
+                occurrence is None
+                or occurrence.status is not OccurrenceStatus.SCHEDULED
+            ):
                 return
             skipped = occurrence.updated(
                 status=OccurrenceStatus.SKIPPED,
@@ -240,9 +237,7 @@ class NativeReminderManager(ReminderManager):
             await self._async_persist_state(candidate, self._users)
             self._reschedule(force=True)
         self._notify_changed({reminder.user_id})
-        self._fire_lifecycle_event(
-            updated, "skipped", occurrence_id=occurrence.id
-        )
+        self._fire_lifecycle_event(updated, "skipped", occurrence_id=occurrence.id)
 
     async def _async_native_trigger_callback(
         self,
@@ -540,4 +535,6 @@ def _native_trigger_cause(run_variables: dict[str, Any]) -> str:
     if not isinstance(trigger, dict):
         return "home_assistant_trigger"
     value = trigger.get("platform") or trigger.get("trigger")
-    return f"home_assistant_{str(value)[:64]}" if value else "home_assistant_trigger"
+    return (
+        f"home_assistant_{str(value)[:64]}" if value else "home_assistant_trigger"
+    )
