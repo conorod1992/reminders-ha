@@ -624,12 +624,22 @@ class Reminder:
         activation_type = ActivationType(
             data.get("activation_type", ActivationType.TIME)
         )
+        status = ReminderStatus(data.get("status", ReminderStatus.PENDING))
         trigger_data = data.get("trigger")
         trigger = TriggerDefinition.from_dict(trigger_data) if trigger_data else None
         deliver_when_data = data.get("deliver_when")
         complete_when_data = data.get("complete_when")
         escalation_data = data.get("escalation")
-        if activation_type is ActivationType.TIME and data.get("due") is None:
+        if (
+            activation_type is ActivationType.TIME
+            and data.get("due") is None
+            and status
+            in {
+                ReminderStatus.PENDING,
+                ReminderStatus.DELIVERING,
+                ReminderStatus.WAITING_FOR_CONTEXT,
+            }
+        ):
             raise ValueError("Time reminder requires due")
         if activation_type is ActivationType.TRIGGER and trigger is None:
             raise ValueError("Triggered reminder requires trigger")
@@ -643,7 +653,7 @@ class Reminder:
             due=_optional_datetime(data.get("due")),
             created_at=_parse_datetime(data["created_at"]),
             updated_at=_parse_datetime(data["updated_at"]),
-            status=ReminderStatus(data.get("status", ReminderStatus.PENDING)),
+            status=status,
             delivery_policy=DeliveryPolicy.from_dict(policy) if policy else None,
             delivered_at=_optional_datetime(data.get("delivered_at")),
             delivery_errors=tuple(
