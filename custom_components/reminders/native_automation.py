@@ -48,9 +48,7 @@ class _ConditionEntry:
 class NativeAutomationRuntime:
     """Attach and evaluate automation-native trigger/condition configurations."""
 
-    def __init__(
-        self, hass: HomeAssistant, callback: NativeTriggerCallback
-    ) -> None:
+    def __init__(self, hass: HomeAssistant, callback: NativeTriggerCallback) -> None:
         self._hass = hass
         self._callback = callback
         self._trigger_entries: dict[tuple[str, str], _TriggerEntry] = {}
