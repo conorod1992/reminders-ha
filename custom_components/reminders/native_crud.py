@@ -204,10 +204,7 @@ async def async_update_native_triggered(
             or current.trigger is not None
             or tuple(dict(item) for item in activation_triggers)
             != current.activation_triggers
-            or (
-                repeat_policy is not None
-                and repeat_policy is not current.repeat_policy
-            )
+            or (repeat_policy is not None and repeat_policy is not current.repeat_policy)
             or available != current.available_from
             or expiry != current.expires_at
         )
