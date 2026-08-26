@@ -11,6 +11,9 @@ from custom_components.reminders.delivery import DeliveryResult
 from custom_components.reminders.manager import ReminderManager
 from custom_components.reminders.models import (
     DeliveryPolicy,
+    MissedOccurrencePolicy,
+    Occurrence,
+    OccurrenceStatus,
     Reminder,
     ReminderStatus,
     UserPreferences,
@@ -21,6 +24,7 @@ from custom_components.reminders.recurrence import (
     Weekday,
 )
 from custom_components.reminders.storage import serialize_storage
+from custom_components.reminders.triggers.models import TriggerDefinition
 
 from .conftest import FakeDispatcher, FakeStore
 
@@ -396,4 +400,146 @@ async def test_recurrence_edit_reanchors_and_persists(
     assert updated.scheduled_due == updated.due
     assert fake_store.saved[-1]["reminders"][reminder.id]["recurrence"] == (
         changed.to_dict()
+    )
+
+
+async def test_pause_survives_restart_and_resume_retains_anchor_phase(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    anchor = datetime.now().replace(tzinfo=None) + timedelta(days=2)
+    reminder = await runtime.async_create_recurring(
+        user_id="u1", title="Daily", recurrence=daily(anchor)
+    )
+    paused = await runtime.async_pause(reminder.id)
+    assert paused.status is ReminderStatus.PAUSED
+    assert paused.due is None
+    assert paused.recurrence == reminder.recurrence
+    assert paused.occurrence_history[-1].completion_reason == "series_paused"
+
+    restarted_dispatcher = FakeDispatcher()
+    restarted = await manager(fake_store, restarted_dispatcher, scheduler)
+    restored = await restarted.async_get(reminder.id)
+    assert restored.paused is True
+    assert not restarted_dispatcher.calls
+
+    resumed = await restarted.async_resume(reminder.id)
+    assert resumed.paused is False
+    assert resumed.recurrence == reminder.recurrence
+    assert resumed.due == reminder.due
+
+
+async def test_skip_next_records_one_occurrence_and_survives_restart(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    anchor = datetime.now().replace(tzinfo=None) + timedelta(days=2)
+    reminder = await runtime.async_create_recurring(
+        user_id="u1", title="Daily", recurrence=daily(anchor)
+    )
+    skipped_due = reminder.scheduled_due
+    skipped = await runtime.async_skip_next(reminder.id)
+    assert skipped.occurrence_history[-2].status is OccurrenceStatus.SKIPPED
+    assert skipped.occurrence_history[-2].scheduled_due == skipped_due
+    assert skipped.due == skipped_due + timedelta(days=1)  # type: ignore[operator]
+
+    restarted = await manager(fake_store, FakeDispatcher(), scheduler)
+    restored = await restarted.async_get(reminder.id)
+    assert restored.due == skipped.due
+    assert (
+        sum(
+            item.status is OccurrenceStatus.SKIPPED
+            for item in restored.occurrence_history
+        )
+        == 1
+    )
+
+
+async def test_offline_skip_policy_advances_without_delivery(
+    scheduler: Scheduler,
+) -> None:
+    now = datetime.now(UTC)
+    recurrence = daily((now - timedelta(days=5)).replace(tzinfo=None))
+    due = now - timedelta(days=2)
+    occurrence = Occurrence("missed", due, due)
+    reminder = Reminder(
+        id="series",
+        user_id="u1",
+        title="Daily",
+        due=due,
+        scheduled_due=due,
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+        recurrence=recurrence,
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        missed_occurrence_policy=MissedOccurrencePolicy.SKIP,
+    )
+    dispatcher = FakeDispatcher()
+    runtime = await manager(
+        FakeStore(serialize_storage({reminder.id: reminder}, {})),
+        dispatcher,
+        scheduler,
+    )
+    restored = await runtime.async_get(reminder.id)
+    assert not dispatcher.calls
+    assert restored.occurrence_history[0].status is OccurrenceStatus.SKIPPED
+    assert restored.due > now  # type: ignore[operator]
+
+
+async def test_context_wait_expiry_is_durable_and_series_advances(
+    scheduler: Scheduler,
+) -> None:
+    now = datetime.now(UTC)
+    recurrence = daily((now - timedelta(days=2)).replace(tzinfo=None))
+    due = now - timedelta(minutes=2)
+    occurrence = Occurrence("waiting", due, due)
+    reminder = Reminder(
+        id="series",
+        user_id="u1",
+        title="At home",
+        due=due,
+        scheduled_due=due,
+        created_at=now - timedelta(days=2),
+        updated_at=due,
+        recurrence=recurrence,
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        deliver_when=TriggerDefinition.from_dict(
+            {"type": "named", "trigger_id": "home"}
+        ),
+        expires_after_seconds=60,
+    )
+    dispatcher = FakeDispatcher()
+    runtime = await manager(
+        FakeStore(serialize_storage({reminder.id: reminder}, {})),
+        dispatcher,
+        scheduler,
+    )
+    advanced = await runtime.async_get(reminder.id)
+    assert not dispatcher.calls
+    assert advanced.occurrence_history[0].status is OccurrenceStatus.EXPIRED
+    assert advanced.last_occurrence_status is ReminderStatus.EXPIRED
+    assert advanced.due > now  # type: ignore[operator]
+
+
+async def test_context_can_activate_before_expiry(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    reminder = await runtime.async_create(
+        user_id="u1",
+        title="At home",
+        due=datetime.now(UTC) - timedelta(seconds=1),
+        deliver_when={"type": "named", "trigger_id": "home"},
+        expires_after_seconds=3600,
+    )
+    waiting = await runtime.async_get(reminder.id)
+    assert waiting.status is ReminderStatus.WAITING_FOR_CONTEXT
+    assert waiting.occurrence_history[-1].expires_at is not None
+    assert (
+        await runtime.async_activate_delivery_context(
+            reminder.id, cause="named", context={}
+        )
+        == "activated"
     )

@@ -151,3 +151,22 @@ export function awaitingOccurrences(reminder) {
     (item) => item.status === "awaiting_acknowledgement",
   );
 }
+
+export function upcomingBucket(value, timeZone, now = Date.now()) {
+  const local = zonedInputParts(value, timeZone).date;
+  const today = zonedInputParts(now, timeZone).date;
+  const dayNumber = (text) => Date.parse(`${text}T12:00:00Z`) / 86400000;
+  const difference = dayNumber(local) - dayNumber(today);
+  if (difference <= 0) return "Today";
+  if (difference === 1) return "Tomorrow";
+  if (difference <= 7) return "This week";
+  return "Later";
+}
+
+export function relativeTime(value, locale = undefined, now = Date.now()) {
+  const seconds = (new Date(value).getTime() - now) / 1000;
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+  if (Math.abs(seconds) < 3600) return formatter.format(Math.round(seconds / 60), "minute");
+  if (Math.abs(seconds) < 86400) return formatter.format(Math.round(seconds / 3600), "hour");
+  return formatter.format(Math.round(seconds / 86400), "day");
+}

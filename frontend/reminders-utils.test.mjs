@@ -9,6 +9,8 @@ import {
   recurrenceSummary,
   suggestedStates,
   triggerRepeatSummary,
+  upcomingBucket,
+  relativeTime,
 } from "../custom_components/reminders/frontend/reminders-utils.js";
 
 test("formats supported recurrence rules", () => {
@@ -53,4 +55,13 @@ test("suggests domain and entity-specific states", () => {
   };
   assert.deepEqual(suggestedStates(states, "light.study"), ["on", "off"]);
   assert.deepEqual(suggestedStates(states, "select.mode"), ["home", "away"]);
+});
+
+test("groups upcoming reminders using the Home Assistant timezone", () => {
+  const now = Date.parse("2026-08-26T22:30:00Z");
+  assert.equal(upcomingBucket("2026-08-26T22:45:00Z", "Europe/Dublin", now), "Today");
+  assert.equal(upcomingBucket("2026-08-27T08:00:00Z", "Europe/Dublin", now), "Tomorrow");
+  assert.equal(upcomingBucket("2026-08-31T08:00:00Z", "Europe/Dublin", now), "This week");
+  assert.equal(upcomingBucket("2026-09-20T08:00:00Z", "Europe/Dublin", now), "Later");
+  assert.equal(relativeTime("2026-08-26T23:12:00Z", "en", now), "in 42 minutes");
 });

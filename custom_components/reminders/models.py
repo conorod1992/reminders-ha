@@ -48,6 +48,8 @@ class ReminderStatus(StrEnum):
     INACTIVE_BEFORE_AVAILABLE_FROM = "inactive_before_available_from"
     EXPIRED = "expired"
     COMPLETED = "completed"
+    PAUSED = "paused"
+    SKIPPED = "skipped"
 
 
 class OccurrenceStatus(StrEnum):
@@ -62,6 +64,15 @@ class OccurrenceStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+    EXPIRED = "expired"
+
+
+class MissedOccurrencePolicy(StrEnum):
+    """How an anchored series handles an occurrence missed while HA was offline."""
+
+    REMIND_ON_STARTUP = "remind_on_startup"
+    SKIP = "skip"
 
 
 class AcknowledgementPolicy(StrEnum):
@@ -257,6 +268,7 @@ class Occurrence:
     activation_cause: str | None = None
     trigger_context: dict[str, Any] | None = None
     context_eligible_at: datetime | None = None
+    expires_at: datetime | None = None
     notification_action_token: str | None = None
     next_escalation_at: datetime | None = None
     escalation_attempt_count: int = 0
@@ -315,6 +327,9 @@ class Occurrence:
                 if self.context_eligible_at
                 else None
             ),
+            "expires_at": _format_datetime(self.expires_at)
+            if self.expires_at
+            else None,
             "notification_action_token": self.notification_action_token,
             "next_escalation_at": (
                 _format_datetime(self.next_escalation_at)
@@ -401,6 +416,7 @@ class Occurrence:
                 else None
             ),
             context_eligible_at=_optional_datetime(data.get("context_eligible_at")),
+            expires_at=_optional_datetime(data.get("expires_at")),
             notification_action_token=(
                 str(data["notification_action_token"])
                 if data.get("notification_action_token")
@@ -503,6 +519,12 @@ class Reminder:
     managed_externally: bool = False
     allow_manual_completion: bool = False
     external_actions: tuple[dict[str, str], ...] = ()
+    paused: bool = False
+    paused_at: datetime | None = None
+    missed_occurrence_policy: MissedOccurrencePolicy = (
+        MissedOccurrencePolicy.REMIND_ON_STARTUP
+    )
+    expires_after_seconds: int | None = None
 
     def updated(self, **changes: Any) -> Self:
         """Return an updated immutable reminder."""
@@ -588,6 +610,10 @@ class Reminder:
             "managed_externally": self.managed_externally,
             "allow_manual_completion": self.allow_manual_completion,
             "external_actions": [dict(item) for item in self.external_actions],
+            "paused": self.paused,
+            "paused_at": _format_datetime(self.paused_at) if self.paused_at else None,
+            "missed_occurrence_policy": self.missed_occurrence_policy.value,
+            "expires_after_seconds": self.expires_after_seconds,
         }
 
     @classmethod
@@ -712,6 +738,19 @@ class Reminder:
             external_actions=tuple(
                 {"id": str(item["id"]), "label": str(item["label"])}
                 for item in data.get("external_actions", [])
+            ),
+            paused=bool(data.get("paused", False)),
+            paused_at=_optional_datetime(data.get("paused_at")),
+            missed_occurrence_policy=MissedOccurrencePolicy(
+                data.get(
+                    "missed_occurrence_policy",
+                    MissedOccurrencePolicy.REMIND_ON_STARTUP,
+                )
+            ),
+            expires_after_seconds=(
+                int(data["expires_after_seconds"])
+                if data.get("expires_after_seconds") is not None
+                else None
             ),
         )
 
