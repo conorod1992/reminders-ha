@@ -516,6 +516,7 @@ class ReminderManager:
 
     async def async_update(self, reminder_id: str, **changes: Any) -> Reminder:
         """Update mutable fields and reschedule while retaining prior history."""
+        expiry_window_changed = "expires_after_seconds" in changes
         async with self._lock:
             current = self._require(reminder_id)
             if current.status is ReminderStatus.DELIVERING:
@@ -798,6 +799,9 @@ class ReminderManager:
             self._reschedule(force=True)
         self._cancel_trigger_duration_timers(reminder_id)
         await self._trigger_registry.async_sync(self._reminders.values())
+        if expiry_window_changed:
+            await self._async_process_occurrence_expiry(dt_util.utcnow())
+            updated = await self.async_get(reminder_id)
         if not updated.immediate_evaluated:
             await self._async_evaluate_immediate({updated.id})
         await self._async_restore_trigger_durations({updated.id})
@@ -834,10 +838,15 @@ class ReminderManager:
                 return current
             history = list(current.occurrence_history)
             active = _find_occurrence(current, current.current_occurrence_id)
-            if active is not None and active.status in {
-                OccurrenceStatus.SCHEDULED,
-                OccurrenceStatus.WAITING_FOR_CONTEXT,
-            }:
+            preserve_scheduled = (
+                active is not None
+                and active.status is OccurrenceStatus.SCHEDULED
+                and active.due > now
+            )
+            if (
+                active is not None
+                and active.status is OccurrenceStatus.WAITING_FOR_CONTEXT
+            ):
                 history = _replace_occurrence(
                     history,
                     active.updated(
@@ -846,13 +855,32 @@ class ReminderManager:
                         completion_reason="series_paused",
                     ),
                 )
+            elif (
+                active is not None
+                and active.status is OccurrenceStatus.SCHEDULED
+                and not preserve_scheduled
+            ):
+                history = _replace_occurrence(
+                    history,
+                    active.updated(
+                        status=OccurrenceStatus.SKIPPED,
+                        completed_at=now,
+                        completion_reason="paused_occurrence_missed",
+                    ),
+                )
+            preserved_scheduled_due = None
+            preserved_occurrence_id = None
+            if preserve_scheduled:
+                assert active is not None
+                preserved_scheduled_due = active.scheduled_due
+                preserved_occurrence_id = active.id
             updated = current.updated(
                 paused=True,
                 paused_at=now,
                 status=ReminderStatus.PAUSED,
                 due=None,
-                scheduled_due=None,
-                current_occurrence_id=None,
+                scheduled_due=preserved_scheduled_due,
+                current_occurrence_id=preserved_occurrence_id,
                 occurrence_history=tuple(history),
                 trigger_duration_waits=tuple(
                     wait
@@ -880,19 +908,63 @@ class ReminderManager:
                 raise ReminderValidationError("Only recurring reminders can be resumed")
             if not current.paused:
                 return current
-            due = first_due(current.recurrence, now)
-            occurrence = _new_occurrence(due)
-            updated = current.updated(
-                paused=False,
-                paused_at=None,
-                status=ReminderStatus.PENDING,
-                due=due,
-                scheduled_due=due,
-                current_occurrence_id=occurrence.id,
-                current_occurrence_number=occurrence_number(current.recurrence, due),
-                occurrence_history=(*current.occurrence_history, occurrence),
-                updated_at=now,
-            )
+            history = list(current.occurrence_history)
+            active = _find_occurrence(current, current.current_occurrence_id)
+            if (
+                active is not None
+                and active.status is OccurrenceStatus.SCHEDULED
+                and active.due > now
+            ):
+                updated = current.updated(
+                    paused=False,
+                    paused_at=None,
+                    status=ReminderStatus.PENDING,
+                    due=active.due,
+                    scheduled_due=active.scheduled_due,
+                    current_occurrence_number=occurrence_number(
+                        current.recurrence, active.scheduled_due
+                    ),
+                    updated_at=now,
+                )
+            elif active is not None and active.status is OccurrenceStatus.SCHEDULED:
+                skipped = active.updated(
+                    status=OccurrenceStatus.SKIPPED,
+                    completed_at=now,
+                    completion_reason="paused_occurrence_missed",
+                )
+                history = _replace_occurrence(history, skipped)
+                updated = _advance_recurring_series(
+                    current,
+                    history,
+                    resolved_due=active.scheduled_due,
+                    resolved_status=ReminderStatus.SKIPPED,
+                    now=now,
+                    after=max(now, active.scheduled_due),
+                ).updated(paused=False, paused_at=None)
+            else:
+                due = next_due_after(current.recurrence, now)
+                if due is None:
+                    updated = current.updated(
+                        paused=False,
+                        paused_at=None,
+                        status=current.last_occurrence_status or ReminderStatus.SKIPPED,
+                        updated_at=now,
+                    )
+                else:
+                    occurrence = _new_occurrence(due)
+                    updated = current.updated(
+                        paused=False,
+                        paused_at=None,
+                        status=ReminderStatus.PENDING,
+                        due=due,
+                        scheduled_due=due,
+                        current_occurrence_id=occurrence.id,
+                        current_occurrence_number=occurrence_number(
+                            current.recurrence, due
+                        ),
+                        occurrence_history=(*current.occurrence_history, occurrence),
+                        updated_at=now,
+                    )
             candidate = dict(self._reminders)
             candidate[reminder_id] = updated
             await self._async_persist_state(candidate, self._users)
@@ -1589,6 +1661,7 @@ class ReminderManager:
     ) -> str:
         """Claim a context-waiting occurrence and deliver it once."""
         now = dt_util.utcnow()
+        expired = False
         async with self._lock:
             current = self._reminders.get(reminder_id)
             if (
@@ -1606,24 +1679,29 @@ class ReminderManager:
                 or occurrence.status is not OccurrenceStatus.WAITING_FOR_CONTEXT
             ):
                 return "inactive"
-            if occurrence.expires_at is not None and now >= occurrence.expires_at:
-                return "expired"
-            activated = occurrence.updated(
-                status=OccurrenceStatus.DELIVERING,
-                trigger_type=deliver_when.type.value,
-                trigger_summary=current.deliver_when_summary,
-                triggered_at=now,
-                activation_cause=cause,
-                trigger_context=_sanitise_trigger_context(context),
-            )
-            history = _replace_occurrence(list(current.occurrence_history), activated)
-            candidate = dict(self._reminders)
-            candidate[reminder_id] = current.updated(
-                status=ReminderStatus.DELIVERING,
-                occurrence_history=tuple(history),
-                updated_at=now,
-            )
-            await self._async_persist_state(candidate, self._users)
+            expired = occurrence.expires_at is not None and now >= occurrence.expires_at
+            if not expired:
+                activated = occurrence.updated(
+                    status=OccurrenceStatus.DELIVERING,
+                    trigger_type=deliver_when.type.value,
+                    trigger_summary=current.deliver_when_summary,
+                    triggered_at=now,
+                    activation_cause=cause,
+                    trigger_context=_sanitise_trigger_context(context),
+                )
+                history = _replace_occurrence(
+                    list(current.occurrence_history), activated
+                )
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = current.updated(
+                    status=ReminderStatus.DELIVERING,
+                    occurrence_history=tuple(history),
+                    updated_at=now,
+                )
+                await self._async_persist_state(candidate, self._users)
+        if expired:
+            await self._async_process_occurrence_expiry(now)
+            return "expired"
         await self._trigger_registry.async_sync(self._reminders.values())
         await self._async_deliver_claimed(reminder_id, now)
         await self._trigger_registry.async_sync(self._reminders.values())
@@ -2176,6 +2254,12 @@ class ReminderManager:
                         resolved_status=ReminderStatus.EXPIRED,
                         now=now,
                         after=max(now, occurrence.scheduled_due),
+                    ).updated(
+                        trigger_duration_waits=tuple(
+                            wait
+                            for wait in reminder.trigger_duration_waits
+                            if wait.role != "deliver_when"
+                        )
                     )
                 else:
                     updated = reminder.updated(
@@ -2194,6 +2278,7 @@ class ReminderManager:
                 events.append((updated, expired))
             if events:
                 await self._async_persist_state(candidate, self._users)
+                self._reschedule(force=True)
         for reminder, occurrence in events:
             self._cancel_trigger_duration_timers(reminder.id, "deliver_when")
             self._fire_lifecycle_event(reminder, "expired", occurrence_id=occurrence.id)
