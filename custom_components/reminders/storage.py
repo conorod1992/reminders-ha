@@ -155,6 +155,13 @@ class ReminderStore(Store[StoredData]):
                     policy = raw.get("default_delivery_policy")
                     if isinstance(policy, dict):
                         policy.setdefault("mobile_app_services", [])
+            if old_minor_version < 7:
+                for raw in normalized["reminders"].values():
+                    if not isinstance(raw, dict):
+                        continue
+                    raw.setdefault("trigger_duration_started_at", None)
+                    raw.setdefault("trigger_duration_cause", None)
+                    raw.setdefault("trigger_duration_context", None)
             return normalized
         raise NotImplementedError(
             f"Cannot migrate reminders storage version {old_major_version}."
@@ -179,6 +186,11 @@ def deserialize_storage(
             if reminder.id != reminder_id:
                 raise ValueError("Reminder ID does not match storage key")
             if reminder.status is ReminderStatus.DELIVERING:
+                # No provider currently supplies an idempotency key or delivery
+                # receipt. A crash may therefore have happened on either side of
+                # the external side effect. Retrying is deliberately conservative:
+                # it can duplicate a delivered notification, but never invents
+                # success and still recovers a claim whose side effect never ran.
                 reminder = reminder.updated(
                     status=(
                         ReminderStatus.WAITING_FOR_TRIGGER

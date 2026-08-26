@@ -455,6 +455,9 @@ class Reminder:
     last_triggered_at: datetime | None = None
     snoozed_until: datetime | None = None
     immediate_evaluated: bool = False
+    trigger_duration_started_at: datetime | None = None
+    trigger_duration_cause: str | None = None
+    trigger_duration_context: dict[str, Any] | None = None
     cooldown_skip_count: int = 0
     deliver_when: TriggerDefinition | None = None
     deliver_when_summary: str | None = None
@@ -538,6 +541,13 @@ class Reminder:
                 _format_datetime(self.snoozed_until) if self.snoozed_until else None
             ),
             "immediate_evaluated": self.immediate_evaluated,
+            "trigger_duration_started_at": (
+                _format_datetime(self.trigger_duration_started_at)
+                if self.trigger_duration_started_at
+                else None
+            ),
+            "trigger_duration_cause": self.trigger_duration_cause,
+            "trigger_duration_context": self.trigger_duration_context,
             "cooldown_skip_count": self.cooldown_skip_count,
             "deliver_when": self.deliver_when.to_dict() if self.deliver_when else None,
             "deliver_when_summary": self.deliver_when_summary,
@@ -637,6 +647,19 @@ class Reminder:
             last_triggered_at=_optional_datetime(data.get("last_triggered_at")),
             snoozed_until=_optional_datetime(data.get("snoozed_until")),
             immediate_evaluated=bool(data.get("immediate_evaluated", False)),
+            trigger_duration_started_at=_optional_datetime(
+                data.get("trigger_duration_started_at")
+            ),
+            trigger_duration_cause=(
+                str(data["trigger_duration_cause"])
+                if data.get("trigger_duration_cause")
+                else None
+            ),
+            trigger_duration_context=(
+                dict(data["trigger_duration_context"])
+                if isinstance(data.get("trigger_duration_context"), dict)
+                else None
+            ),
             cooldown_skip_count=int(data.get("cooldown_skip_count", 0)),
             deliver_when=(
                 TriggerDefinition.from_dict(deliver_when_data)

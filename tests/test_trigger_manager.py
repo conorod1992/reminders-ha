@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -239,3 +239,186 @@ async def test_already_matching_default_and_opt_in(
     )
     assert (await manager.async_get(immediate.id)).status is ReminderStatus.COMPLETED
     assert len(dispatcher.calls) == 1
+
+
+class DurationTimers:
+    """Capture reminder-local duration timers and their remaining delay."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[float, Any]] = []
+
+    def schedule(self, _hass: Any, delay: float, callback: Any) -> Any:
+        self.calls.append((delay, callback))
+        return lambda: None
+
+
+async def test_restart_resumes_already_matching_duration_from_original_start(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    no_timers: None,
+    trigger_listeners: list[str],
+) -> None:
+    del trigger_listeners
+    timers = DurationTimers()
+    monkeypatch.setattr(
+        "custom_components.reminders.manager.async_call_later", timers.schedule
+    )
+    hass = SimpleNamespace(
+        states={"sensor.work": State("sensor.work", "done")},
+        bus=SimpleNamespace(),
+    )
+    first = ReminderManager(hass, fake_store, FakeDispatcher())  # type: ignore[arg-type]
+    await first.async_load()
+    reminder = await first.async_create_triggered(
+        user_id="u1",
+        title="Now after duration",
+        trigger={
+            "type": "state",
+            "entity_id": "sensor.work",
+            "to": "done",
+            "for_seconds": 30,
+        },
+        fire_if_already_matching=True,
+    )
+    persisted_start = (await first.async_get(reminder.id)).trigger_duration_started_at
+    assert persisted_start is not None
+    assert len(timers.calls) == 1
+    await first.async_unload()
+
+    twenty_seconds_ago = datetime.now(persisted_start.tzinfo) - timedelta(seconds=20)
+    fake_store.data["reminders"][reminder.id]["trigger_duration_started_at"] = (
+        twenty_seconds_ago.isoformat()
+    )
+    restarted_dispatcher = FakeDispatcher()
+    restarted = ReminderManager(  # type: ignore[arg-type]
+        hass, fake_store, restarted_dispatcher
+    )
+    await restarted.async_load()
+
+    remaining, callback = timers.calls[-1]
+    assert 0 < remaining <= 11
+    assert (await restarted.async_get(reminder.id)).immediate_evaluated is True
+    await callback(datetime.now(persisted_start.tzinfo))
+    assert len(restarted_dispatcher.calls) == 1
+    assert (await restarted.async_get(reminder.id)).trigger_duration_started_at is None
+
+
+async def test_restart_resumes_ordinary_duration_for_deduplicated_reminders(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    no_timers: None,
+) -> None:
+    listeners: list[Any] = []
+
+    def listen(_hass: Any, _entities: list[str], callback: Any) -> Any:
+        listeners.append(callback)
+        return lambda: None
+
+    timers = DurationTimers()
+    monkeypatch.setattr(
+        "custom_components.reminders.triggers.registry.async_track_state_change_event",
+        listen,
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.manager.async_call_later", timers.schedule
+    )
+    loop = asyncio.get_running_loop()
+    hass = SimpleNamespace(
+        states={"sensor.work": State("sensor.work", "idle")},
+        bus=SimpleNamespace(),
+        create_task=lambda coroutine, name=None: loop.create_task(coroutine, name=name),
+    )
+    first = ReminderManager(hass, fake_store, FakeDispatcher())  # type: ignore[arg-type]
+    await first.async_load()
+    reminders = [
+        await first.async_create_triggered(
+            user_id="u1",
+            title=title,
+            trigger={
+                "type": "state",
+                "entity_id": "sensor.work",
+                "to": "done",
+                "for_seconds": 30,
+            },
+        )
+        for title in ("One", "Two")
+    ]
+    assert first.trigger_listener_count == 1
+    hass.states["sensor.work"] = State("sensor.work", "done")
+    listeners[0](
+        Event(
+            "state_changed",
+            {
+                "old_state": State("sensor.work", "idle"),
+                "new_state": hass.states["sensor.work"],
+            },
+        )
+    )
+    for _ in range(20):
+        starts = [
+            (await first.async_get(item.id)).trigger_duration_started_at
+            for item in reminders
+        ]
+        if all(starts):
+            break
+        await asyncio.sleep(0)
+    assert len(timers.calls) == 2
+    await first.async_unload()
+
+    twenty_seconds_ago = datetime.now().astimezone() - timedelta(seconds=20)
+    for reminder in reminders:
+        fake_store.data["reminders"][reminder.id]["trigger_duration_started_at"] = (
+            twenty_seconds_ago.isoformat()
+        )
+    restarted = ReminderManager(  # type: ignore[arg-type]
+        hass, fake_store, FakeDispatcher()
+    )
+    await restarted.async_load()
+    resumed = timers.calls[-2:]
+    assert len(resumed) == 2
+    assert all(0 < delay <= 11 for delay, _callback in resumed)
+    assert restarted.trigger_listener_count == 1
+
+
+async def test_trigger_task_queued_immediately_before_unload_is_inert(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    no_timers: None,
+) -> None:
+    listeners: list[Any] = []
+
+    def listen(_hass: Any, _entities: list[str], callback: Any) -> Any:
+        listeners.append(callback)
+        return lambda: None
+
+    monkeypatch.setattr(
+        "custom_components.reminders.triggers.registry.async_track_state_change_event",
+        listen,
+    )
+    dispatcher = FakeDispatcher()
+    loop = asyncio.get_running_loop()
+    hass = SimpleNamespace(
+        states={"light.study": State("light.study", "on")},
+        bus=SimpleNamespace(),
+        create_task=lambda coroutine, name=None: loop.create_task(coroutine, name=name),
+    )
+    manager = ReminderManager(hass, fake_store, dispatcher)  # type: ignore[arg-type]
+    await manager.async_load()
+    reminder = await manager.async_create_triggered(
+        user_id="u1",
+        title="Light off",
+        trigger={"type": "state", "entity_id": "light.study", "to": "off"},
+    )
+    listeners[0](
+        Event(
+            "state_changed",
+            {
+                "old_state": State("light.study", "on"),
+                "new_state": State("light.study", "off"),
+            },
+        )
+    )
+    await manager.async_unload()
+    await asyncio.sleep(0)
+    assert dispatcher.calls == []
+    assert (await manager.async_get(reminder.id)).last_triggered_at is None

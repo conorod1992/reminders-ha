@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
@@ -48,6 +49,7 @@ class TriggerRegistry:
         self._entries: dict[str, _Entry] = {}
         self._named: dict[str, set[str]] = {}
         self._unloaded = False
+        self._callback_tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def listener_count(self) -> int:
@@ -95,6 +97,11 @@ class TriggerRegistry:
         for key in tuple(self._entries):
             self._remove(key)
         self._named.clear()
+        tasks = tuple(self._callback_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def condition_is_currently_matching(self, trigger: TriggerDefinition) -> bool:
         """Evaluate durable state/numeric/zone conditions without firing."""
@@ -130,7 +137,9 @@ class TriggerRegistry:
 
             def state_listener(event: Event[Any]) -> None:
                 self._hass.create_task(
-                    self._async_state_changed(key, event),
+                    self._async_run_tracked(
+                        self._async_state_changed(key, event),
+                    ),
                     f"reminders trigger {trigger.type.value}",
                 )
 
@@ -141,7 +150,9 @@ class TriggerRegistry:
 
             def event_listener(event: Event[Any]) -> None:
                 self._hass.create_task(
-                    self._async_event_fired(key, event),
+                    self._async_run_tracked(
+                        self._async_event_fired(key, event),
+                    ),
                     "reminders event trigger",
                 )
 
@@ -190,6 +201,16 @@ class TriggerRegistry:
             )
         if not remains_matching:
             self._cancel_duration(entry)
+            await self._activate(
+                entry,
+                "duration_cancelled",
+                {},
+                references={
+                    reference
+                    for reference in entry.reminder_ids
+                    if "::" not in reference
+                },
+            )
         if not matched:
             return
         context = {
@@ -198,7 +219,13 @@ class TriggerRegistry:
             "to": _safe_state_value(new_state, trigger.attribute),
         }
         if trigger.for_seconds:
-            self._start_duration(key, entry, timer_value, context)
+            durable = {
+                reference for reference in entry.reminder_ids if "::" not in reference
+            }
+            await self._activate(entry, "duration_started", context, references=durable)
+            contextual = entry.reminder_ids - durable
+            if contextual:
+                self._start_duration(key, entry, timer_value, context, contextual)
             return
         await self._activate(entry, "future_transition", context)
 
@@ -217,7 +244,12 @@ class TriggerRegistry:
         )
 
     def _start_duration(
-        self, key: str, entry: _Entry, timer_value: Any, context: dict[str, Any]
+        self,
+        key: str,
+        entry: _Entry,
+        timer_value: Any,
+        context: dict[str, Any],
+        references: set[str],
     ) -> None:
         self._cancel_duration(entry)
         entry.timer_value = timer_value
@@ -227,7 +259,12 @@ class TriggerRegistry:
             if current is not entry or not self._duration_still_matches(entry):
                 return
             entry.cancel_timer = None
-            await self._activate(entry, "future_transition", context)
+            await self._activate(
+                entry,
+                "future_transition",
+                context,
+                references=references & entry.reminder_ids,
+            )
 
         entry.cancel_timer = async_call_later(
             self._hass, entry.definition.for_seconds, elapsed
@@ -248,9 +285,17 @@ class TriggerRegistry:
         return self._zone_match(trigger, state) == (trigger.event is ZoneEvent.ENTER)
 
     async def _activate(
-        self, entry: _Entry, cause: str, context: dict[str, Any]
+        self,
+        entry: _Entry,
+        cause: str,
+        context: dict[str, Any],
+        *,
+        references: set[str] | None = None,
     ) -> None:
-        for reminder_id in tuple(entry.reminder_ids):
+        targets = entry.reminder_ids if references is None else references
+        for reminder_id in tuple(targets):
+            if self._unloaded:
+                return
             try:
                 await self._callback(reminder_id, cause, context)
             except Exception:
@@ -276,6 +321,18 @@ class TriggerRegistry:
             entry.cancel_timer()
             entry.cancel_timer = None
             entry.timer_value = None
+
+    async def _async_run_tracked(self, callback: Awaitable[None]) -> None:
+        """Track callback work from inside HA's thread-safe task wrapper."""
+        task = asyncio.current_task()
+        if task is None:
+            await callback
+            return
+        self._callback_tasks.add(task)
+        try:
+            await callback
+        finally:
+            self._callback_tasks.discard(task)
 
     def _remove(self, key: str) -> None:
         entry = self._entries.pop(key, None)

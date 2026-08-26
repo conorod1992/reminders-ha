@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
@@ -43,10 +45,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: RemindersConfigEntry) ->
         ]
     )
     manager = ReminderManager(hass, ReminderStore(hass), dispatcher)
-    await manager.async_load()
+    try:
+        await manager.async_load()
+        await async_register_frontend(hass)
+    except BaseException:
+        # async_load can install listeners and timers before later recovery work
+        # fails. Always tear down that partial runtime and preserve the original
+        # setup exception.
+        with suppress(BaseException):
+            await manager.async_unload()
+        raise
     entry.runtime_data = manager
     hass.data[DOMAIN] = manager
-    await async_register_frontend(hass)
     return True
 
 
