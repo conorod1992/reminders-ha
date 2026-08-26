@@ -656,7 +656,9 @@ class Reminder:
             and not activation_triggers
         ):
             raise ValueError("Triggered reminder requires a trigger")
-        if activation_type is ActivationType.TIME and (trigger is not None or activation_triggers):
+        if activation_type is ActivationType.TIME and (
+            trigger is not None or activation_triggers
+        ):
             raise ValueError("Time reminder cannot contain activation triggers")
         return cls(
             id=str(data["id"]),
