@@ -492,6 +492,7 @@ class Reminder:
     trigger: TriggerDefinition | None = None
     trigger_summary: str | None = None
     trigger_description: str | None = None
+    activation_triggers: tuple[dict[str, Any], ...] = ()
     repeat_policy: TriggerRepeatPolicy = TriggerRepeatPolicy.ONCE
     fire_if_already_matching: bool = False
     while_awaiting_acknowledgement: WhileAwaitingAcknowledgement = (
@@ -507,8 +508,11 @@ class Reminder:
     cooldown_skip_count: int = 0
     deliver_when: TriggerDefinition | None = None
     deliver_when_summary: str | None = None
+    delivery_triggers: tuple[dict[str, Any], ...] = ()
+    delivery_conditions: tuple[dict[str, Any], ...] = ()
     complete_when: TriggerDefinition | None = None
     complete_when_summary: str | None = None
+    completion_triggers: tuple[dict[str, Any], ...] = ()
     escalation: EscalationPolicy | None = None
     notification_actions: tuple[dict[str, str], ...] = field(
         default=(), compare=False, repr=False
@@ -572,6 +576,7 @@ class Reminder:
             "trigger": self.trigger.to_dict() if self.trigger else None,
             "trigger_summary": self.trigger_summary,
             "trigger_description": self.trigger_description,
+            "activation_triggers": [dict(item) for item in self.activation_triggers],
             "repeat_policy": self.repeat_policy.value,
             "fire_if_already_matching": self.fire_if_already_matching,
             "while_awaiting_acknowledgement": (
@@ -599,10 +604,13 @@ class Reminder:
             "cooldown_skip_count": self.cooldown_skip_count,
             "deliver_when": self.deliver_when.to_dict() if self.deliver_when else None,
             "deliver_when_summary": self.deliver_when_summary,
+            "delivery_triggers": [dict(item) for item in self.delivery_triggers],
+            "delivery_conditions": [dict(item) for item in self.delivery_conditions],
             "complete_when": (
                 self.complete_when.to_dict() if self.complete_when else None
             ),
             "complete_when_summary": self.complete_when_summary,
+            "completion_triggers": [dict(item) for item in self.completion_triggers],
             "escalation": self.escalation.to_dict() if self.escalation else None,
             "source": self.source,
             "source_id": self.source_id,
@@ -627,6 +635,7 @@ class Reminder:
         status = ReminderStatus(data.get("status", ReminderStatus.PENDING))
         trigger_data = data.get("trigger")
         trigger = TriggerDefinition.from_dict(trigger_data) if trigger_data else None
+        activation_triggers = _config_tuple(data.get("activation_triggers"))
         deliver_when_data = data.get("deliver_when")
         complete_when_data = data.get("complete_when")
         escalation_data = data.get("escalation")
@@ -641,10 +650,14 @@ class Reminder:
             }
         ):
             raise ValueError("Time reminder requires due")
-        if activation_type is ActivationType.TRIGGER and trigger is None:
-            raise ValueError("Triggered reminder requires trigger")
-        if activation_type is ActivationType.TIME and trigger is not None:
-            raise ValueError("Time reminder cannot contain a trigger")
+        if (
+            activation_type is ActivationType.TRIGGER
+            and trigger is None
+            and not activation_triggers
+        ):
+            raise ValueError("Triggered reminder requires a trigger")
+        if activation_type is ActivationType.TIME and (trigger is not None or activation_triggers):
+            raise ValueError("Time reminder cannot contain activation triggers")
         return cls(
             id=str(data["id"]),
             user_id=str(data["user_id"]),
@@ -693,6 +706,7 @@ class Reminder:
                 if data.get("trigger_description")
                 else None
             ),
+            activation_triggers=activation_triggers,
             repeat_policy=TriggerRepeatPolicy(
                 data.get("repeat_policy", TriggerRepeatPolicy.ONCE)
             ),
@@ -725,6 +739,8 @@ class Reminder:
                 if data.get("deliver_when_summary")
                 else None
             ),
+            delivery_triggers=_config_tuple(data.get("delivery_triggers")),
+            delivery_conditions=_config_tuple(data.get("delivery_conditions")),
             complete_when=(
                 TriggerDefinition.from_dict(complete_when_data)
                 if complete_when_data
@@ -735,6 +751,7 @@ class Reminder:
                 if data.get("complete_when_summary")
                 else None
             ),
+            completion_triggers=_config_tuple(data.get("completion_triggers")),
             escalation=(
                 EscalationPolicy.from_dict(escalation_data) if escalation_data else None
             ),
@@ -763,6 +780,17 @@ class Reminder:
                 else None
             ),
         )
+
+
+def _config_tuple(value: Any) -> tuple[dict[str, Any], ...]:
+    """Copy a persisted Home Assistant automation config list defensively."""
+    if value is None:
+        return ()
+    if not isinstance(value, list | tuple):
+        raise ValueError("Automation configuration must be a list")
+    if not all(isinstance(item, dict) for item in value):
+        raise ValueError("Automation configuration entries must be objects")
+    return tuple(dict(item) for item in value)
 
 
 def _format_datetime(value: datetime) -> str:
