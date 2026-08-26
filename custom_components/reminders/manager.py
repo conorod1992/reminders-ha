@@ -1422,6 +1422,7 @@ class ReminderManager:
                 or current.deliver_when is None
             ):
                 return "inactive"
+            deliver_when = current.deliver_when
             current = _replace_trigger_duration_wait(current, "deliver_when", None)
             occurrence = _find_occurrence(current, current.current_occurrence_id)
             if (
@@ -1431,7 +1432,7 @@ class ReminderManager:
                 return "inactive"
             activated = occurrence.updated(
                 status=OccurrenceStatus.DELIVERING,
-                trigger_type=current.deliver_when.type.value,
+                trigger_type=deliver_when.type.value,
                 trigger_summary=current.deliver_when_summary,
                 triggered_at=now,
                 activation_cause=cause,
@@ -1459,6 +1460,7 @@ class ReminderManager:
             current = self._reminders.get(reminder_id)
             if self._unloaded or current is None or current.complete_when is None:
                 return "inactive"
+            complete_when = current.complete_when
             current = _replace_trigger_duration_wait(current, "complete_when", None)
             occurrence = _automatic_completion_occurrence(current)
             if occurrence is None or occurrence.status not in {
@@ -1474,7 +1476,7 @@ class ReminderManager:
                 completed_by=None,
                 completion_source="automatic",
                 completion_reason=cause,
-                trigger_type=current.complete_when.type.value,
+                trigger_type=complete_when.type.value,
                 trigger_summary=current.complete_when_summary,
                 triggered_at=now,
                 activation_cause=cause,
