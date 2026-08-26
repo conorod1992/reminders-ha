@@ -35,6 +35,7 @@ from .models import (
     QuietHoursPolicy,
     Reminder,
     ReminderStatus,
+    TriggerDurationWait,
     TriggerRepeatPolicy,
     UserPreferences,
     WhileAwaitingAcknowledgement,
@@ -81,7 +82,7 @@ class ReminderManager:
         self._unloaded = False
         self._listeners: set[Callable[[frozenset[str]], None]] = set()
         self._trigger_registry = TriggerRegistry(hass, self._async_trigger_callback)
-        self._immediate_timers: dict[str, Callable[[], None]] = {}
+        self._trigger_duration_timers: dict[tuple[str, str], Callable[[], None]] = {}
         self._unsub_mobile_actions: Callable[[], None] | None = None
 
     @property
@@ -110,6 +111,7 @@ class ReminderManager:
                     MOBILE_ACTION_EVENT, self._mobile_action_received
                 )
         await self._trigger_registry.async_sync(self._reminders.values())
+        await self._async_restore_trigger_durations()
         await self._async_evaluate_immediate()
         await self._async_process_due(dt_util.utcnow())
 
@@ -118,9 +120,9 @@ class ReminderManager:
         async with self._lock:
             self._unloaded = True
             self._cancel_timer()
-            for cancel in self._immediate_timers.values():
+            for cancel in self._trigger_duration_timers.values():
                 cancel()
-            self._immediate_timers.clear()
+            self._trigger_duration_timers.clear()
             self._listeners.clear()
             if self._unsub_mobile_actions is not None:
                 self._unsub_mobile_actions()
@@ -584,6 +586,13 @@ class ReminderManager:
                         if changes[field_name] is not None
                         else None
                     )
+                    changes["trigger_duration_waits"] = tuple(
+                        wait
+                        for wait in changes.get(
+                            "trigger_duration_waits", current.trigger_duration_waits
+                        )
+                        if wait.role != field_name
+                    )
             if "escalation" in changes:
                 changes["escalation"] = _coerce_escalation(changes["escalation"])
             if "repeat_policy" in changes:
@@ -615,7 +624,10 @@ class ReminderManager:
                     raise ReminderValidationError(
                         "A trigger definition is required for trigger activation"
                     )
-                if active and active.status is OccurrenceStatus.SCHEDULED:
+                if active and active.status in {
+                    OccurrenceStatus.SCHEDULED,
+                    OccurrenceStatus.WAITING_FOR_CONTEXT,
+                }:
                     history = _replace_occurrence(
                         history, active.updated(status=OccurrenceStatus.CANCELLED)
                     )
@@ -632,6 +644,7 @@ class ReminderManager:
                     changes.update(
                         status=_trigger_waiting_status(now, available, expiry),
                         immediate_evaluated=False,
+                        trigger_duration_waits=(),
                     )
                 else:
                     changes["status"] = current.status
@@ -640,7 +653,10 @@ class ReminderManager:
                 if not isinstance(recurrence, RecurrenceRule):
                     raise ReminderValidationError("Recurrence rule is invalid")
                 next_due = first_due(recurrence, now)
-                if active and active.status is OccurrenceStatus.SCHEDULED:
+                if active and active.status in {
+                    OccurrenceStatus.SCHEDULED,
+                    OccurrenceStatus.WAITING_FOR_CONTEXT,
+                }:
                     history = _replace_occurrence(
                         history, active.updated(status=OccurrenceStatus.CANCELLED)
                     )
@@ -696,19 +712,22 @@ class ReminderManager:
                 policy = changes["escalation"]
                 rewritten: list[Occurrence] = []
                 for item in history:
-                    rewritten.append(
-                        item.updated(
-                            next_escalation_at=(
-                                now + timedelta(minutes=policy.initial_delay_minutes)
-                                if policy is not None
-                                and item.status
-                                is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                                else None
-                            ),
-                            escalation_attempt_count=0,
-                            escalation_history=(),
+                    if item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT:
+                        rewritten.append(
+                            item.updated(
+                                next_escalation_at=(
+                                    now
+                                    + timedelta(minutes=policy.initial_delay_minutes)
+                                    if policy is not None
+                                    else None
+                                ),
+                                escalation_attempt_count=0,
+                                escalation_history=(),
+                            )
                         )
-                    )
+                    else:
+                        # Completed/resolved occurrence history is durable evidence.
+                        rewritten.append(item)
                 history = rewritten
             changes["occurrence_history"] = tuple(history)
             changes.setdefault(
@@ -724,12 +743,11 @@ class ReminderManager:
             candidate[reminder_id] = updated
             await self._async_persist_state(candidate, self._users)
             self._reschedule(force=True)
-        cancel = self._immediate_timers.pop(reminder_id, None)
-        if cancel:
-            cancel()
+        self._cancel_trigger_duration_timers(reminder_id)
         await self._trigger_registry.async_sync(self._reminders.values())
         if not updated.immediate_evaluated:
             await self._async_evaluate_immediate({updated.id})
+        await self._async_restore_trigger_durations({updated.id})
         if updated.due is not None and updated.due <= dt_util.utcnow():
             await self._async_process_due(dt_util.utcnow())
         self._notify_changed({current.user_id, updated.user_id})
@@ -745,9 +763,7 @@ class ReminderManager:
             del candidate[reminder_id]
             await self._async_persist_state(candidate, self._users)
             self._reschedule(force=True)
-        cancel = self._immediate_timers.pop(reminder_id, None)
-        if cancel:
-            cancel()
+        self._cancel_trigger_duration_timers(reminder_id)
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({reminder.user_id})
         self._fire_lifecycle_event(reminder, "deleted")
@@ -1367,6 +1383,20 @@ class ReminderManager:
         self, reminder_id: str, cause: str, context: dict[str, Any]
     ) -> None:
         reminder_id, separator, role = reminder_id.partition("::")
+        if self._unloaded:
+            return
+        duration_role = role if separator else "activation"
+        if cause == "duration_started":
+            await self._async_start_trigger_duration(
+                reminder_id,
+                role=duration_role,
+                cause="future_transition",
+                context=context,
+            )
+            return
+        if cause == "duration_cancelled":
+            await self._async_clear_trigger_duration(reminder_id, duration_role)
+            return
         if not separator:
             await self.async_activate_trigger(reminder_id, cause=cause, context=context)
         elif role == "deliver_when":
@@ -1386,11 +1416,14 @@ class ReminderManager:
         async with self._lock:
             current = self._reminders.get(reminder_id)
             if (
-                current is None
+                self._unloaded
+                or current is None
                 or current.status is not ReminderStatus.WAITING_FOR_CONTEXT
                 or current.deliver_when is None
             ):
                 return "inactive"
+            deliver_when = current.deliver_when
+            current = _replace_trigger_duration_wait(current, "deliver_when", None)
             occurrence = _find_occurrence(current, current.current_occurrence_id)
             if (
                 occurrence is None
@@ -1399,7 +1432,7 @@ class ReminderManager:
                 return "inactive"
             activated = occurrence.updated(
                 status=OccurrenceStatus.DELIVERING,
-                trigger_type=current.deliver_when.type.value,
+                trigger_type=deliver_when.type.value,
                 trigger_summary=current.deliver_when_summary,
                 triggered_at=now,
                 activation_cause=cause,
@@ -1425,8 +1458,10 @@ class ReminderManager:
         now = dt_util.utcnow()
         async with self._lock:
             current = self._reminders.get(reminder_id)
-            if current is None or current.complete_when is None:
+            if self._unloaded or current is None or current.complete_when is None:
                 return "inactive"
+            complete_when = current.complete_when
+            current = _replace_trigger_duration_wait(current, "complete_when", None)
             occurrence = _automatic_completion_occurrence(current)
             if occurrence is None or occurrence.status not in {
                 OccurrenceStatus.SCHEDULED,
@@ -1441,7 +1476,7 @@ class ReminderManager:
                 completed_by=None,
                 completion_source="automatic",
                 completion_reason=cause,
-                trigger_type=current.complete_when.type.value,
+                trigger_type=complete_when.type.value,
                 trigger_summary=current.complete_when_summary,
                 triggered_at=now,
                 activation_cause=cause,
@@ -1520,11 +1555,16 @@ class ReminderManager:
         async with self._lock:
             current = self._reminders.get(reminder_id)
             if (
-                current is None
+                self._unloaded
+                or current is None
                 or current.activation_type is not ActivationType.TRIGGER
                 or current.trigger is None
             ):
                 return "inactive"
+            trigger = current.trigger
+            duration_pending = _trigger_duration_wait(current, "activation") is not None
+            if duration_pending:
+                current = _replace_trigger_duration_wait(current, "activation", None)
             owner = current.user_id
             if current.expires_at is not None and now >= current.expires_at:
                 updated = current.updated(status=ReminderStatus.EXPIRED, updated_at=now)
@@ -1584,7 +1624,7 @@ class ReminderManager:
                 else:
                     occurrence = _new_occurrence(now).updated(
                         status=OccurrenceStatus.DELIVERING,
-                        trigger_type=current.trigger.type.value,
+                        trigger_type=trigger.type.value,
                         trigger_summary=current.trigger_summary,
                         triggered_at=now,
                         activation_cause=cause,
@@ -1603,6 +1643,16 @@ class ReminderManager:
                     candidate[reminder_id] = claimed
                     await self._async_persist_state(candidate, self._users)
                     outcome = "activated"
+            if (
+                duration_pending
+                and self._reminders.get(reminder_id) is not None
+                and _trigger_duration_wait(self._reminders[reminder_id], "activation")
+                is not None
+            ):
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = current.updated(updated_at=now)
+                await self._async_persist_state(candidate, self._users)
+        self._cancel_trigger_duration_timers(reminder_id, "activation")
         await self._trigger_registry.async_sync(self._reminders.values())
         if outcome == "activated":
             await self._async_deliver_claimed(reminder_id, now)
@@ -1616,6 +1666,7 @@ class ReminderManager:
     ) -> None:
         """Safely perform each reminder's one-time already-matching evaluation."""
         candidates: list[Reminder] = []
+        now = dt_util.utcnow()
         async with self._lock:
             proposed = dict(self._reminders)
             changed = False
@@ -1629,17 +1680,28 @@ class ReminderManager:
                     or reminder.trigger.type in {TriggerType.EVENT, TriggerType.NAMED}
                 ):
                     continue
-                proposed[reminder.id] = reminder.updated(
-                    immediate_evaluated=True, updated_at=dt_util.utcnow()
-                )
-                changed = True
-                if (
+                matching = (
                     reminder.fire_if_already_matching
                     and self._trigger_registry.condition_is_currently_matching(
                         reminder.trigger
                     )
-                ):
-                    candidates.append(reminder)
+                )
+                updated = reminder.updated(immediate_evaluated=True, updated_at=now)
+                if matching and reminder.trigger.for_seconds:
+                    updated = _replace_trigger_duration_wait(
+                        updated,
+                        "activation",
+                        TriggerDurationWait(
+                            "activation",
+                            now,
+                            "already_matching",
+                            {"already_matching": True},
+                        ),
+                    )
+                proposed[reminder.id] = updated
+                changed = True
+                if matching:
+                    candidates.append(updated)
             if changed:
                 await self._async_persist_state(proposed, self._users)
         for reminder in candidates:
@@ -1647,33 +1709,165 @@ class ReminderManager:
             if trigger is None:
                 continue
             if trigger.for_seconds:
-
-                async def elapsed(
-                    _now: datetime, reminder_id: str = reminder.id
-                ) -> None:
-                    self._immediate_timers.pop(reminder_id, None)
-                    current = await self.async_get(reminder_id)
-                    if (
-                        current.trigger is not None
-                        and self._trigger_registry.condition_is_currently_matching(
-                            current.trigger
-                        )
-                    ):
-                        await self.async_activate_trigger(
-                            reminder_id,
-                            cause="already_matching",
-                            context={"already_matching": True},
-                        )
-
-                self._immediate_timers[reminder.id] = async_call_later(
-                    self._hass, trigger.for_seconds, elapsed
-                )
+                self._schedule_trigger_duration(reminder, "activation")
             else:
                 await self.async_activate_trigger(
                     reminder.id,
                     cause="already_matching",
                     context={"already_matching": True},
                 )
+
+    async def _async_start_trigger_duration(
+        self,
+        reminder_id: str,
+        *,
+        role: str,
+        cause: str,
+        context: dict[str, Any],
+    ) -> None:
+        """Persist a transition duration before installing its in-memory timer."""
+        now = dt_util.utcnow()
+        async with self._lock:
+            current = self._reminders.get(reminder_id)
+            if (
+                self._unloaded
+                or current is None
+                or (trigger := _trigger_for_duration_role(current, role)) is None
+                or not trigger.for_seconds
+            ):
+                return
+            observed_value = context.get("duration_observed_value")
+            stored_context = {
+                key: value
+                for key, value in context.items()
+                if key != "duration_observed_value"
+            }
+            updated = _replace_trigger_duration_wait(
+                current,
+                role,
+                TriggerDurationWait(
+                    role,
+                    now,
+                    cause,
+                    _sanitise_trigger_context(stored_context),
+                    observed_value,
+                ),
+            ).updated(updated_at=now)
+            candidate = dict(self._reminders)
+            candidate[reminder_id] = updated
+            await self._async_persist_state(candidate, self._users)
+        self._schedule_trigger_duration(updated, role)
+
+    async def _async_clear_trigger_duration(self, reminder_id: str, role: str) -> None:
+        """Discard durable duration progress after the condition stops matching."""
+        async with self._lock:
+            current = self._reminders.get(reminder_id)
+            if current is None or _trigger_duration_wait(current, role) is None:
+                return
+            updated = _replace_trigger_duration_wait(current, role, None).updated(
+                updated_at=dt_util.utcnow()
+            )
+            candidate = dict(self._reminders)
+            candidate[reminder_id] = updated
+            await self._async_persist_state(candidate, self._users)
+        self._cancel_trigger_duration_timers(reminder_id, role)
+
+    async def _async_restore_trigger_durations(
+        self, reminder_ids: set[str] | None = None
+    ) -> None:
+        """Resume persisted waits from their original matching timestamps."""
+        valid: list[tuple[Reminder, str]] = []
+        invalid: list[tuple[str, str]] = []
+        async with self._lock:
+            for reminder in self._reminders.values():
+                if reminder_ids is not None and reminder.id not in reminder_ids:
+                    continue
+                for wait in reminder.trigger_duration_waits:
+                    trigger = _trigger_for_duration_role(reminder, wait.role)
+                    if (
+                        trigger is not None
+                        and trigger.for_seconds
+                        and self._trigger_registry.duration_is_still_matching(
+                            trigger, wait.observed_value
+                        )
+                    ):
+                        valid.append((reminder, wait.role))
+                    else:
+                        invalid.append((reminder.id, wait.role))
+            if invalid:
+                candidate = dict(self._reminders)
+                now = dt_util.utcnow()
+                for reminder_id, role in invalid:
+                    candidate[reminder_id] = _replace_trigger_duration_wait(
+                        candidate[reminder_id], role, None
+                    ).updated(updated_at=now)
+                await self._async_persist_state(candidate, self._users)
+        for reminder, role in valid:
+            self._schedule_trigger_duration(reminder, role)
+
+    def _schedule_trigger_duration(self, reminder: Reminder, role: str) -> None:
+        """Install one reminder-local timer for a durable shared-listener wait."""
+        trigger = _trigger_for_duration_role(reminder, role)
+        wait = _trigger_duration_wait(reminder, role)
+        if trigger is None or wait is None:
+            return
+        key = (reminder.id, role)
+        cancel = self._trigger_duration_timers.pop(key, None)
+        if cancel is not None:
+            cancel()
+        remaining = max(
+            0.0,
+            (
+                wait.started_at
+                + timedelta(seconds=trigger.for_seconds)
+                - dt_util.utcnow()
+            ).total_seconds(),
+        )
+
+        async def elapsed(_now: datetime, reminder_id: str = reminder.id) -> None:
+            self._trigger_duration_timers.pop(key, None)
+            if self._unloaded:
+                return
+            current = await self.async_get(reminder_id)
+            current_wait = _trigger_duration_wait(current, role)
+            current_trigger = _trigger_for_duration_role(current, role)
+            if (
+                current_wait != wait
+                or current_trigger is None
+                or not self._trigger_registry.duration_is_still_matching(
+                    current_trigger, wait.observed_value
+                )
+            ):
+                await self._async_clear_trigger_duration(reminder_id, role)
+                return
+            if role == "activation":
+                await self.async_activate_trigger(
+                    reminder_id, cause=wait.cause, context=wait.context
+                )
+            elif role == "deliver_when":
+                outcome = await self.async_activate_delivery_context(
+                    reminder_id, cause=wait.cause, context=wait.context
+                )
+                if outcome != "activated":
+                    await self._async_clear_trigger_duration(reminder_id, role)
+            else:
+                outcome = await self.async_complete_automatically(
+                    reminder_id, cause=wait.cause, context=wait.context
+                )
+                if outcome != "completed":
+                    await self._async_clear_trigger_duration(reminder_id, role)
+
+        self._trigger_duration_timers[key] = async_call_later(
+            self._hass, remaining, elapsed
+        )
+
+    def _cancel_trigger_duration_timers(
+        self, reminder_id: str, role: str | None = None
+    ) -> None:
+        for key in tuple(self._trigger_duration_timers):
+            if key[0] != reminder_id or (role is not None and key[1] != role):
+                continue
+            self._trigger_duration_timers.pop(key)()
 
     def _summary(self, trigger: TriggerDefinition) -> str:
         names: dict[str, str] = {}
@@ -2157,7 +2351,11 @@ class ReminderManager:
     ) -> None:
         async with self._lock:
             claimed = self._reminders.get(reminder_id)
-            if claimed is None or claimed.status is not ReminderStatus.DELIVERING:
+            if (
+                self._unloaded
+                or claimed is None
+                or claimed.status is not ReminderStatus.DELIVERING
+            ):
                 return
             preferences = self._users.get(claimed.user_id, UserPreferences())
             policy = claimed.delivery_policy or preferences.default_delivery_policy
@@ -2199,7 +2397,11 @@ class ReminderManager:
         )
         async with self._lock:
             current = self._reminders.get(reminder_id)
-            if current is None or current.status is not ReminderStatus.DELIVERING:
+            if (
+                self._unloaded
+                or current is None
+                or current.status is not ReminderStatus.DELIVERING
+            ):
                 return
             occurrence = _find_occurrence(current, current.current_occurrence_id)
             if occurrence is None:
@@ -2600,6 +2802,31 @@ def _sanitise_trigger_context(context: dict[str, Any]) -> dict[str, Any]:
                 or child_value is None
             }
     return result
+
+
+def _trigger_for_duration_role(
+    reminder: Reminder, role: str
+) -> TriggerDefinition | None:
+    return {
+        "activation": reminder.trigger,
+        "deliver_when": reminder.deliver_when,
+        "complete_when": reminder.complete_when,
+    }.get(role)
+
+
+def _trigger_duration_wait(reminder: Reminder, role: str) -> TriggerDurationWait | None:
+    return next(
+        (item for item in reminder.trigger_duration_waits if item.role == role), None
+    )
+
+
+def _replace_trigger_duration_wait(
+    reminder: Reminder, role: str, wait: TriggerDurationWait | None
+) -> Reminder:
+    waits = [item for item in reminder.trigger_duration_waits if item.role != role]
+    if wait is not None:
+        waits.append(wait)
+    return reminder.updated(trigger_duration_waits=tuple(waits))
 
 
 def _validate_title(title: str) -> None:

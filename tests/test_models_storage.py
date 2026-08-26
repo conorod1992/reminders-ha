@@ -57,6 +57,38 @@ async def test_v1_migration_preserves_one_shot_and_preferences() -> None:
     assert users == {"u1": preferences}
 
 
+async def test_storage_1_7_migration_converts_activation_duration_wait() -> None:
+    now = datetime(2026, 7, 26, 12, tzinfo=UTC)
+    reminder = Reminder(
+        id="legacy-duration",
+        user_id="u1",
+        title="Legacy",
+        due=now,
+        created_at=now,
+        updated_at=now,
+    )
+    old = serialize_storage({reminder.id: reminder}, {})
+    raw = old["reminders"][reminder.id]
+    raw.pop("trigger_duration_waits")
+    raw["trigger_duration_started_at"] = now.isoformat()
+    raw["trigger_duration_cause"] = "future_transition"
+    raw["trigger_duration_context"] = {"entity_id": "sensor.work"}
+    store = object.__new__(ReminderStore)
+
+    migrated = await store._async_migrate_func(1, 7, old)
+
+    waits = migrated["reminders"][reminder.id]["trigger_duration_waits"]
+    assert waits == [
+        {
+            "role": "activation",
+            "started_at": now.isoformat(),
+            "cause": "future_transition",
+            "context": {"entity_id": "sensor.work"},
+            "observed_value": None,
+        }
+    ]
+
+
 def test_serialize_deserialize_round_trip() -> None:
     now = datetime(2026, 7, 26, 12, tzinfo=UTC)
     reminder = Reminder(
@@ -114,6 +146,8 @@ def test_interrupted_delivery_is_recovered_as_pending() -> None:
         status=ReminderStatus.DELIVERING,
     )
     reminders, _ = deserialize_storage(serialize_storage({"abc": reminder}, {}))
+    # Recovery cannot know whether the provider side effect ran. It retries rather
+    # than silently inventing success or dropping a claim that may not have run.
     assert reminders["abc"].status is ReminderStatus.PENDING
 
 

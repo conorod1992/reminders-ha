@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
@@ -9,7 +10,7 @@ from typing import Any
 
 from homeassistant.components.zone import in_zone
 from homeassistant.core import Event, HomeAssistant, State
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import async_track_state_change_event
 
 from ..models import (
     ActivationType,
@@ -35,8 +36,6 @@ class _Entry:
     definition: TriggerDefinition
     reminder_ids: set[str] = field(default_factory=set)
     unsubscribe: Callable[[], None] | None = None
-    cancel_timer: Callable[[], None] | None = None
-    timer_value: Any = None
 
 
 class TriggerRegistry:
@@ -48,6 +47,7 @@ class TriggerRegistry:
         self._entries: dict[str, _Entry] = {}
         self._named: dict[str, set[str]] = {}
         self._unloaded = False
+        self._callback_tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def listener_count(self) -> int:
@@ -95,6 +95,11 @@ class TriggerRegistry:
         for key in tuple(self._entries):
             self._remove(key)
         self._named.clear()
+        tasks = tuple(self._callback_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def condition_is_currently_matching(self, trigger: TriggerDefinition) -> bool:
         """Evaluate durable state/numeric/zone conditions without firing."""
@@ -120,6 +125,22 @@ class TriggerRegistry:
             return inside if trigger.event is ZoneEvent.ENTER else not inside
         return False
 
+    def duration_is_still_matching(
+        self, trigger: TriggerDefinition, observed_value: Any
+    ) -> bool:
+        """Check a restored duration against its original observed state value."""
+        if (
+            trigger.type is TriggerType.STATE
+            and trigger.to_value is None
+            and trigger.from_value is None
+        ):
+            state = self._hass.states.get(trigger.entity_id or "")
+            return (
+                state is not None
+                and _observed(state, trigger.attribute) == observed_value
+            )
+        return self.condition_is_currently_matching(trigger)
+
     def _attach(self, key: str, entry: _Entry) -> None:
         trigger = entry.definition
         if trigger.type in {
@@ -130,7 +151,9 @@ class TriggerRegistry:
 
             def state_listener(event: Event[Any]) -> None:
                 self._hass.create_task(
-                    self._async_state_changed(key, event),
+                    self._async_run_tracked(
+                        self._async_state_changed(key, event),
+                    ),
                     f"reminders trigger {trigger.type.value}",
                 )
 
@@ -141,7 +164,9 @@ class TriggerRegistry:
 
             def event_listener(event: Event[Any]) -> None:
                 self._hass.create_task(
-                    self._async_event_fired(key, event),
+                    self._async_run_tracked(
+                        self._async_event_fired(key, event),
+                    ),
                     "reminders event trigger",
                 )
 
@@ -156,12 +181,11 @@ class TriggerRegistry:
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
         if not isinstance(old_state, State) or not isinstance(new_state, State):
-            self._cancel_duration(entry)
+            await self._activate(entry, "duration_cancelled", {})
             return
         trigger = entry.definition
         matched = False
         remains_matching = False
-        timer_value: Any = None
         if trigger.type is TriggerType.STATE:
             old_value = _observed(old_state, trigger.attribute)
             new_value = _observed(new_state, trigger.attribute)
@@ -171,7 +195,6 @@ class TriggerRegistry:
                 trigger.from_value is None or old_value == trigger.from_value
             ) and (trigger.to_value is None or new_value == trigger.to_value)
             remains_matching = _state_current_matches(trigger, new_value)
-            timer_value = new_value
         elif trigger.type is TriggerType.NUMERIC_STATE:
             old_number = _number(old_state, trigger.attribute)
             new_number = _number(new_state, trigger.attribute)
@@ -189,7 +212,16 @@ class TriggerRegistry:
                 new_inside if trigger.event is ZoneEvent.ENTER else not new_inside
             )
         if not remains_matching:
-            self._cancel_duration(entry)
+            await self._activate(
+                entry,
+                "duration_cancelled",
+                {},
+                references={
+                    reference
+                    for reference in entry.reminder_ids
+                    if "::" not in reference
+                },
+            )
         if not matched:
             return
         context = {
@@ -198,7 +230,10 @@ class TriggerRegistry:
             "to": _safe_state_value(new_state, trigger.attribute),
         }
         if trigger.for_seconds:
-            self._start_duration(key, entry, timer_value, context)
+            context["duration_observed_value"] = _duration_observed_value(
+                _observed(new_state, trigger.attribute)
+            )
+            await self._activate(entry, "duration_started", context)
             return
         await self._activate(entry, "future_transition", context)
 
@@ -216,41 +251,18 @@ class TriggerRegistry:
             {"event_type": entry.definition.event_type, "matched_data": expected},
         )
 
-    def _start_duration(
-        self, key: str, entry: _Entry, timer_value: Any, context: dict[str, Any]
-    ) -> None:
-        self._cancel_duration(entry)
-        entry.timer_value = timer_value
-
-        async def elapsed(_now: Any) -> None:
-            current = self._entries.get(key)
-            if current is not entry or not self._duration_still_matches(entry):
-                return
-            entry.cancel_timer = None
-            await self._activate(entry, "future_transition", context)
-
-        entry.cancel_timer = async_call_later(
-            self._hass, entry.definition.for_seconds, elapsed
-        )
-
-    def _duration_still_matches(self, entry: _Entry) -> bool:
-        trigger = entry.definition
-        state = self._hass.states.get(trigger.entity_id or "")
-        if state is None:
-            return False
-        if trigger.type is TriggerType.STATE:
-            value = _observed(state, trigger.attribute)
-            if trigger.to_value is None and trigger.from_value is None:
-                return bool(value == entry.timer_value)
-            return _state_current_matches(trigger, value)
-        if trigger.type is TriggerType.NUMERIC_STATE:
-            return _numeric_matches(_number(state, trigger.attribute), trigger)
-        return self._zone_match(trigger, state) == (trigger.event is ZoneEvent.ENTER)
-
     async def _activate(
-        self, entry: _Entry, cause: str, context: dict[str, Any]
+        self,
+        entry: _Entry,
+        cause: str,
+        context: dict[str, Any],
+        *,
+        references: set[str] | None = None,
     ) -> None:
-        for reminder_id in tuple(entry.reminder_ids):
+        targets = entry.reminder_ids if references is None else references
+        for reminder_id in tuple(targets):
+            if self._unloaded:
+                return
             try:
                 await self._callback(reminder_id, cause, context)
             except Exception:
@@ -271,17 +283,22 @@ class TriggerRegistry:
         except KeyError, TypeError, ValueError:
             return False
 
-    def _cancel_duration(self, entry: _Entry) -> None:
-        if entry.cancel_timer is not None:
-            entry.cancel_timer()
-            entry.cancel_timer = None
-            entry.timer_value = None
+    async def _async_run_tracked(self, callback: Awaitable[None]) -> None:
+        """Track callback work from inside HA's thread-safe task wrapper."""
+        task = asyncio.current_task()
+        if task is None:
+            await callback
+            return
+        self._callback_tasks.add(task)
+        try:
+            await callback
+        finally:
+            self._callback_tasks.discard(task)
 
     def _remove(self, key: str) -> None:
         entry = self._entries.pop(key, None)
         if entry is None:
             return
-        self._cancel_duration(entry)
         if entry.unsubscribe is not None:
             entry.unsubscribe()
 
@@ -368,5 +385,14 @@ def _numeric_matches(value: float | None, trigger: TriggerDefinition) -> bool:
 def _safe_state_value(state: State, attribute: str | None) -> Any:
     value = _observed(state, attribute)
     if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)[:256]
+
+
+def _duration_observed_value(value: Any) -> Any:
+    """Keep the value needed to resume an attribute-only duration exactly."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, dict)):
         return value
     return str(value)[:256]

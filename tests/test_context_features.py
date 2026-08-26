@@ -19,6 +19,7 @@ from custom_components.reminders.manager import (
 from custom_components.reminders.models import (
     AcknowledgementPolicy,
     DeliveryPolicy,
+    EscalationAttempt,
     EscalationPolicy,
     Occurrence,
     OccurrenceStatus,
@@ -26,6 +27,7 @@ from custom_components.reminders.models import (
     ReminderStatus,
 )
 from custom_components.reminders.recurrence import RecurrenceFrequency, RecurrenceRule
+from custom_components.reminders.storage import serialize_storage
 
 from .conftest import FakeDispatcher, FakeStore
 
@@ -67,6 +69,107 @@ async def _manager(
     manager = ReminderManager(hass, store, dispatcher)  # type: ignore[arg-type]
     await manager.async_load()
     return manager
+
+
+async def test_escalation_edit_preserves_resolved_occurrence_history(
+    no_runtime_listeners: None,
+) -> None:
+    now = datetime.now(UTC)
+    recorded = EscalationAttempt(1, now, succeeded_channels=("phone",))
+    completed = Occurrence(
+        "completed",
+        now - timedelta(days=1),
+        now - timedelta(days=1),
+        status=OccurrenceStatus.COMPLETED,
+        escalation_attempt_count=1,
+        escalation_history=(recorded,),
+    )
+    awaiting = Occurrence(
+        "awaiting",
+        now,
+        now,
+        status=OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+        escalation_attempt_count=1,
+        escalation_history=(recorded,),
+        next_escalation_at=now + timedelta(minutes=5),
+    )
+    reminder = Reminder(
+        id="escalation-edit",
+        user_id="u1",
+        title="Keep history",
+        due=now + timedelta(days=1),
+        created_at=now,
+        updated_at=now,
+        current_occurrence_id=awaiting.id,
+        occurrence_history=(completed, awaiting),
+        escalation=EscalationPolicy(5, 5, 2),
+    )
+    manager = await _manager(
+        FakeStore(serialize_storage({reminder.id: reminder}, {})), FakeDispatcher()
+    )
+
+    updated = await manager.async_update(
+        reminder.id, escalation=EscalationPolicy(10, 10, 3)
+    )
+    preserved = next(
+        item for item in updated.occurrence_history if item.id == completed.id
+    )
+    rebased = next(
+        item for item in updated.occurrence_history if item.id == awaiting.id
+    )
+    assert preserved.escalation_attempt_count == 1
+    assert preserved.escalation_history == (recorded,)
+    assert rebased.escalation_attempt_count == 0
+    assert rebased.escalation_history == ()
+    assert rebased.next_escalation_at is not None
+
+
+async def test_recurrence_edit_cancels_superseded_waiting_for_context(
+    no_runtime_listeners: None,
+) -> None:
+    now = datetime.now(UTC)
+    due = now + timedelta(hours=1)
+    waiting = Occurrence(
+        "waiting", due, due, status=OccurrenceStatus.WAITING_FOR_CONTEXT
+    )
+    original_rule = RecurrenceRule(
+        RecurrenceFrequency.DAILY, 1, "UTC", due.replace(tzinfo=None)
+    )
+    reminder = Reminder(
+        id="recurrence-edit",
+        user_id="u1",
+        title="Waiting",
+        due=due,
+        scheduled_due=due,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.WAITING_FOR_CONTEXT,
+        recurrence=original_rule,
+        current_occurrence_id=waiting.id,
+        occurrence_history=(waiting,),
+    )
+    manager = await _manager(
+        FakeStore(serialize_storage({reminder.id: reminder}, {})), FakeDispatcher()
+    )
+    replacement = RecurrenceRule(
+        RecurrenceFrequency.DAILY,
+        2,
+        "UTC",
+        (due + timedelta(hours=2)).replace(tzinfo=None),
+    )
+
+    updated = await manager.async_update(reminder.id, recurrence=replacement)
+    superseded = next(
+        item for item in updated.occurrence_history if item.id == waiting.id
+    )
+    current = next(
+        item
+        for item in updated.occurrence_history
+        if item.id == updated.current_occurrence_id
+    )
+    assert superseded.status is OccurrenceStatus.CANCELLED
+    assert current.status is OccurrenceStatus.SCHEDULED
+    assert current.id != superseded.id
 
 
 async def _recurring_snoozed_retry(
