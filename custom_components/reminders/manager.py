@@ -900,7 +900,8 @@ class ReminderManager:
         await self._trigger_registry.async_sync(self._reminders.values())
         self._notify_changed({current.user_id})
         self._fire_lifecycle_event(updated, "resumed")
-        return updated
+        await self._async_process_due(now)
+        return await self.async_get(reminder_id)
 
     async def async_skip_next(self, reminder_id: str) -> Reminder:
         """Skip exactly the active anchored occurrence and retain series phase."""
@@ -2425,7 +2426,7 @@ class ReminderManager:
         async with self._lock:
             candidate = dict(self._reminders)
             for reminder in self._reminders.values():
-                if reminder.recurrence is None:
+                if reminder.recurrence is None or reminder.paused:
                     continue
                 history = list(reminder.occurrence_history)
                 changed = False
@@ -2557,7 +2558,7 @@ class ReminderManager:
             candidate = dict(self._reminders)
             for reminder in self._reminders.values():
                 escalation = reminder.escalation
-                if escalation is None:
+                if escalation is None or reminder.paused:
                     continue
                 preferences = self._users.get(reminder.user_id, UserPreferences())
                 policy = reminder.delivery_policy or preferences.default_delivery_policy
@@ -2912,14 +2913,16 @@ class ReminderManager:
             candidates.extend(
                 occurrence.expires_at
                 for occurrence in reminder.occurrence_history
-                if occurrence.status is OccurrenceStatus.WAITING_FOR_CONTEXT
+                if not reminder.paused
+                and occurrence.status is OccurrenceStatus.WAITING_FOR_CONTEXT
                 and occurrence.expires_at is not None
                 and occurrence.expires_at > now
             )
             candidates.extend(
                 occurrence.next_escalation_at
                 for occurrence in reminder.occurrence_history
-                if occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                if not reminder.paused
+                and occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
                 and occurrence.next_escalation_at is not None
                 and occurrence.next_escalation_at > now
             )
@@ -2927,6 +2930,7 @@ class ReminderManager:
                 occurrence.due
                 for occurrence in reminder.occurrence_history
                 if reminder.recurrence is not None
+                and not reminder.paused
                 and occurrence.id != reminder.current_occurrence_id
                 and occurrence.snoozed
                 and occurrence.status is OccurrenceStatus.SCHEDULED

@@ -543,3 +543,43 @@ async def test_context_can_activate_before_expiry(
         )
         == "activated"
     )
+
+
+async def test_pause_holds_independent_snoozed_retry_until_resume(
+    scheduler: Scheduler,
+) -> None:
+    now = datetime.now(UTC)
+    recurrence = daily((now + timedelta(days=2)).replace(tzinfo=None))
+    retry = Occurrence(
+        "retry",
+        now - timedelta(hours=2),
+        now - timedelta(hours=1),
+        snoozed=True,
+    )
+    reminder = Reminder(
+        id="series",
+        user_id="u1",
+        title="Daily",
+        due=None,
+        created_at=now - timedelta(days=1),
+        updated_at=now,
+        recurrence=recurrence,
+        status=ReminderStatus.PAUSED,
+        paused=True,
+        paused_at=now,
+        occurrence_history=(retry,),
+    )
+    dispatcher = FakeDispatcher()
+    runtime = await manager(
+        FakeStore(serialize_storage({reminder.id: reminder}, {})),
+        dispatcher,
+        scheduler,
+    )
+    assert not dispatcher.calls
+
+    resumed = await runtime.async_resume(reminder.id)
+    assert len(dispatcher.calls) == 1
+    restored_retry = next(
+        item for item in resumed.occurrence_history if item.id == retry.id
+    )
+    assert restored_retry.status is OccurrenceStatus.DELIVERED
