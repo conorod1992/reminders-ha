@@ -3,7 +3,10 @@
 from datetime import UTC, datetime
 
 from custom_components.reminders.models import (
+    ActivationType,
     DeliveryPolicy,
+    Occurrence,
+    OccurrenceStatus,
     Reminder,
     ReminderStatus,
     UserPreferences,
@@ -149,6 +152,43 @@ def test_interrupted_delivery_is_recovered_as_pending() -> None:
     # Recovery cannot know whether the provider side effect ran. It retries rather
     # than silently inventing success or dropping a claim that may not have run.
     assert reminders["abc"].status is ReminderStatus.PENDING
+
+
+def test_interrupted_triggered_delivery_recovers_claim_for_retry() -> None:
+    now = datetime(2026, 7, 26, 12, tzinfo=UTC)
+    occurrence = Occurrence(
+        id="triggered-occurrence",
+        due=now,
+        scheduled_due=now,
+        status=OccurrenceStatus.DELIVERING,
+        triggered_at=now,
+    )
+    reminder = Reminder(
+        id="triggered",
+        user_id="user-1",
+        title="Triggered",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.DELIVERING,
+        activation_type=ActivationType.TRIGGER,
+        activation_triggers=(
+            {"trigger": "state", "entity_id": "binary_sensor.door", "to": "on"},
+        ),
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        last_triggered_at=now,
+    )
+
+    reminders, _ = deserialize_storage(
+        serialize_storage({reminder.id: reminder}, {})
+    )
+    recovered = reminders[reminder.id]
+
+    assert recovered.status is ReminderStatus.WAITING_FOR_TRIGGER
+    assert recovered.due == occurrence.due
+    assert recovered.current_occurrence_id == occurrence.id
+    assert recovered.occurrence_history[0].status is OccurrenceStatus.SCHEDULED
 
 
 def test_malformed_record_does_not_discard_valid_records() -> None:
