@@ -138,10 +138,10 @@ class NativeReminderManager(ReminderManager):
             conditions_match = await self._native_runtime.async_conditions_match(
                 reminder
             )
-            if conditions_match and reminder.delivery_conditions:
-                continue
             if reminder.delivery_triggers:
                 await self._async_begin_native_delivery_wait(reminder.id, effective_now)
+                continue
+            if conditions_match and reminder.delivery_conditions:
                 continue
             if reminder.delivery_conditions and not conditions_match:
                 await self._async_skip_native_condition_failure(
