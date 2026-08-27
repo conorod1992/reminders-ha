@@ -22,10 +22,10 @@ def test_trigger_commands_are_registered(monkeypatch: Any) -> None:
     assert "websocket_fire_trigger" in registered
 
 
-def test_trigger_views_are_accepted_by_registered_list_schema() -> None:
-    """The live list handler must accept every trigger-oriented panel view."""
+def test_trigger_and_attention_views_are_accepted_by_registered_list_schema() -> None:
+    """The live list handler must accept every panel view added outside core CRUD."""
     schema = websocket_registration.websocket_list._ws_schema
 
-    for view in ("triggered", "waiting_for_trigger", "expired"):
+    for view in ("attention", "triggered", "waiting_for_trigger", "expired"):
         message = schema({"id": 1, "type": "reminders/list", "view": view})
         assert message["view"] == view
