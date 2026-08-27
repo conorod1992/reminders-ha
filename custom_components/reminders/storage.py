@@ -9,7 +9,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
-from .models import OccurrenceStatus, Reminder, ReminderStatus, UserPreferences
+from .models import (
+    ActivationType,
+    OccurrenceStatus,
+    Reminder,
+    ReminderStatus,
+    UserPreferences,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -210,19 +216,7 @@ def deserialize_storage(
             reminder = Reminder.from_dict(raw)
             if reminder.id != reminder_id:
                 raise ValueError("Reminder ID does not match storage key")
-            if reminder.status is ReminderStatus.DELIVERING:
-                # No provider currently supplies an idempotency key or delivery
-                # receipt. A crash may therefore have happened on either side of
-                # the external side effect. Retrying is deliberately conservative:
-                # it can duplicate a delivered notification, but never invents
-                # success and still recovers a claim whose side effect never ran.
-                reminder = reminder.updated(
-                    status=(
-                        ReminderStatus.WAITING_FOR_TRIGGER
-                        if reminder.trigger is not None
-                        else ReminderStatus.PENDING
-                    )
-                )
+            interrupted_delivery = reminder.status is ReminderStatus.DELIVERING
             recovered_history = tuple(
                 occurrence.updated(status=OccurrenceStatus.SCHEDULED)
                 if occurrence.status is OccurrenceStatus.DELIVERING
@@ -231,6 +225,27 @@ def deserialize_storage(
             )
             if recovered_history != reminder.occurrence_history:
                 reminder = reminder.updated(occurrence_history=recovered_history)
+            if interrupted_delivery:
+                # No provider currently supplies an idempotency key or delivery
+                # receipt. A crash may therefore have happened on either side of
+                # the external side effect. Retrying is deliberately conservative:
+                # it can duplicate a delivered notification, but never invents
+                # success and still recovers a claim whose side effect never ran.
+                if reminder.activation_type is ActivationType.TRIGGER:
+                    active = next(
+                        (
+                            occurrence
+                            for occurrence in reminder.occurrence_history
+                            if occurrence.id == reminder.current_occurrence_id
+                        ),
+                        None,
+                    )
+                    reminder = reminder.updated(
+                        status=ReminderStatus.WAITING_FOR_TRIGGER,
+                        due=active.due if active is not None else reminder.due,
+                    )
+                else:
+                    reminder = reminder.updated(status=ReminderStatus.PENDING)
             if reminder.recurrence and reminder.scheduled_due is None:
                 reminder = reminder.updated(scheduled_due=reminder.due)
             reminders[reminder_id] = reminder
