@@ -229,9 +229,12 @@ async def async_validate_native_conditions(
     raw = [dict(item) for item in configs]
     base = cv.CONDITIONS_SCHEMA(raw)
     validated = await condition_helper.async_validate_conditions_config(hass, base)
-    if not all(isinstance(item, dict) for item in validated):
-        raise ValueError("Reminder conditions must use structured Home Assistant rules")
-    return [dict(item) for item in validated]
+    result: list[ConfigType] = []
+    for item in validated:
+        if not isinstance(item, dict):
+            raise ValueError("Reminder conditions must use structured Home Assistant rules")
+        result.append(dict(item))
+    return result
 
 
 def _native_activation_armed(reminder: Reminder) -> bool:
