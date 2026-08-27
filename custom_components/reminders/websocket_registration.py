@@ -47,6 +47,28 @@ from .websocket_api import (
 COMMAND_PREFIX = f"{DOMAIN}/"
 
 
+def _attention_reason(reminder: Reminder) -> str | None:
+    """Return why a reminder currently needs user attention, if it does."""
+    if reminder.status is ReminderStatus.FAILED:
+        return "delivery_failed"
+    if reminder.status is ReminderStatus.AWAITING_ACKNOWLEDGEMENT or any(
+        item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+        for item in reminder.occurrence_history
+    ):
+        return "awaiting_acknowledgement"
+    if (reminder.allow_manual_completion or reminder.external_actions) and (
+        reminder.status is ReminderStatus.DELIVERED
+        or any(
+            item.status is OccurrenceStatus.DELIVERED
+            for item in reminder.occurrence_history
+        )
+    ):
+        return "action_available"
+    if reminder.last_occurrence_status is ReminderStatus.FAILED:
+        return "recent_delivery_failed"
+    return None
+
+
 def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, Any]:
     """Serialize a list row without embedding unrelated retained history."""
     result = reminder.to_dict()
@@ -59,9 +81,43 @@ def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, A
             and (reminder.allow_manual_completion or reminder.external_actions)
         )
     ]
+    attention_reason = _attention_reason(reminder)
+    if attention_reason is not None:
+        result["attention_reason"] = attention_reason
     if reminder.user_id in names:
         result["owner_name"] = names[reminder.user_id]
     return result
+
+
+async def _filtered_page(
+    hass: HomeAssistant,
+    *,
+    user_id: str | None,
+    query: str | None,
+    due_after: Any,
+    due_before: Any,
+    limit: int,
+    offset: int,
+    predicate: Any,
+) -> list[Reminder]:
+    """Apply a derived predicate before the caller's requested page bounds."""
+    manager = _manager(hass)
+    matches: list[Reminder] = []
+    source_offset = 0
+    while True:
+        page = await manager.async_list(
+            user_id=user_id,
+            due_after=due_after,
+            due_before=due_before,
+            query=query,
+            limit=1000,
+            offset=source_offset,
+        )
+        matches.extend(item for item in page if predicate(item))
+        if len(page) < 1000 or len(matches) >= offset + limit:
+            break
+        source_offset += 1000
+    return matches[offset : offset + limit]
 
 
 async def _failed_page(
@@ -75,28 +131,40 @@ async def _failed_page(
     offset: int,
 ) -> list[Reminder]:
     """Filter failed reminders before applying the caller's page bounds."""
-    manager = _manager(hass)
-    matches: list[Reminder] = []
-    source_offset = 0
-    while True:
-        page = await manager.async_list(
-            user_id=user_id,
-            due_after=due_after,
-            due_before=due_before,
-            query=query,
-            limit=1000,
-            offset=source_offset,
-        )
-        matches.extend(
-            item
-            for item in page
-            if item.status is ReminderStatus.FAILED
-            or item.last_occurrence_status is ReminderStatus.FAILED
-        )
-        if len(page) < 1000 or len(matches) >= offset + limit:
-            break
-        source_offset += 1000
-    return matches[offset : offset + limit]
+    return await _filtered_page(
+        hass,
+        user_id=user_id,
+        query=query,
+        due_after=due_after,
+        due_before=due_before,
+        limit=limit,
+        offset=offset,
+        predicate=lambda item: item.status is ReminderStatus.FAILED
+        or item.last_occurrence_status is ReminderStatus.FAILED,
+    )
+
+
+async def _attention_page(
+    hass: HomeAssistant,
+    *,
+    user_id: str | None,
+    query: str | None,
+    due_after: Any,
+    due_before: Any,
+    limit: int,
+    offset: int,
+) -> list[Reminder]:
+    """Filter actionable/problem reminders before applying page bounds."""
+    return await _filtered_page(
+        hass,
+        user_id=user_id,
+        query=query,
+        due_after=due_after,
+        due_before=due_before,
+        limit=limit,
+        offset=offset,
+        predicate=lambda item: _attention_reason(item) is not None,
+    )
 
 
 @websocket_command(
@@ -106,6 +174,7 @@ async def _failed_page(
         vol.Optional("user_id"): cv.string,
         vol.Optional("view", default="upcoming"): vol.In(
             (
+                "attention",
                 "upcoming",
                 "recurring",
                 "triggered",
@@ -147,6 +216,16 @@ async def websocket_list(
     view = msg["view"]
     if view == "failed":
         reminders = await _failed_page(
+            hass,
+            user_id=user_id,
+            query=msg.get("query"),
+            due_after=due_after,
+            due_before=due_before,
+            limit=msg["limit"],
+            offset=msg["offset"],
+        )
+    elif view == "attention":
+        reminders = await _attention_page(
             hass,
             user_id=user_id,
             query=msg.get("query"),
