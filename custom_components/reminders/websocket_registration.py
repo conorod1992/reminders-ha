@@ -18,6 +18,7 @@ from homeassistant.helpers import config_validation as cv
 from .authorization import async_resolve_list_user
 from .const import DOMAIN
 from .models import ActivationType, OccurrenceStatus, Reminder, ReminderStatus
+from .native_websocket import NATIVE_WEBSOCKET_HANDLERS
 from .services import _parse_datetime
 from .websocket_api import (
     _api_errors,
@@ -224,5 +225,6 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_test_delivery,
         websocket_users,
         websocket_subscribe,
+        *NATIVE_WEBSOCKET_HANDLERS,
     ):
         async_register_command(hass, handler)

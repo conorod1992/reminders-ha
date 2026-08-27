@@ -18,12 +18,12 @@ from .delivery import (
     VoiceProvider,
 )
 from .frontend import async_register_frontend, async_unregister_panel
-from .manager import ReminderManager
+from .native_manager import NativeReminderManager
 from .services import async_register_services
 from .storage import ReminderStore
 from .websocket_registration import async_register_websocket_api
 
-RemindersConfigEntry = ConfigEntry[ReminderManager]
+RemindersConfigEntry = ConfigEntry[NativeReminderManager]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -44,7 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: RemindersConfigEntry) ->
             VoiceProvider(hass),
         ]
     )
-    manager = ReminderManager(hass, ReminderStore(hass), dispatcher)
+    manager = NativeReminderManager(hass, ReminderStore(hass), dispatcher)
     try:
         await manager.async_load()
         await async_register_frontend(hass)

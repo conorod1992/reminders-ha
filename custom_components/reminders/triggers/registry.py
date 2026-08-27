@@ -212,16 +212,7 @@ class TriggerRegistry:
                 new_inside if trigger.event is ZoneEvent.ENTER else not new_inside
             )
         if not remains_matching:
-            await self._activate(
-                entry,
-                "duration_cancelled",
-                {},
-                references={
-                    reference
-                    for reference in entry.reminder_ids
-                    if "::" not in reference
-                },
-            )
+            await self._activate(entry, "duration_cancelled", {})
         if not matched:
             return
         context = {
