@@ -149,7 +149,7 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
       const currentWasNativeTriggered = Boolean(state.reminder?.activation_triggers?.length);
       if (currentWasNativeTriggered) {
         throw new Error(
-          "Changing a native trigger-based reminder to a scheduled reminder is not supported in this draft yet. Duplicate it as a scheduled reminder instead."
+          "A native trigger-based reminder cannot be changed directly into a scheduled reminder. Duplicate it as a scheduled reminder instead."
         );
       }
       const data = _without(payload, ["deliver_when", "complete_when"]);
@@ -277,19 +277,21 @@ function _enhanceDelivery(panel, form) {
 }
 
 function _mountTriggerEditor(panel, host, value, changed) {
-  const editor = document.createElement("ha-automation-trigger");
+  const editor = document.createElement("ha-selector");
   editor.hass = panel._hass;
-  editor.triggers = _clone(value);
-  editor.root = true;
+  editor.selector = { trigger: {} };
+  editor.value = _clone(value);
+  editor.required = false;
   editor.addEventListener("value-changed", (event) => changed(_clone(event.detail?.value || [])));
   host.replaceChildren(editor);
 }
 
 function _mountConditionEditor(panel, host, value, changed) {
-  const editor = document.createElement("ha-automation-condition");
+  const editor = document.createElement("ha-selector");
   editor.hass = panel._hass;
-  editor.conditions = _clone(value);
-  editor.root = true;
+  editor.selector = { condition: {} };
+  editor.value = _clone(value);
+  editor.required = false;
   editor.addEventListener("value-changed", (event) => changed(_clone(event.detail?.value || [])));
   host.replaceChildren(editor);
 }
