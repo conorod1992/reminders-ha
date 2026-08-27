@@ -28,7 +28,9 @@ def _reminder(**changes: object) -> Reminder:
 
 
 def test_failed_reminder_needs_attention() -> None:
-    assert _attention_reason(_reminder(status=ReminderStatus.FAILED)) == "delivery_failed"
+    assert (
+        _attention_reason(_reminder(status=ReminderStatus.FAILED)) == "delivery_failed"
+    )
 
 
 def test_recurring_series_keeps_recent_failed_occurrence_visible() -> None:
@@ -88,4 +90,4 @@ def test_attention_panel_is_additive_wrapper_over_native_panel() -> None:
     assert 'import "./reminders-panel-native.js"' in source
     assert 'button.textContent = "Needs attention"' in source
     assert 'this._view = "attention"' in source
-    assert 'Nothing needs your attention' in source
+    assert "Nothing needs your attention" in source
