@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import voluptuous as vol
@@ -98,7 +99,7 @@ async def _filtered_page(
     due_before: Any,
     limit: int,
     offset: int,
-    predicate: Any,
+    predicate: Callable[[Reminder], bool],
 ) -> list[Reminder]:
     """Apply a derived predicate before the caller's requested page bounds."""
     manager = _manager(hass)
@@ -139,8 +140,10 @@ async def _failed_page(
         due_before=due_before,
         limit=limit,
         offset=offset,
-        predicate=lambda item: item.status is ReminderStatus.FAILED
-        or item.last_occurrence_status is ReminderStatus.FAILED,
+        predicate=lambda item: (
+            item.status is ReminderStatus.FAILED
+            or item.last_occurrence_status is ReminderStatus.FAILED
+        ),
     )
 
 
