@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -42,7 +43,9 @@ class NativeReminderManager(ReminderManager):
         self._native_runtime = NativeAutomationRuntime(
             self._hass, self._async_native_trigger_callback
         )
-        self._native_change_unsub = self.async_subscribe(self._native_changed)
+        self._native_change_unsub: Callable[[], None] | None = self.async_subscribe(
+            self._native_changed
+        )
 
     async def async_load(self) -> None:
         """Load legacy state, then arm native rules."""
