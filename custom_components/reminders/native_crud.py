@@ -131,24 +131,24 @@ async def async_update_native_triggered(
     *,
     activation_triggers: list[dict[str, Any]],
     title: str | None = None,
-    message: str | None | object = _UNSET,
-    delivery_policy: DeliveryPolicy | None | object = _UNSET,
+    message: str | object | None = _UNSET,
+    delivery_policy: DeliveryPolicy | object | None = _UNSET,
     user_id: str | None = None,
     acknowledgement_policy: AcknowledgementPolicy | None = None,
     quiet_hours_policy: QuietHoursPolicy | None = None,
     repeat_policy: TriggerRepeatPolicy | None = None,
     while_awaiting_acknowledgement: WhileAwaitingAcknowledgement | None = None,
     cooldown_seconds: int | None = None,
-    available_from: datetime | None | object = _UNSET,
-    expires_at: datetime | None | object = _UNSET,
-    trigger_description: str | None | object = _UNSET,
+    available_from: datetime | object | None = _UNSET,
+    expires_at: datetime | object | None = _UNSET,
+    trigger_description: str | object | None = _UNSET,
     completion_triggers: list[dict[str, Any]] | None = None,
-    escalation: EscalationPolicy | dict[str, Any] | None | object = _UNSET,
+    escalation: EscalationPolicy | dict[str, Any] | object | None = _UNSET,
     managed_externally: bool | None = None,
     allow_manual_completion: bool | None = None,
     external_actions: list[dict[str, str]] | tuple[dict[str, str], ...] | None = None,
 ) -> Reminder:
-    """Update a native triggered reminder without passing through legacy trigger CRUD."""
+    """Update a native triggered reminder without legacy trigger CRUD."""
     if not activation_triggers:
         raise ReminderValidationError("Choose at least one activation trigger")
     await async_validate_native_triggers(manager._hass, activation_triggers)
