@@ -54,14 +54,16 @@ def _native_manager(hass: HomeAssistant) -> NativeReminderManager:
 
 @websocket_command(
     vol.All(
-        {
-            vol.Required("type"): f"{COMMAND_PREFIX}set_native_rules",
-            vol.Required("reminder_id"): cv.string,
-            vol.Optional("activation_triggers"): NATIVE_LIST,
-            vol.Optional("delivery_triggers"): NATIVE_LIST,
-            vol.Optional("delivery_conditions"): NATIVE_LIST,
-            vol.Optional("completion_triggers"): NATIVE_LIST,
-        },
+        vol.Schema(
+            {
+                vol.Required("type"): f"{COMMAND_PREFIX}set_native_rules",
+                vol.Required("reminder_id"): cv.string,
+                vol.Optional("activation_triggers"): NATIVE_LIST,
+                vol.Optional("delivery_triggers"): NATIVE_LIST,
+                vol.Optional("delivery_conditions"): NATIVE_LIST,
+                vol.Optional("completion_triggers"): NATIVE_LIST,
+            }
+        ),
         cv.has_at_least_one_key(
             "activation_triggers",
             "delivery_triggers",
