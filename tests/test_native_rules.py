@@ -20,7 +20,9 @@ from custom_components.reminders.storage import empty_storage
 from .conftest import FakeDispatcher, FakeStore
 
 
-def _manager(monkeypatch: pytest.MonkeyPatch) -> tuple[NativeReminderManager, FakeDispatcher]:
+def _manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[NativeReminderManager, FakeDispatcher]:
     monkeypatch.setattr(
         "custom_components.reminders.manager.async_track_point_in_utc_time",
         lambda _hass, _callback, _due: lambda: None,
@@ -33,7 +35,9 @@ def _manager(monkeypatch: pytest.MonkeyPatch) -> tuple[NativeReminderManager, Fa
     )
     dispatcher = FakeDispatcher()
     manager = NativeReminderManager(
-        hass, FakeStore(empty_storage()), dispatcher  # type: ignore[arg-type]
+        hass,
+        FakeStore(empty_storage()),
+        dispatcher,  # type: ignore[arg-type]
     )
     manager._listeners.clear()
     manager._loaded = True
@@ -157,9 +161,7 @@ def test_native_rule_fields_round_trip_through_storage_model() -> None:
         activation_triggers=(
             {"trigger": "sun", "event": "sunset", "offset": "00:10:00"},
         ),
-        completion_triggers=(
-            {"trigger": "event", "event_type": "task_finished"},
-        ),
+        completion_triggers=({"trigger": "event", "event_type": "task_finished"},),
         delivery_conditions=(
             {
                 "condition": "or",
