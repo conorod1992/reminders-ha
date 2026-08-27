@@ -232,7 +232,9 @@ async def async_validate_native_conditions(
     result: list[ConfigType] = []
     for item in validated:
         if not isinstance(item, dict):
-            raise ValueError("Reminder conditions must use structured Home Assistant rules")
+            raise ValueError(
+                "Reminder conditions must use structured Home Assistant rules"
+            )
         result.append(dict(item))
     return result
 
