@@ -180,9 +180,7 @@ def test_interrupted_triggered_delivery_recovers_claim_for_retry() -> None:
         last_triggered_at=now,
     )
 
-    reminders, _ = deserialize_storage(
-        serialize_storage({reminder.id: reminder}, {})
-    )
+    reminders, _ = deserialize_storage(serialize_storage({reminder.id: reminder}, {}))
     recovered = reminders[reminder.id]
 
     assert recovered.status is ReminderStatus.WAITING_FOR_TRIGGER
