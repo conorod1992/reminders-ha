@@ -1,4 +1,5 @@
 import "./reminders-panel-robust.js";
+import { canSnooze } from "./reminders-utils.js";
 
 const Panel = customElements.get("reminders-management-panel");
 const proto = Panel?.prototype;
@@ -160,6 +161,11 @@ if (proto && !proto.__frontendPolishInstalled) {
 
 function _polishReminderCard(card, reminder) {
   card.classList.add("polished-card");
+  if (!canSnooze(reminder)) {
+    for (const button of card.querySelectorAll(".actions button")) {
+      if (button.textContent.trim() === "Snooze") button.remove();
+    }
+  }
   const body = card.children[1];
   const title = body?.querySelector(".name");
   if (title && !body.querySelector(".title-row")) {

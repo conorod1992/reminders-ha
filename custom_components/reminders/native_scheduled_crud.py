@@ -121,12 +121,14 @@ async def async_update_native_scheduled(
         now = dt_util.utcnow()
         history = list(current.occurrence_history)
         active = _find_occurrence(current, current.current_occurrence_id)
+        time_rearmed = False
 
         # An edit to the complete delivery-rule snapshot rearms a context wait.
         # Normalizing the active occurrence to scheduled lets the new rule set be
         # evaluated cleanly after the single commit, including when all rules are
         # removed from an already-due reminder.
         if active is not None and active.status is OccurrenceStatus.WAITING_FOR_CONTEXT:
+            time_rearmed = True
             active = active.updated(
                 status=OccurrenceStatus.SCHEDULED,
                 context_eligible_at=None,
@@ -157,6 +159,7 @@ async def async_update_native_scheduled(
                     status=ReminderStatus.PAUSED,
                 )
             else:
+                time_rearmed = True
                 new_occurrence = _new_occurrence(next_due)
                 history.append(new_occurrence)
                 changes.update(
@@ -173,6 +176,7 @@ async def async_update_native_scheduled(
                 raise ReminderValidationError(
                     "Recurring due time is derived from its recurrence rule"
                 )
+            time_rearmed = True
             new_due = _normalize_due(changes["due"])
             changes["due"] = new_due
             if active and active.status is OccurrenceStatus.SCHEDULED:
@@ -236,7 +240,7 @@ async def async_update_native_scheduled(
 
         changes["occurrence_history"] = tuple(history)
         changes.setdefault(
-            "status", current.status if current.paused else ReminderStatus.PENDING
+            "status", ReminderStatus.PENDING if time_rearmed else current.status
         )
         changes.update(
             activation_triggers=(),
@@ -257,10 +261,9 @@ async def async_update_native_scheduled(
             ),
         )
 
-        updated = current.updated(**changes, updated_at=now).updated(
-            delivered_at=None,
-            delivery_errors=(),
-        )
+        updated = current.updated(**changes, updated_at=now)
+        if time_rearmed:
+            updated = updated.updated(delivered_at=None, delivery_errors=())
         candidate = dict(manager._reminders)
         candidate[reminder_id] = updated
         await manager._async_persist_state(candidate, manager._users)

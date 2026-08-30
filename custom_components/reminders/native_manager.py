@@ -466,7 +466,7 @@ class NativeReminderManager(ReminderManager):
                             current.recurrence, next_due
                         ),
                         last_occurrence_due=scheduled_due,
-                        last_occurrence_status=ReminderStatus.ACKNOWLEDGED,
+                        last_occurrence_status=ReminderStatus.COMPLETED,
                         occurrence_history=tuple(history),
                         updated_at=now,
                     )

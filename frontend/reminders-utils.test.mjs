@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   acknowledgementSummary,
   awaitingOccurrences,
+  canSnooze,
   deliverySummary,
   localDateTime,
   quickTimeParts,
@@ -64,4 +65,21 @@ test("groups upcoming reminders using the Home Assistant timezone", () => {
   assert.equal(upcomingBucket("2026-08-31T08:00:00Z", "Europe/Dublin", now), "This week");
   assert.equal(upcomingBucket("2026-09-20T08:00:00Z", "Europe/Dublin", now), "Later");
   assert.equal(relativeTime("2026-08-26T23:12:00Z", "en", now), "in 42 minutes");
+});
+
+
+test("only offers snooze where it can produce a valid retry", () => {
+  assert.equal(canSnooze({ activation_type: "time", status: "pending" }), true);
+  assert.equal(canSnooze({ activation_type: "time", status: "waiting_for_context" }), true);
+  assert.equal(canSnooze({ activation_type: "time", status: "awaiting_acknowledgement" }), true);
+  assert.equal(canSnooze({ activation_type: "time", status: "delivered" }), true);
+  assert.equal(canSnooze({ activation_type: "time", status: "failed" }), true);
+  assert.equal(canSnooze({ activation_type: "time", status: "completed" }), false);
+  assert.equal(canSnooze({ activation_type: "time", status: "acknowledged" }), false);
+  assert.equal(canSnooze({ activation_type: "time", status: "expired" }), false);
+  assert.equal(canSnooze({ activation_type: "time", status: "skipped" }), false);
+  assert.equal(canSnooze({ activation_type: "trigger", status: "completed" }), true);
+  assert.equal(canSnooze({ activation_type: "trigger", status: "acknowledged" }), true);
+  assert.equal(canSnooze({ activation_type: "trigger", status: "expired" }), false);
+  assert.equal(canSnooze({ activation_type: "time", status: "pending", paused: true }), false);
 });
