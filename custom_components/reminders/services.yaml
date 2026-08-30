@@ -411,12 +411,12 @@ update:
         boolean:
     while_awaiting_acknowledgement:
       name: While waiting for dismissal
-      description: For every-trigger reminders, skip new matches or replace the unresolved occurrence.
+      description: For every-trigger reminders, skip new matches or deliver a new occurrence while the older one is unresolved.
       selector:
         select:
           options:
             - skip
-            - replace
+            - deliver_new_occurrence
     cooldown_seconds:
       name: Trigger cooldown
       selector:
@@ -622,15 +622,15 @@ create_triggered:
         boolean:
     while_awaiting_acknowledgement:
       name: While waiting for dismissal
-      description: For every-trigger reminders, skip new matches or replace the unresolved occurrence.
+      description: For every-trigger reminders, skip new matches or deliver a new occurrence while the older one remains unresolved.
       default: skip
       selector:
         select:
           options:
             - label: Skip new matches
               value: skip
-            - label: Replace the unresolved occurrence
-              value: replace
+            - label: Deliver a new occurrence
+              value: deliver_new_occurrence
     cooldown_seconds:
       name: Cooldown
       description: Minimum seconds between occurrence creation for this reminder.
