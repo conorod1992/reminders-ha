@@ -10,7 +10,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import LIFECYCLE_EVENT, LIFECYCLE_SCHEMA_VERSION
 from .manager import ReminderValidationError, _validate_source_metadata
-from .models import OccurrenceStatus, Reminder, ReminderStatus
+from .models import Reminder, ReminderStatus
 from .native_manager import NativeReminderManager
 
 _T = TypeVar("_T")
@@ -157,13 +157,3 @@ class InteropReminderManager(NativeReminderManager):
         if external_action_id is not None:
             payload["external_action_id"] = external_action_id
         fire(LIFECYCLE_EVENT, payload)
-
-
-def occurrence_is_resolved(status: OccurrenceStatus) -> bool:
-    """Return whether an occurrence status is terminal for API consumers."""
-    return status not in {
-        OccurrenceStatus.SCHEDULED,
-        OccurrenceStatus.DELIVERING,
-        OccurrenceStatus.WAITING_FOR_CONTEXT,
-        OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
-    }
