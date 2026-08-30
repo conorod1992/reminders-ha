@@ -30,14 +30,14 @@ def test_compact_websocket_registration_keeps_series_commands_and_source_filters
         assert source.count(command) >= 2
     assert 'vol.Optional("source")' in source
     assert 'vol.Optional("source_id")' in source
-    assert "source=msg.get(\"source\")" in source
-    assert "source_id=msg.get(\"source_id\")" in source
+    assert 'source=msg.get("source")' in source
+    assert 'source_id=msg.get("source_id")' in source
 
 
 def test_frontend_disables_long_lived_module_cache_and_uses_robust_wrapper() -> None:
-    source = (
-        ROOT / "custom_components" / "reminders" / "frontend.py"
-    ).read_text(encoding="utf-8")
+    source = (ROOT / "custom_components" / "reminders" / "frontend.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "StaticPathConfig(STATIC_URL, str(frontend_dir), False)" in source
     assert 'module_url=f"{STATIC_URL}/reminders-panel-robust.js"' in source
@@ -67,7 +67,9 @@ def test_native_create_rolls_back_if_rule_save_fails() -> None:
         / "reminders-panel-native.js"
     ).read_text(encoding="utf-8")
 
-    assert 'await originalCall.call(this, "delete", { reminder_id: reminderId })' in source
+    assert (
+        'await originalCall.call(this, "delete", { reminder_id: reminderId })' in source
+    )
     assert "The incomplete reminder could not be removed automatically" in source
 
 
@@ -140,13 +142,9 @@ async def test_persistent_notifications_are_occurrence_scoped() -> None:
         current_occurrence_id="occurrence-2",
     )
 
-    await provider.async_deliver(
-        reminder, DeliveryPolicy(("persistent_notification",))
-    )
+    await provider.async_deliver(reminder, DeliveryPolicy(("persistent_notification",)))
 
-    assert services.calls[0][2]["notification_id"] == (
-        "reminders_series_occurrence-2"
-    )
+    assert services.calls[0][2]["notification_id"] == ("reminders_series_occurrence-2")
 
 
 async def test_resolved_lifecycle_event_dismisses_persistent_notification() -> None:
