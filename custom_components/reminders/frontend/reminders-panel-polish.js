@@ -4,31 +4,38 @@ import { canSnooze } from "./reminders-utils.js";
 const Panel = customElements.get("reminders-management-panel");
 const proto = Panel?.prototype;
 const HISTORY_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 100;
 const SECONDARY_VIEWS = new Set(["all", "recurring", "triggered", "failed", "expired"]);
 
 if (proto && !proto.__frontendPolishInstalled) {
   proto.__frontendPolishInstalled = true;
 
-  const originalLoad = proto._load;
   const originalRenderFilters = proto._renderFilters;
   const originalRenderList = proto._renderList;
   const originalReminderCard = proto._reminderCard;
   const originalHistoryCard = proto._historyCard;
 
   proto._load = async function (options = {}) {
-    if (this._view !== "history") {
+    const historyView = this._view === "history";
+    const appendHistory = historyView && options?.appendHistory === true;
+    const appendList = !historyView && options?.appendList === true;
+
+    if (historyView) {
+      this._listTotal = 0;
+      this._listLoadingMore = false;
+      if (this._historyRequestInFlight) return true;
+      if (appendHistory && this._history.length >= (this._historyTotal || 0)) return true;
+      this._historyRequestInFlight = true;
+    } else {
       this._historyTotal = 0;
       this._historyLoadingMore = false;
-      return originalLoad.call(this);
+      if (appendList && this._items.length >= (this._listTotal || 0)) return true;
     }
 
-    const append = options?.appendHistory === true;
-    if (this._historyRequestInFlight) return true;
-    if (append && this._history.length >= (this._historyTotal || 0)) return true;
-
-    this._historyRequestInFlight = true;
-    if (append) {
+    if (appendHistory) {
       this._historyLoadingMore = true;
+    } else if (appendList) {
+      this._listLoadingMore = true;
     } else {
       this._loading = true;
     }
@@ -38,25 +45,39 @@ if (proto && !proto.__frontendPolishInstalled) {
       const data = {
         scope: this._scope,
         query: this._query || undefined,
-        limit: HISTORY_PAGE_SIZE,
-        offset: append ? this._history.length : 0,
       };
       if (this._scope === "user") data.user_id = this._selectedUser;
-      const result = await this._call("history", data);
-      this._history = append
-        ? [...this._history, ...(result.history || [])]
-        : (result.history || []);
-      this._historyTotal = Number.isFinite(result.total)
-        ? result.total
-        : this._history.length;
+      if (historyView) {
+        data.limit = HISTORY_PAGE_SIZE;
+        data.offset = appendHistory ? this._history.length : 0;
+        const result = await this._call("history", data);
+        this._history = appendHistory
+          ? [...this._history, ...(result.history || [])]
+          : (result.history || []);
+        this._historyTotal = Number.isFinite(result.total)
+          ? result.total
+          : this._history.length;
+      } else {
+        data.view = this._view;
+        data.limit = LIST_PAGE_SIZE;
+        data.offset = appendList ? this._items.length : 0;
+        const result = await this._call("list", data);
+        this._items = appendList
+          ? [...this._items, ...(result.reminders || [])]
+          : (result.reminders || []);
+        this._listTotal = Number.isFinite(result.total)
+          ? result.total
+          : this._items.length;
+      }
       this._clearError();
       return true;
     } catch (error) {
       this._showError(error);
       return false;
     } finally {
-      this._historyRequestInFlight = false;
+      if (historyView) this._historyRequestInFlight = false;
       this._historyLoadingMore = false;
+      this._listLoadingMore = false;
       this._loading = false;
       this._renderFilters();
       this._renderList();
@@ -120,27 +141,36 @@ if (proto && !proto.__frontendPolishInstalled) {
 
   proto._renderList = function () {
     originalRenderList.call(this);
-    if (this._view !== "history" || this._loading) return;
+    if (this._loading) return;
     const host = this.shadowRoot?.querySelector("#list");
-    if (!host || !this._history.length) return;
+    const historyView = this._view === "history";
+    const values = historyView ? this._history : this._items;
+    if (!host || !values.length) return;
 
-    const total = Math.max(this._historyTotal || 0, this._history.length);
-    if (total <= HISTORY_PAGE_SIZE && this._history.length >= total) return;
+    const storedTotal = historyView ? this._historyTotal : this._listTotal;
+    const total = Math.max(storedTotal || 0, values.length);
+    const pageSize = historyView ? HISTORY_PAGE_SIZE : LIST_PAGE_SIZE;
+    if (total <= pageSize && values.length >= total) return;
 
     const footer = document.createElement("div");
-    footer.className = "history-footer";
+    footer.className = "pagination-footer";
     const count = document.createElement("span");
-    count.className = "history-count";
-    count.textContent = `Showing ${this._history.length} of ${total}`;
+    count.className = "pagination-count";
+    count.textContent = `Showing ${values.length} of ${total}`;
     footer.append(count);
 
-    if (this._history.length < total) {
+    if (values.length < total) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary load-more";
-      button.disabled = Boolean(this._historyLoadingMore);
-      button.textContent = this._historyLoadingMore ? "Loading…" : "Load more";
-      button.onclick = () => this._load({ appendHistory: true });
+      const loadingMore = historyView
+        ? this._historyLoadingMore
+        : this._listLoadingMore;
+      button.disabled = Boolean(loadingMore);
+      button.textContent = loadingMore ? "Loading…" : "Load more";
+      button.onclick = () => this._load(
+        historyView ? { appendHistory: true } : { appendList: true },
+      );
       footer.append(button);
     }
     host.append(footer);
@@ -233,15 +263,15 @@ function _installPolishStyles(root) {
     .card-meta-item{display:inline-flex;align-items:center;min-height:26px;padding:4px 8px;border-radius:7px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-size:12px;line-height:1.35}
     .complex-card{row-gap:12px}
     .complex-card .message{max-width:72ch}
-    .history-footer{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:12px;padding:18px 8px 6px;color:var(--secondary-text-color)}
-    .history-footer .load-more{min-width:110px}
-    .history-count{font-size:13px}
+    .pagination-footer{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:12px;padding:18px 8px 6px;color:var(--secondary-text-color)}
+    .pagination-footer .load-more{min-width:110px}
+    .pagination-count{font-size:13px}
     @media(max-width:720px){
       .primary-tabs .tab{padding-inline:11px}
       .toolbar{align-items:stretch}
       .view-filter-wrap{width:100%}
       .view-filter{width:100%}
-      .history-footer{flex-direction:column}
+      .pagination-footer{flex-direction:column}
     }
   `;
   root.append(style);

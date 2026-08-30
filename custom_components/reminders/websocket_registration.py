@@ -105,27 +105,34 @@ async def _filtered_page(
     limit: int,
     offset: int,
     predicate: Callable[[Reminder], bool],
-) -> list[Reminder]:
-    """Apply a derived predicate before the caller's requested page bounds."""
+    recurring: bool | None = None,
+    activation_type: ActivationType | None = None,
+    statuses: set[ReminderStatus] | None = None,
+) -> tuple[list[Reminder], int]:
+    """Apply a derived predicate before paging and report its exact total."""
     manager = _manager(hass)
     matches: list[Reminder] = []
     source_offset = 0
-    while True:
-        page = await manager.async_list(
+    source_total: int | None = None
+    while source_total is None or source_offset < source_total:
+        page, source_total = await manager.async_list_page(
             user_id=user_id,
             due_after=due_after,
             due_before=due_before,
             query=query,
+            recurring=recurring,
+            activation_type=activation_type,
+            statuses=statuses,
             source=source,
             source_id=source_id,
             limit=1000,
             offset=source_offset,
         )
         matches.extend(item for item in page if predicate(item))
-        if len(page) < 1000 or len(matches) >= offset + limit:
+        source_offset += len(page)
+        if not page:
             break
-        source_offset += 1000
-    return matches[offset : offset + limit]
+    return matches[offset : offset + limit], len(matches)
 
 
 async def _failed_page(
@@ -139,7 +146,7 @@ async def _failed_page(
     source_id: str | None,
     limit: int,
     offset: int,
-) -> list[Reminder]:
+) -> tuple[list[Reminder], int]:
     """Filter failed reminders before applying the caller's page bounds."""
     return await _filtered_page(
         hass,
@@ -169,7 +176,7 @@ async def _attention_page(
     source_id: str | None,
     limit: int,
     offset: int,
-) -> list[Reminder]:
+) -> tuple[list[Reminder], int]:
     """Filter actionable/problem reminders before applying page bounds."""
     return await _filtered_page(
         hass,
@@ -182,6 +189,43 @@ async def _attention_page(
         limit=limit,
         offset=offset,
         predicate=lambda item: _attention_reason(item) is not None,
+    )
+
+
+async def _upcoming_page(
+    hass: HomeAssistant,
+    *,
+    user_id: str | None,
+    query: str | None,
+    due_after: Any,
+    due_before: Any,
+    source: str | None,
+    source_id: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[Reminder], int]:
+    """Filter the visible Upcoming set before applying page bounds."""
+    return await _filtered_page(
+        hass,
+        user_id=user_id,
+        query=query,
+        due_after=due_after,
+        due_before=due_before,
+        source=source,
+        source_id=source_id,
+        limit=limit,
+        offset=offset,
+        activation_type=ActivationType.TIME,
+        statuses={
+            ReminderStatus.PENDING,
+            ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+            ReminderStatus.DELIVERED,
+        },
+        predicate=lambda item: (
+            item.status is not ReminderStatus.DELIVERED
+            or item.allow_manual_completion
+            or bool(item.external_actions)
+        ),
     )
 
 
@@ -235,7 +279,7 @@ async def websocket_list(
     manager = _manager(hass)
     view = msg["view"]
     if view == "failed":
-        reminders = await _failed_page(
+        reminders, total = await _failed_page(
             hass,
             user_id=user_id,
             query=msg.get("query"),
@@ -247,7 +291,19 @@ async def websocket_list(
             offset=msg["offset"],
         )
     elif view == "attention":
-        reminders = await _attention_page(
+        reminders, total = await _attention_page(
+            hass,
+            user_id=user_id,
+            query=msg.get("query"),
+            due_after=due_after,
+            due_before=due_before,
+            source=msg.get("source"),
+            source_id=msg.get("source_id"),
+            limit=msg["limit"],
+            offset=msg["offset"],
+        )
+    elif view == "upcoming":
+        reminders, total = await _upcoming_page(
             hass,
             user_id=user_id,
             query=msg.get("query"),
@@ -262,14 +318,7 @@ async def websocket_list(
         statuses: set[ReminderStatus] | None = None
         activation_type = None
         recurring = None
-        if view == "upcoming":
-            statuses = {
-                ReminderStatus.PENDING,
-                ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
-                ReminderStatus.DELIVERED,
-            }
-            activation_type = ActivationType.TIME
-        elif view == "recurring":
+        if view == "recurring":
             recurring = True
         elif view == "triggered":
             activation_type = ActivationType.TRIGGER
@@ -277,7 +326,7 @@ async def websocket_list(
             statuses = {ReminderStatus.WAITING_FOR_TRIGGER}
         elif view == "expired":
             statuses = {ReminderStatus.EXPIRED}
-        reminders = await manager.async_list(
+        reminders, total = await manager.async_list_page(
             user_id=user_id,
             due_after=due_after,
             due_before=due_before,
@@ -290,20 +339,15 @@ async def websocket_list(
             limit=msg["limit"],
             offset=msg["offset"],
         )
-        if view == "upcoming":
-            reminders = [
-                item
-                for item in reminders
-                if item.status is not ReminderStatus.DELIVERED
-                or item.allow_manual_completion
-                or bool(item.external_actions)
-            ]
     names = (
         await _user_names(hass) if connection.user.is_admin and scope != "mine" else {}
     )
     connection.send_result(
         msg["id"],
-        {"reminders": [_serialize_summary(item, names) for item in reminders]},
+        {
+            "reminders": [_serialize_summary(item, names) for item in reminders],
+            "total": total,
+        },
     )
 
 

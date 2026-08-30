@@ -27,13 +27,10 @@ def test_history_uses_incremental_pagination() -> None:
     source = (FRONTEND / "reminders-panel-polish.js").read_text(encoding="utf-8")
 
     assert "const HISTORY_PAGE_SIZE = 50" in source
-    assert "offset: append ? this._history.length : 0" in source
+    assert "data.offset = appendHistory ? this._history.length : 0" in source
     assert "this._historyTotal = Number.isFinite(result.total)" in source
-    assert (
-        'button.textContent = this._historyLoadingMore ? "Loading…" : "Load more"'
-        in source
-    )
-    assert "this._load({ appendHistory: true })" in source
+    assert 'button.textContent = loadingMore ? "Loading…" : "Load more"' in source
+    assert "{ appendHistory: true }" in source
 
 
 def test_complex_cards_use_scannable_metadata() -> None:
@@ -62,3 +59,13 @@ def test_registered_panel_loads_polish_wrapper() -> None:
     ).read_text(encoding="utf-8")
 
     assert 'module_url=f"{STATIC_URL}/reminders-panel-polish.js"' in source
+
+
+def test_current_lists_use_incremental_pagination() -> None:
+    source = (FRONTEND / "reminders-panel-polish.js").read_text(encoding="utf-8")
+
+    assert "const LIST_PAGE_SIZE = 100" in source
+    assert "data.offset = appendList ? this._items.length : 0" in source
+    assert "this._listTotal = Number.isFinite(result.total)" in source
+    assert "{ appendList: true }" in source
+    assert 'footer.className = "pagination-footer"' in source
