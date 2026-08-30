@@ -15,6 +15,10 @@ from .const import (
     CHANNEL_VOICE,
 )
 from .models import DeliveryPolicy, Reminder
+from .persistent_cleanup import (
+    persistent_notification_id,
+    track_persistent_notification,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,16 +41,20 @@ class PersistentNotificationProvider:
         self._hass = hass
 
     async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
+        notification_id = persistent_notification_id(
+            reminder.id, reminder.current_occurrence_id
+        )
         await self._hass.services.async_call(
             "persistent_notification",
             "create",
             {
                 "title": reminder.title,
                 "message": reminder.message or reminder.title,
-                "notification_id": f"reminders_{reminder.id}",
+                "notification_id": notification_id,
             },
             blocking=True,
         )
+        track_persistent_notification(self._hass, reminder.id, notification_id)
 
 
 class NotifyProvider:
