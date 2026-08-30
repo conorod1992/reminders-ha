@@ -114,9 +114,7 @@ async def test_reconcile_is_atomic_scoped_and_skips_active_delivery(
     stale = _reminder("stale", "stale")
     ordinary = _reminder("ordinary", "ordinary", managed_externally=False)
     other_source = _reminder("other-source", "stale", source="other")
-    delivering = _reminder(
-        "delivering", "delivering", status=ReminderStatus.DELIVERING
-    )
+    delivering = _reminder("delivering", "delivering", status=ReminderStatus.DELIVERING)
     manager._reminders = {
         item.id: item for item in (keep, stale, ordinary, other_source, delivering)
     }
@@ -201,9 +199,7 @@ def test_interop_service_schemas_keep_payload_and_reconciliation_bounded() -> No
         }
     )
     assert validated["kind"] == "one_time"
-    assert RECONCILE_SOURCE_SCHEMA({"source": "annual_events"})[
-        "keep_source_ids"
-    ] == []
+    assert RECONCILE_SOURCE_SCHEMA({"source": "annual_events"})["keep_source_ids"] == []
 
 
 def test_upsert_rejects_kind_changes_for_stable_external_key() -> None:
