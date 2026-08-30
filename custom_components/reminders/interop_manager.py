@@ -33,14 +33,16 @@ class InteropReminderManager(NativeReminderManager):
         update: Callable[[Reminder], Awaitable[_T]],
     ) -> tuple[bool, _T]:
         """Serialize one create-or-update operation by owner/source/source ID."""
-        source, source_id, _ = _validate_source_metadata(source, source_id, None)
-        assert source is not None
-        assert source_id is not None
+        normalized_source, normalized_source_id, _ = _validate_source_metadata(
+            source, source_id, None
+        )
+        assert normalized_source is not None
+        assert normalized_source_id is not None
         async with self._external_mutation_lock:
             matches = await self.async_list(
                 user_id=user_id,
-                source=source,
-                source_id=source_id,
+                source=normalized_source,
+                source_id=normalized_source_id,
                 limit=2,
             )
             if len(matches) > 1:
@@ -65,8 +67,8 @@ class InteropReminderManager(NativeReminderManager):
         keep_source_ids: Iterable[str],
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Atomically delete stale externally managed records for one source."""
-        source, _, _ = _validate_source_metadata(source, None, None)
-        assert source is not None
+        normalized_source, _, _ = _validate_source_metadata(source, None, None)
+        assert normalized_source is not None
         keep: set[str] = set()
         for value in keep_source_ids:
             _, normalized, _ = _validate_source_metadata(None, value, None)
@@ -79,7 +81,7 @@ class InteropReminderManager(NativeReminderManager):
                     reminder
                     for reminder in self._reminders.values()
                     if reminder.user_id == user_id
-                    and reminder.source == source
+                    and reminder.source == normalized_source
                     and reminder.managed_externally
                     and reminder.source_id is not None
                     and reminder.source_id not in keep
