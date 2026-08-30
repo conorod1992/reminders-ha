@@ -91,6 +91,21 @@ async def test_failed_setup_unloads_listeners_before_successful_retry(
     monkeypatch.setattr(
         "custom_components.reminders.DeliveryDispatcher", lambda _providers: dispatcher
     )
+
+    class FakeCleanupCoordinator:
+        def __init__(self, _hass: Any) -> None:
+            return None
+
+        async def async_load(self) -> None:
+            return None
+
+        async def async_reconcile(self, _reminders: Any) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "custom_components.reminders.PersistentCleanupCoordinator",
+        FakeCleanupCoordinator,
+    )
     monkeypatch.setattr(
         "custom_components.reminders.triggers.registry.async_track_state_change_event",
         listen,
