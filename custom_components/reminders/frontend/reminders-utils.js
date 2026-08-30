@@ -152,6 +152,19 @@ export function awaitingOccurrences(reminder) {
   );
 }
 
+const TIMED_SNOOZE_STATUSES = new Set([
+  "pending", "waiting_for_context", "awaiting_acknowledgement", "delivered", "failed",
+]);
+const TRIGGER_SNOOZE_BLOCKED_STATUSES = new Set(["delivering", "expired", "cancelled"]);
+
+export function canSnooze(reminder) {
+  if (!reminder || reminder.paused) return false;
+  if (reminder.activation_type === "trigger") {
+    return !TRIGGER_SNOOZE_BLOCKED_STATUSES.has(reminder.status);
+  }
+  return TIMED_SNOOZE_STATUSES.has(reminder.status);
+}
+
 export function upcomingBucket(value, timeZone, now = Date.now()) {
   const local = zonedInputParts(value, timeZone).date;
   const today = zonedInputParts(now, timeZone).date;

@@ -577,6 +577,7 @@ class ReminderManager:
             target_type = ActivationType(
                 changes.pop("activation_type", current.activation_type)
             )
+            time_rearmed = False
             if "available_from" in changes:
                 changes["available_from"] = _normalize_optional_time(
                     changes["available_from"]
@@ -694,6 +695,7 @@ class ReminderManager:
                         status=ReminderStatus.PAUSED,
                     )
                 else:
+                    time_rearmed = True
                     new_occurrence = _new_occurrence(next_due)
                     history.append(new_occurrence)
                     changes.update(
@@ -711,6 +713,7 @@ class ReminderManager:
                     raise ReminderValidationError(
                         "Recurring due time is derived from its recurrence rule"
                     )
+                time_rearmed = True
                 new_due = _normalize_due(changes["due"])
                 changes["due"] = new_due
                 if active and active.status is OccurrenceStatus.SCHEDULED:
@@ -734,6 +737,11 @@ class ReminderManager:
                         "Changing to time activation requires a due time"
                     )
                 changes["activation_type"] = ActivationType.TIME
+            if (
+                current.status is ReminderStatus.WAITING_FOR_CONTEXT
+                and "deliver_when" in changes
+            ):
+                time_rearmed = True
             if (
                 current.status is ReminderStatus.WAITING_FOR_CONTEXT
                 and "deliver_when" in changes
@@ -784,14 +792,10 @@ class ReminderManager:
             changes["occurrence_history"] = tuple(history)
             changes.setdefault(
                 "status",
-                current.status
-                if current.paused
-                else ReminderStatus.PENDING
-                if target_type is ActivationType.TIME
-                else current.status,
+                ReminderStatus.PENDING if time_rearmed else current.status,
             )
             updated = current.updated(**changes, updated_at=now)
-            if target_type is ActivationType.TIME:
+            if time_rearmed:
                 updated = updated.updated(delivered_at=None, delivery_errors=())
             candidate = dict(self._reminders)
             candidate[reminder_id] = updated
@@ -1762,7 +1766,7 @@ class ReminderManager:
                             current.recurrence, next_due
                         ),
                         last_occurrence_due=scheduled_due,
-                        last_occurrence_status=ReminderStatus.ACKNOWLEDGED,
+                        last_occurrence_status=ReminderStatus.COMPLETED,
                         occurrence_history=tuple(history),
                         updated_at=now,
                     )
