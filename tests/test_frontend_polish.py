@@ -1,9 +1,6 @@
 """Regression tests for the frontend polish wrapper."""
 
-from __future__ import annotations
-
 from pathlib import Path
-
 
 FRONTEND = Path(__file__).parents[1] / "custom_components" / "reminders" / "frontend"
 
@@ -18,10 +15,11 @@ def test_polish_wrapper_reduces_primary_navigation() -> None:
             f'["{label.lower() if label != "Triggered" else "triggered"}", "{label}"]'
             in source
         )
-    assert (
-        'SECONDARY_VIEWS = new Set(["all", "recurring", "triggered", "failed", "expired"])'
-        in source
+    secondary_views = (
+        'SECONDARY_VIEWS = new Set(["all", "recurring", '
+        '"triggered", "failed", "expired"])'
     )
+    assert secondary_views in source
     assert 'select.className = "view-filter"' in source
 
 
