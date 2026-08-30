@@ -17,8 +17,12 @@ from custom_components.reminders.models import (
     ReminderStatus,
 )
 from custom_components.reminders.native_manager import NativeReminderManager
-from custom_components.reminders.native_scheduled_crud import async_update_native_scheduled
-from custom_components.reminders.native_websocket import websocket_update_native_scheduled
+from custom_components.reminders.native_scheduled_crud import (
+    async_update_native_scheduled,
+)
+from custom_components.reminders.native_websocket import (
+    websocket_update_native_scheduled,
+)
 from custom_components.reminders.storage import serialize_storage
 from custom_components.reminders.triggers.models import TriggerDefinition
 
@@ -128,9 +132,7 @@ async def test_failed_atomic_edit_changes_neither_reminder_nor_native_rules(
                     "state": "on",
                 }
             ],
-            completion_triggers=[
-                {"trigger": "event", "event_type": "task_complete"}
-            ],
+            completion_triggers=[{"trigger": "event", "event_type": "task_complete"}],
         )
 
     assert manager._reminders[original.id] == original
