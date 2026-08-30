@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import voluptuous as vol
 
 from custom_components.reminders.models import (
     ActivationType,
@@ -208,7 +209,7 @@ async def test_atomic_edit_rearms_existing_native_context_wait(
 
 
 def test_atomic_scheduled_websocket_schema_requires_complete_native_snapshot() -> None:
-    """The endpoint accepts the panel payload and always receives all native rule roles."""
+    """The endpoint requires a complete native rule snapshot."""
     schema = websocket_update_native_scheduled._ws_schema
     message = schema(
         {
@@ -224,7 +225,7 @@ def test_atomic_scheduled_websocket_schema_requires_complete_native_snapshot() -
     )
     assert message["activation_type"] == ActivationType.TIME
 
-    with pytest.raises(Exception):
+    with pytest.raises(vol.Invalid):
         schema(
             {
                 "id": 1,
