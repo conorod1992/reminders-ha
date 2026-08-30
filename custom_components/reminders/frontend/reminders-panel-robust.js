@@ -1,4 +1,4 @@
-import "./reminders-panel-attention.js";
+import "./reminders-panel-atomic.js";
 
 const Panel = customElements.get("reminders-management-panel");
 const proto = Panel?.prototype;
