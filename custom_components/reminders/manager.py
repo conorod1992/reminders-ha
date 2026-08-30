@@ -398,7 +398,7 @@ class ReminderManager:
         async with self._lock:
             return self._require(reminder_id)
 
-    async def async_list(
+    async def async_list_page(
         self,
         *,
         user_id: str | None = None,
@@ -413,8 +413,8 @@ class ReminderManager:
         source_id: str | None = None,
         limit: int = 500,
         offset: int = 0,
-    ) -> list[Reminder]:
-        """List bounded reminders with backend-supported filters."""
+    ) -> tuple[list[Reminder], int]:
+        """Return one filtered reminder page and its pre-pagination total."""
         after = _normalize_due(due_after) if due_after else None
         before = _normalize_due(due_before) if due_before else None
         needle = query.casefold().strip() if query else None
@@ -450,14 +450,48 @@ class ReminderManager:
                     or needle in (reminder.message or "").casefold()
                 )
             ]
-        return sorted(
-            values,
-            key=lambda item: (
-                item.due is None,
-                item.due or item.created_at,
-                item.id,
-            ),
-        )[offset : offset + limit]
+            ordered = sorted(
+                values,
+                key=lambda item: (
+                    item.due is None,
+                    item.due or item.created_at,
+                    item.id,
+                ),
+            )
+        return ordered[offset : offset + limit], len(ordered)
+
+    async def async_list(
+        self,
+        *,
+        user_id: str | None = None,
+        pending_only: bool = False,
+        due_after: datetime | None = None,
+        due_before: datetime | None = None,
+        query: str | None = None,
+        recurring: bool | None = None,
+        activation_type: ActivationType | None = None,
+        statuses: set[ReminderStatus] | None = None,
+        source: str | None = None,
+        source_id: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[Reminder]:
+        """List bounded reminders with backend-supported filters."""
+        page, _ = await self.async_list_page(
+            user_id=user_id,
+            pending_only=pending_only,
+            due_after=due_after,
+            due_before=due_before,
+            query=query,
+            recurring=recurring,
+            activation_type=activation_type,
+            statuses=statuses,
+            source=source,
+            source_id=source_id,
+            limit=limit,
+            offset=offset,
+        )
+        return page
 
     async def async_history(
         self,
