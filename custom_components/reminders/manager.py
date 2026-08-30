@@ -2668,12 +2668,10 @@ class ReminderManager:
                         continue
                     number = occurrence.escalation_attempt_count + 1
                     placeholder = EscalationAttempt(
-                        number, effective_now, suppressed_channels=suppressed
-                    )
-                    next_at = (
-                        effective_now + timedelta(minutes=escalation.repeat_minutes)
-                        if number < escalation.max_attempts
-                        else None
+                        number,
+                        effective_now,
+                        suppressed_channels=suppressed,
+                        in_flight=True,
                     )
                     claimed_occurrence = occurrence.updated(
                         escalation_attempt_count=number,
@@ -2681,7 +2679,6 @@ class ReminderManager:
                             *occurrence.escalation_history,
                             placeholder,
                         ),
-                        next_escalation_at=next_at,
                     )
                     history = _replace_occurrence(history, claimed_occurrence)
                     delivery_reminder = reminder.updated(
@@ -2719,8 +2716,9 @@ class ReminderManager:
                 if found_occurrence is None:
                     continue
                 attempts = list(found_occurrence.escalation_history)
+                completed_claim = False
                 for index, attempt in enumerate(attempts):
-                    if attempt.number == number:
+                    if attempt.number == number and attempt.in_flight:
                         attempts[index] = EscalationAttempt(
                             number=number,
                             attempted_at=attempt.attempted_at,
@@ -2728,10 +2726,24 @@ class ReminderManager:
                             failed_channels=result.failed_channels,
                             delivery_errors=result.errors,
                             suppressed_channels=attempt.suppressed_channels,
+                            in_flight=False,
                         )
+                        completed_claim = True
                         break
+                if not completed_claim:
+                    continue
+                current_escalation = current.escalation
+                next_at = (
+                    effective_now + timedelta(minutes=current_escalation.repeat_minutes)
+                    if found_occurrence.status
+                    is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                    and current_escalation is not None
+                    and number < current_escalation.max_attempts
+                    else None
+                )
                 updated_occurrence = found_occurrence.updated(
-                    escalation_history=tuple(attempts)
+                    escalation_history=tuple(attempts),
+                    next_escalation_at=next_at,
                 )
                 history = _replace_occurrence(
                     list(current.occurrence_history), updated_occurrence

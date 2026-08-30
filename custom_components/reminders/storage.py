@@ -223,6 +223,10 @@ def deserialize_storage(
                 else occurrence
                 for occurrence in reminder.occurrence_history
             )
+            recovered_history = tuple(
+                _recover_interrupted_escalation(occurrence)
+                for occurrence in recovered_history
+            )
             if recovered_history != reminder.occurrence_history:
                 reminder = reminder.updated(occurrence_history=recovered_history)
             if interrupted_delivery:
@@ -259,6 +263,43 @@ def deserialize_storage(
                 "Skipping malformed stored user preferences for %s: %s", user_id, err
             )
     return reminders, users
+
+
+def _recover_interrupted_escalation(occurrence: Any) -> Any:
+    """Roll back a durable escalation claim whose result was never persisted."""
+    in_flight = tuple(
+        attempt for attempt in occurrence.escalation_history if attempt.in_flight
+    )
+    if not in_flight:
+        return occurrence
+    if occurrence.status is not OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT:
+        return occurrence.updated(
+            escalation_history=tuple(
+                attempt
+                if not attempt.in_flight
+                else type(attempt)(
+                    number=attempt.number,
+                    attempted_at=attempt.attempted_at,
+                    succeeded_channels=attempt.succeeded_channels,
+                    failed_channels=attempt.failed_channels,
+                    delivery_errors=attempt.delivery_errors,
+                    suppressed_channels=attempt.suppressed_channels,
+                    in_flight=False,
+                )
+                for attempt in occurrence.escalation_history
+            )
+        )
+    completed = tuple(
+        attempt for attempt in occurrence.escalation_history if not attempt.in_flight
+    )
+    retry_at = min(attempt.attempted_at for attempt in in_flight)
+    return occurrence.updated(
+        escalation_attempt_count=max(
+            (attempt.number for attempt in completed), default=0
+        ),
+        escalation_history=completed,
+        next_escalation_at=retry_at,
+    )
 
 
 def serialize_storage(
