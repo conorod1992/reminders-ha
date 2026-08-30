@@ -23,6 +23,7 @@ from .const import (
     SERVICE_PAUSE,
     SERVICE_RECONCILE_SOURCE,
     SERVICE_RESUME,
+    SERVICE_SET_NATIVE_RULES,
     SERVICE_SKIP_NEXT,
     SERVICE_UPDATE,
     SERVICE_UPSERT,
@@ -42,8 +43,26 @@ _RESERVED_UPSERT_FIELDS = {
     "source_id",
     "user_id",
 }
+_NATIVE_LIST = vol.All(cv.ensure_list, [dict])
 
 ID_SCHEMA = vol.Schema({vol.Required("reminder_id"): cv.string})
+SET_NATIVE_RULES_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Required("reminder_id"): cv.string,
+            vol.Optional("activation_triggers"): _NATIVE_LIST,
+            vol.Optional("delivery_triggers"): _NATIVE_LIST,
+            vol.Optional("delivery_conditions"): _NATIVE_LIST,
+            vol.Optional("completion_triggers"): _NATIVE_LIST,
+        }
+    ),
+    cv.has_at_least_one_key(
+        "activation_triggers",
+        "delivery_triggers",
+        "delivery_conditions",
+        "completion_triggers",
+    ),
+)
 UPSERT_SCHEMA = vol.Schema(
     {
         vol.Required("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
@@ -87,6 +106,24 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
         manager = _manager(hass)
         reminder = await _authorized(hass, manager, call, call.data["reminder_id"])
         updated = await manager.async_skip_next(reminder.id)
+        return {"reminder": updated.to_dict()} if call.return_response else None
+
+    async def set_native_rules(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        reminder = await _authorized(hass, manager, call, call.data["reminder_id"])
+        updated = await manager.async_set_native_rules(
+            reminder.id,
+            **{
+                key: call.data[key]
+                for key in (
+                    "activation_triggers",
+                    "delivery_triggers",
+                    "delivery_conditions",
+                    "completion_triggers",
+                )
+                if key in call.data
+            },
+        )
         return {"reminder": updated.to_dict()} if call.return_response else None
 
     async def upsert(call: ServiceCall) -> ServiceResponse:
@@ -161,6 +198,12 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
         (SERVICE_PAUSE, pause, ID_SCHEMA, SupportsResponse.OPTIONAL),
         (SERVICE_RESUME, resume, ID_SCHEMA, SupportsResponse.OPTIONAL),
         (SERVICE_SKIP_NEXT, skip_next, ID_SCHEMA, SupportsResponse.OPTIONAL),
+        (
+            SERVICE_SET_NATIVE_RULES,
+            set_native_rules,
+            SET_NATIVE_RULES_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
         (SERVICE_UPSERT, upsert, UPSERT_SCHEMA, SupportsResponse.ONLY),
         (
             SERVICE_RECONCILE_SOURCE,
