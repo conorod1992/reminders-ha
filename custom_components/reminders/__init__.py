@@ -18,13 +18,14 @@ from .delivery import (
     VoiceProvider,
 )
 from .frontend import async_register_frontend, async_unregister_panel
-from .native_manager import NativeReminderManager
+from .interop_manager import InteropReminderManager
+from .interop_services import async_register_interop_services
 from .persistent_cleanup import async_register_persistent_cleanup
 from .services import async_register_services
 from .storage import ReminderStore
 from .websocket_registration import async_register_websocket_api
 
-RemindersConfigEntry = ConfigEntry[NativeReminderManager]
+RemindersConfigEntry = ConfigEntry[InteropReminderManager]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PERSISTENT_CLEANUP_DATA = f"{DOMAIN}_persistent_cleanup_unsub"
 
@@ -32,6 +33,7 @@ PERSISTENT_CLEANUP_DATA = f"{DOMAIN}_persistent_cleanup_unsub"
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up integration-wide resources."""
     async_register_services(hass)
+    async_register_interop_services(hass)
     async_register_websocket_api(hass)
     async_register_conversation_api(hass)
     return True
@@ -46,7 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: RemindersConfigEntry) ->
             VoiceProvider(hass),
         ]
     )
-    manager = NativeReminderManager(hass, ReminderStore(hass), dispatcher)
+    manager = InteropReminderManager(hass, ReminderStore(hass), dispatcher)
     try:
         await manager.async_load()
         await async_register_frontend(hass)
