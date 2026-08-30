@@ -9,7 +9,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.reminders.models import Occurrence, OccurrenceStatus, Reminder, ReminderStatus
+from custom_components.reminders.models import (
+    ActivationType,
+    Occurrence,
+    OccurrenceStatus,
+    Reminder,
+    ReminderStatus,
+)
 from custom_components.reminders.native_manager import NativeReminderManager
 from custom_components.reminders.native_scheduled_crud import async_update_native_scheduled
 from custom_components.reminders.native_websocket import websocket_update_native_scheduled
@@ -116,7 +122,11 @@ async def test_failed_atomic_edit_changes_neither_reminder_nor_native_rules(
                 {"trigger": "state", "entity_id": "binary_sensor.new", "to": "on"}
             ],
             delivery_conditions=[
-                {"condition": "state", "entity_id": "input_boolean.ready", "state": "on"}
+                {
+                    "condition": "state",
+                    "entity_id": "input_boolean.ready",
+                    "state": "on",
+                }
             ],
             completion_triggers=[
                 {"trigger": "event", "event_type": "task_complete"}
@@ -148,7 +158,11 @@ async def test_successful_atomic_edit_uses_one_write_and_preserves_occurrence_id
             {"trigger": "state", "entity_id": "binary_sensor.new", "to": "on"}
         ],
         delivery_conditions=[
-            {"condition": "state", "entity_id": "input_boolean.ready", "state": "on"}
+            {
+                "condition": "state",
+                "entity_id": "input_boolean.ready",
+                "state": "on",
+            }
         ],
         completion_triggers=[{"trigger": "event", "event_type": "task_complete"}],
     )
@@ -223,10 +237,7 @@ def test_atomic_scheduled_websocket_schema_requires_complete_native_snapshot() -
 def test_frontend_routes_existing_scheduled_native_edits_to_atomic_command() -> None:
     """The module chain must bypass the old update + set_native_rules save path."""
     frontend_dir = (
-        Path(__file__).parents[1]
-        / "custom_components"
-        / "reminders"
-        / "frontend"
+        Path(__file__).parents[1] / "custom_components" / "reminders" / "frontend"
     )
     atomic_source = (frontend_dir / "reminders-panel-atomic.js").read_text(
         encoding="utf-8"
