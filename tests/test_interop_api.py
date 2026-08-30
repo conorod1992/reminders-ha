@@ -190,6 +190,93 @@ def test_lifecycle_payload_is_versioned_enriched_and_content_free() -> None:
     assert "message" not in payload
 
 
+def test_lifecycle_payload_prefers_committed_manager_snapshot() -> None:
+    """Enriched status fields describe the committed transition, not its input."""
+    bus = EventBus()
+    manager = InteropReminderManager(  # type: ignore[arg-type]
+        SimpleNamespace(bus=bus), FakeStore(), FakeDispatcher()
+    )
+    now = datetime.now(UTC)
+    before_occurrence = Occurrence(
+        id="occ-committed",
+        scheduled_due=now,
+        due=now,
+        status=OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+    )
+    before = Reminder(
+        id="committed",
+        user_id="u1",
+        title="Committed state",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+        occurrence_history=(before_occurrence,),
+    )
+    after_occurrence = before_occurrence.updated(
+        status=OccurrenceStatus.ACKNOWLEDGED,
+        acknowledged_at=now,
+    )
+    after = before.updated(
+        status=ReminderStatus.ACKNOWLEDGED,
+        occurrence_history=(after_occurrence,),
+    )
+    manager._reminders[before.id] = after
+
+    manager._fire_lifecycle_event(
+        before,
+        "acknowledged",
+        occurrence_id=before_occurrence.id,
+    )
+
+    payload = bus.events[0][1]
+    assert payload["reminder_status"] == "acknowledged"
+    assert payload["occurrence_status"] == "acknowledged"
+
+
+async def test_completion_event_reports_post_transition_state() -> None:
+    """Actual completion callers may retain an old snapshot without leaking it."""
+    bus = EventBus()
+    hass = SimpleNamespace(
+        bus=bus,
+        data={},
+        states={},
+        config=SimpleNamespace(time_zone="UTC"),
+        create_task=lambda coroutine, _name=None: coroutine.close(),
+    )
+    manager = InteropReminderManager(  # type: ignore[arg-type]
+        hass, FakeStore(), FakeDispatcher()
+    )
+    manager._listeners.clear()
+    now = datetime.now(UTC)
+    occurrence = Occurrence(
+        id="occ-complete",
+        scheduled_due=now,
+        due=now,
+        status=OccurrenceStatus.DELIVERED,
+    )
+    reminder = Reminder(
+        id="complete",
+        user_id="u1",
+        title="Complete me",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.DELIVERED,
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        allow_manual_completion=True,
+    )
+    manager._reminders[reminder.id] = reminder
+
+    await manager.async_complete(reminder.id, occurrence_id=occurrence.id)
+
+    payload = bus.events[-1][1]
+    assert payload["action"] == "completed"
+    assert payload["reminder_status"] == "completed"
+    assert payload["occurrence_status"] == "completed"
+
+
 def test_interop_service_schemas_keep_payload_and_reconciliation_bounded() -> None:
     validated = UPSERT_SCHEMA(
         {
