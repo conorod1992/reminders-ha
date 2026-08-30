@@ -31,6 +31,7 @@ For most users, getting started is simply:
 - Friendly Home Assistant entity/user names in the panel
 - Everything needed for normal use is available from the Reminders panel — YAML is optional
 - Automation actions and optional conversation/LLM tools for advanced use
+- Stable integration-facing upsert/reconciliation APIs for reminders owned by other integrations
 
 Reminders does not create a Home Assistant entity or automation for every reminder, and it does not rely on polling.
 
@@ -167,6 +168,8 @@ Depending on the reminder's settings, a reminder can offer:
 - **Dismiss**
 - **Delete**
 
+Recurring reminders can additionally be paused, resumed, or have their next occurrence skipped.
+
 **Done** appears only when manual completion is enabled.
 
 **Dismiss** appears when that delivered reminder needs acknowledgement.
@@ -220,12 +223,22 @@ History, previous delivery state, acknowledgement state, and internal IDs are ne
 
 Search looks through reminder titles and messages.
 
-The panel includes live views for:
+The panel has four primary views:
 
-- **Upcoming**
-- **Recurring**
-- **History**
-- **Failed**
+- **Needs attention** — reminders that currently require action or have a problem
+- **Upcoming** — reminders waiting for their next scheduled delivery
+- **All reminders** — the complete current reminder list
+- **History** — resolved/delivered occurrence history
+
+Under **All reminders**, the **Show** filter can narrow the list to:
+
+- all reminder types
+- recurring reminders
+- triggered reminders
+- failed reminders
+- expired reminders
+
+History is loaded in pages, with **Load more** available when additional rows exist.
 
 These views update automatically as reminders change.
 
@@ -570,6 +583,8 @@ Triggered reminders support:
 
 `once` is the default.
 
+For `every_trigger`, `while_awaiting_acknowledgement` controls whether a new trigger is skipped while an older occurrence still needs dismissal or whether a new occurrence may be delivered.
+
 Cooldown, start availability, expiry, duration matching, and already-matching behaviour are available under Advanced options.
 
 ## Triggered reminder actions
@@ -695,23 +710,39 @@ Everything needed for ordinary reminder creation and management is available fro
 
 Actions are useful when automations, scripts, or other integrations need to create or manage reminders.
 
-All actions include Home Assistant visual-editor names, descriptions, examples, and selectors.
+All public actions include Home Assistant action metadata so they are discoverable from the action editor.
 
-### Existing compatible actions
+### Reminder CRUD and lifecycle
 
 - `reminders.create`
 - `reminders.create_recurring`
+- `reminders.create_triggered`
 - `reminders.get`
 - `reminders.list`
 - `reminders.update`
 - `reminders.delete`
 - `reminders.snooze`
-- `reminders.set_user_preferences`
-
-### Additional actions
-
 - `reminders.acknowledge`
+- `reminders.complete`
+
+### Recurring-series controls
+
+- `reminders.pause`
+- `reminders.resume`
+- `reminders.skip_next`
+
+### Preferences, delivery, and triggers
+
+- `reminders.set_user_preferences`
 - `reminders.test_delivery`
+- `reminders.fire_trigger`
+
+### Integration-facing actions
+
+- `reminders.set_native_rules`
+- `reminders.upsert`
+- `reminders.reconcile_source`
+- `reminders.external_action`
 
 An authenticated action normally operates on the user who called it.
 
@@ -806,20 +837,55 @@ If a title matches zero reminders or more than one reminder, the tool does not g
 
 ## Integration developer support
 
-Other integrations can create reminders and later find them again without depending on Reminders' internal storage.
+Other integrations can create and synchronize reminders without depending on Reminders' internal storage.
 
-Supported optional metadata fields include:
+Supported source metadata fields include:
 
 - `source`
 - `source_id`
 - `source_event`
 - `managed_externally`
 
-`create`, `create_recurring`, `create_triggered`, and `update` support these fields.
+`create`, `create_recurring`, `create_triggered`, and `update` support these fields. `list` can filter by `source` and `source_id`.
 
-Use `list` with `source` and `source_id` to rediscover externally created reminders.
+For stable synchronization, prefer the dedicated integration-facing actions below.
 
-Normal ownership rules continue to apply.
+### Stable external identity and upsert
+
+`reminders.upsert` identifies an external reminder by:
+
+**owner/user + `source` + `source_id`**
+
+This allows the same source object to have separate reminders for different Home Assistant users without cross-user collisions.
+
+The action accepts a reminder `kind` (`one_time`, `recurring`, or `triggered`) plus the complete desired create payload in `data`. It creates the reminder if the key does not exist or updates the existing externally managed reminder if it does.
+
+An existing reminder under the key is never silently taken over if it is not marked `managed_externally`. Changing an existing external reminder to a different semantic kind also requires deleting/reconciling it first rather than silently converting it.
+
+Example:
+
+```yaml
+action: reminders.upsert
+data:
+  source: annual_events
+  source_id: passport_renewal
+  kind: one_time
+  data:
+    title: Renew passport
+    due: "2026-11-01 09:00:00"
+```
+
+### Reconcile an external source
+
+`reminders.reconcile_source` lets an integration submit the complete set of source IDs that still exist for one owner/source pair.
+
+Reminders atomically removes stale **externally managed** reminders for that scope. Ordinary user reminders are never swept. A reminder actively in the middle of delivery is skipped and reported in the response so the caller can safely reconcile again later.
+
+### Home Assistant-native rules
+
+`reminders.set_native_rules` exposes the same validated Home Assistant-native activation, delivery, delivery-condition, and completion rule lists used by the advanced panel editor.
+
+The replacement is atomic: rule configuration is validated before the durable reminder state is changed.
 
 ### External actions
 
@@ -849,7 +915,7 @@ They can coexist with Snooze and Dismiss.
 
 ### Lifecycle events
 
-Dismissal, manual completion, automatic completion, snooze, external action selection, and deletion fire the:
+Dismissal, manual completion, automatic completion, snooze, pause/resume, skip, external action selection, expiry, and deletion can fire the:
 
 ```text
 reminders_lifecycle
@@ -857,13 +923,22 @@ reminders_lifecycle
 
 Home Assistant event.
 
-The safe event payload can include:
+The current event schema is versioned with `schema_version: 1`. Its safe payload can include:
 
+- `schema_version`
 - `action`
 - `reminder_id`
 - `occurrence_id`
 - `user_id`
-- source metadata
+- `source`
+- `source_id`
+- `source_event`
+- `managed_externally`
+- `activation_type`
+- `recurring`
+- `reminder_status`
+- `occurrence_status`
+- `event_time`
 - `external_action_id` where relevant
 
 Reminder titles and messages are deliberately excluded.
@@ -872,11 +947,11 @@ Reminder titles and messages are deliberately excluded.
 
 Reminders persists its state across Home Assistant restarts.
 
-Reminder creation, updates, deletion, snoozing, acknowledgement, recurrence advancement, and delivery-state changes are written to storage before the new runtime state is treated as committed.
+Reminder creation, updates, deletion, snoozing, acknowledgement, recurrence advancement, rule changes, and delivery-state changes are written to storage before the new runtime state is treated as committed.
 
 Before sending a reminder, due work is persisted as `delivering`.
 
-If Home Assistant restarts during delivery, that claim is recovered.
+If Home Assistant restarts during delivery, that claim is recovered and retried for both timed and triggered reminders.
 
 This intentionally prefers not losing a reminder. In the rare case where an external notification service accepted a message immediately before Home Assistant crashed, a duplicate notification may be possible after restart.
 
@@ -933,21 +1008,21 @@ Diagnostics deliberately exclude:
 
 ## Storage and migration
 
-Storage schema 1.3 includes:
+Storage schema 1.8 includes:
 
-- recurrence patterns and limits
-- per-user preferences
-- occurrence history
+- anchored recurrence patterns and limits
+- per-user delivery, dismissal, history, and quiet-hours preferences
+- occurrence history and delivery/retry state
+- triggered-reminder state, cooldowns, availability, and expiry
+- context-aware delivery and automatic-completion state
+- escalation state
+- Companion App action state
+- durable trigger-duration waits
+- external source metadata and native rule configuration
 
-Migration from versions 1.0–1.2 preserves existing reminder data, including IDs, owners, content, due times, recurrence anchors, and existing monthly-day behaviour.
+Migration from storage versions 1.0–1.7 preserves compatible reminder data, including IDs, owners, content, due times, recurrence anchors, source metadata, and existing history.
 
-Migration also:
-
-- creates a conservative lifecycle occurrence for legacy reminders
-- sets acknowledgement to `default`
-- leaves quiet hours disabled until configured
-- preserves existing preference records
-- applies the 90-day / 250-occurrence retention defaults
+Migration also supplies conservative defaults for features introduced after older schemas, including acknowledgement, quiet hours, trigger lifecycle state, escalation, mobile actions, and durable trigger-duration tracking.
 
 Malformed individual records are isolated rather than causing the entire Reminders store to be discarded.
 
@@ -962,16 +1037,9 @@ Malformed individual records are isolated rather than causing the entire Reminde
 - Repeated reminders/escalation must be enabled explicitly.
 - Quiet hours use Home Assistant's configured timezone because Home Assistant does not currently expose a separate timezone for each user.
 - Home Assistant 2026.7 does not expose a valid user selector for generic action schemas, so advanced admin `user_id` fields may appear as text fields in action configuration.
-- The initial triggered-reminder implementation deliberately does not include:
-  - templates
-  - arbitrary service execution
-  - device-trigger schemas
-  - webhooks
-  - complex AND/OR condition trees
-  - custom radius calculations
-  - automatic automation generation
+- The bounded built-in trigger editor deliberately does not include arbitrary service execution, webhooks, custom radius calculations, or automatic automation generation.
 
-For more complex logic, use a normal Home Assistant automation or a named trigger.
+For more complex logic, use Home Assistant-native rules, a normal Home Assistant automation, or a named trigger.
 
 ## Technical architecture
 
@@ -984,7 +1052,8 @@ For users interested in how Reminders avoids unnecessary Home Assistant overhead
 - no external database
 - no per-occurrence Home Assistant objects
 - one exact next-due callback is scheduled for the integration
-- equivalent trigger definitions can share listeners
+- equivalent bounded trigger definitions can share listeners
+- Home Assistant-native rule listeners are attached only while relevant
 - trigger listeners are rebuilt from storage at startup
 - unused listeners are removed after edits, deletion, completion, expiry, or unload
 - history is kept in bounded integration storage
