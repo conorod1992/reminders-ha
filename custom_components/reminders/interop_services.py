@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any, cast
 
 import voluptuous as vol
-from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
@@ -87,9 +92,7 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
     async def upsert(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         actor = await async_actor(hass, call.context.user_id)
-        user_id = await async_resolve_target_user(
-            hass, actor, call.data.get("user_id")
-        )
+        user_id = await async_resolve_target_user(hass, actor, call.data.get("user_id"))
         supplied = dict(call.data["data"])
         reserved = _RESERVED_UPSERT_FIELDS.intersection(supplied)
         if reserved:
@@ -143,9 +146,7 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
     async def reconcile_source(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         actor = await async_actor(hass, call.context.user_id)
-        user_id = await async_resolve_target_user(
-            hass, actor, call.data.get("user_id")
-        )
+        user_id = await async_resolve_target_user(hass, actor, call.data.get("user_id"))
         deleted, skipped = await manager.async_reconcile_external_source(
             user_id=user_id,
             source=call.data["source"],
