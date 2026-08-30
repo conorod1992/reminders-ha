@@ -1,15 +1,24 @@
 {
   "services": {
     "acknowledge": {"service": "mdi:check-circle"},
+    "complete": {"service": "mdi:check-bold"},
     "create": {"service": "mdi:bell-plus"},
     "create_recurring": {"service": "mdi:bell-sync"},
+    "create_triggered": {"service": "mdi:bell-ring"},
     "delete": {"service": "mdi:bell-remove"},
+    "external_action": {"service": "mdi:gesture-tap-button"},
+    "fire_trigger": {"service": "mdi:bell-ring"},
     "get": {"service": "mdi:bell"},
     "list": {"service": "mdi:bell-multiple"},
+    "pause": {"service": "mdi:pause"},
+    "reconcile_source": {"service": "mdi:sync"},
+    "resume": {"service": "mdi:play"},
+    "set_native_rules": {"service": "mdi:tune"},
     "set_user_preferences": {"service": "mdi:bell-cog"},
+    "skip_next": {"service": "mdi:skip-next"},
     "snooze": {"service": "mdi:bell-sleep"},
     "test_delivery": {"service": "mdi:bell-check"},
-    "update": {"service": "mdi:bell-edit"}
+    "update": {"service": "mdi:bell-edit"},
+    "upsert": {"service": "mdi:database-sync"}
   }
 }
-
