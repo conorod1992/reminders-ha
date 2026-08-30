@@ -95,7 +95,7 @@ class NativeAutomationRuntime:
                 await self._async_ensure_condition_entry(reminder_id, configs)
 
     async def async_conditions_match(self, reminder: Reminder) -> bool:
-        """Evaluate a reminder's native delivery conditions using HA semantics."""
+        """Evaluate native conditions, preferring an extra reminder to a lost one."""
         if not reminder.delivery_conditions:
             return True
         key = _config_key(reminder.delivery_conditions)
@@ -109,15 +109,25 @@ class NativeAutomationRuntime:
                 )
                 entry = self._condition_entries.get(reminder.id)
         if entry is None:
-            return False
+            # A valid stored reminder must not be permanently skipped because HA
+            # could not compile its condition at runtime (for example while a
+            # dependency is temporarily unavailable after restart). Reminders are
+            # safety-biased: fail open and log rather than silently lose delivery.
+            _LOGGER.error(
+                "Native delivery conditions are unavailable for reminder %s; "
+                "delivering rather than silently skipping the reminder",
+                reminder.id,
+            )
+            return True
         try:
             return bool(entry.checker.async_check(variables={}))
         except Exception:
             _LOGGER.exception(
-                "Error evaluating native delivery conditions for reminder %s",
+                "Error evaluating native delivery conditions for reminder %s; "
+                "delivering rather than silently skipping the reminder",
                 reminder.id,
             )
-            return False
+            return True
 
     async def async_unload(self) -> None:
         """Detach native trigger listeners and condition resources."""

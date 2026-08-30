@@ -13,8 +13,13 @@ from .const import (
     CHANNEL_PERSISTENT_NOTIFICATION,
     CHANNEL_PHONE,
     CHANNEL_VOICE,
+    MOBILE_ACTION_PREFIX,
 )
-from .models import DeliveryPolicy, Reminder
+from .models import DeliveryPolicy, OccurrenceStatus, Reminder
+from .persistent_cleanup import (
+    persistent_notification_id,
+    track_persistent_notification,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +33,36 @@ class DeliveryProvider(Protocol):
         """Deliver a reminder."""
 
 
+def _delivery_occurrence_id(reminder: Reminder) -> str | None:
+    """Resolve the occurrence represented by this delivery payload."""
+    # Escalations and actionable retries carry the occurrence's opaque action
+    # token even when the recurring series has already advanced its current ID.
+    tokens: set[str] = set()
+    for item in reminder.notification_actions:
+        action = item.get("action")
+        if not isinstance(action, str) or not action.startswith(MOBILE_ACTION_PREFIX):
+            continue
+        token, separator, _operation = action.removeprefix(
+            MOBILE_ACTION_PREFIX
+        ).partition(":")
+        if separator and token:
+            tokens.add(token)
+    if tokens:
+        for occurrence in reminder.occurrence_history:
+            if occurrence.notification_action_token in tokens:
+                return occurrence.id
+
+    # Non-actionable snoozed retries are still explicitly claimed as DELIVERING.
+    delivering = [
+        occurrence.id
+        for occurrence in reminder.occurrence_history
+        if occurrence.status is OccurrenceStatus.DELIVERING
+    ]
+    if len(delivering) == 1:
+        return delivering[0]
+    return reminder.current_occurrence_id
+
+
 class PersistentNotificationProvider:
     """Deliver through Home Assistant persistent notifications."""
 
@@ -37,16 +72,20 @@ class PersistentNotificationProvider:
         self._hass = hass
 
     async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
+        notification_id = persistent_notification_id(
+            reminder.id, _delivery_occurrence_id(reminder)
+        )
         await self._hass.services.async_call(
             "persistent_notification",
             "create",
             {
                 "title": reminder.title,
                 "message": reminder.message or reminder.title,
-                "notification_id": f"reminders_{reminder.id}",
+                "notification_id": notification_id,
             },
             blocking=True,
         )
+        track_persistent_notification(self._hass, reminder.id, notification_id)
 
 
 class NotifyProvider:

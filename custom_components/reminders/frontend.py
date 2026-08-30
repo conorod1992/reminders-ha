@@ -20,8 +20,11 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
     """Register the static route once and the reloadable sidebar panel."""
     if not hass.data.get(FRONTEND_DATA):
         frontend_dir = Path(__file__).parent / "frontend"
+        # The panel is a small unbundled module graph. Long-lived cache headers can
+        # otherwise leave a new wrapper importing an older cached dependency after
+        # an integration update, so prefer correctness over negligible cache savings.
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, str(frontend_dir), True)]
+            [StaticPathConfig(STATIC_URL, str(frontend_dir), False)]
         )
         hass.data[FRONTEND_DATA] = True
 
@@ -33,7 +36,7 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
         webcomponent_name=PANEL_ELEMENT,
         sidebar_title="Reminders",
         sidebar_icon="mdi:bell",
-        module_url=f"{STATIC_URL}/reminders-panel-attention.js?v=2.2.0",
+        module_url=f"{STATIC_URL}/reminders-panel-robust.js",
         config={"api_prefix": f"{DOMAIN}/"},
         require_admin=False,
         config_panel_domain=DOMAIN,

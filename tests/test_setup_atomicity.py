@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from homeassistant.core import Event, State
 
-from custom_components.reminders import async_setup_entry
+from custom_components.reminders import async_setup_entry, async_unload_entry
 from custom_components.reminders.models import ActivationType, Reminder, ReminderStatus
 from custom_components.reminders.storage import serialize_storage
 from custom_components.reminders.triggers.models import TriggerDefinition
@@ -20,7 +20,7 @@ from .test_atomic_persistence import FailingStore, SaveError
 
 
 class TrackingBus:
-    """Track installed mobile action listeners."""
+    """Track installed integration event-bus listeners."""
 
     def __init__(self) -> None:
         self.listeners: list[Any] = []
@@ -106,6 +106,9 @@ async def test_failed_setup_unloads_listeners_before_successful_retry(
     monkeypatch.setattr(
         "custom_components.reminders.async_register_frontend", register_frontend
     )
+    monkeypatch.setattr(
+        "custom_components.reminders.async_unregister_panel", lambda _hass: None
+    )
     entry = SimpleNamespace()
 
     with pytest.raises(SaveError):
@@ -116,7 +119,9 @@ async def test_failed_setup_unloads_listeners_before_successful_retry(
     store.fail_on_calls.clear()
     await async_setup_entry(hass, entry)  # type: ignore[arg-type]
     assert len(active_state_callbacks) == 1
-    assert len(bus.listeners) == 1
+    # Mobile actions and persistent-notification lifecycle cleanup both listen on
+    # the HA event bus after a successful setup.
+    assert len(bus.listeners) == 2
     delivered_after_retry = len(dispatcher.calls)
 
     all_state_callbacks[0](
@@ -130,3 +135,7 @@ async def test_failed_setup_unloads_listeners_before_successful_retry(
     )
     await asyncio.sleep(0)
     assert len(dispatcher.calls) == delivered_after_retry
+
+    assert await async_unload_entry(hass, entry) is True  # type: ignore[arg-type]
+    assert active_state_callbacks == []
+    assert bus.listeners == []

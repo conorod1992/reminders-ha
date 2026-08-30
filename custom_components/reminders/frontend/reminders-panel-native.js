@@ -136,13 +136,23 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
       const created = await originalCall.call(this, action, data);
       const reminderId = created?.reminder?.id;
       if (!reminderId) return created;
-      const updated = await originalCall.call(this, "set_native_rules", {
-        reminder_id: reminderId,
-        delivery_triggers: rules.deliveryTriggers,
-        delivery_conditions: rules.deliveryConditions,
-        completion_triggers: rules.completion,
-      });
-      return updated || created;
+      try {
+        const updated = await originalCall.call(this, "set_native_rules", {
+          reminder_id: reminderId,
+          delivery_triggers: rules.deliveryTriggers,
+          delivery_conditions: rules.deliveryConditions,
+          completion_triggers: rules.completion,
+        });
+        return updated || created;
+      } catch (error) {
+        try {
+          await originalCall.call(this, "delete", { reminder_id: reminderId });
+        } catch (rollbackError) {
+          const detail = rollbackError?.message || String(rollbackError);
+          error.message = `${error?.message || String(error)} The incomplete reminder could not be removed automatically: ${detail}`;
+        }
+        throw error;
+      }
     }
 
     if (action === "update" && !state.triggered) {

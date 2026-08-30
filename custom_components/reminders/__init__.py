@@ -19,12 +19,14 @@ from .delivery import (
 )
 from .frontend import async_register_frontend, async_unregister_panel
 from .native_manager import NativeReminderManager
+from .persistent_cleanup import async_register_persistent_cleanup
 from .services import async_register_services
 from .storage import ReminderStore
 from .websocket_registration import async_register_websocket_api
 
 RemindersConfigEntry = ConfigEntry[NativeReminderManager]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+PERSISTENT_CLEANUP_DATA = f"{DOMAIN}_persistent_cleanup_unsub"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -57,11 +59,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: RemindersConfigEntry) ->
         raise
     entry.runtime_data = manager
     hass.data[DOMAIN] = manager
+    hass.data[PERSISTENT_CLEANUP_DATA] = async_register_persistent_cleanup(hass)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: RemindersConfigEntry) -> bool:
     """Unload a Reminders config entry."""
+    unsubscribe = hass.data.pop(PERSISTENT_CLEANUP_DATA, None)
+    if unsubscribe is not None:
+        unsubscribe()
     await entry.runtime_data.async_unload()
     async_unregister_panel(hass)
     hass.data.pop(DOMAIN, None)
