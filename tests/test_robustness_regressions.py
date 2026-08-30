@@ -34,13 +34,18 @@ def test_compact_websocket_registration_keeps_series_commands_and_source_filters
     assert 'source_id=msg.get("source_id")' in source
 
 
-def test_frontend_disables_long_lived_module_cache_and_uses_robust_wrapper() -> None:
+def test_frontend_disables_long_lived_module_cache_and_uses_current_wrapper() -> None:
+    frontend_dir = ROOT / "custom_components" / "reminders" / "frontend"
     source = (ROOT / "custom_components" / "reminders" / "frontend.py").read_text(
+        encoding="utf-8"
+    )
+    polish_source = (frontend_dir / "reminders-panel-polish.js").read_text(
         encoding="utf-8"
     )
 
     assert "StaticPathConfig(STATIC_URL, str(frontend_dir), False)" in source
-    assert 'module_url=f"{STATIC_URL}/reminders-panel-robust.js"' in source
+    assert 'module_url=f"{STATIC_URL}/reminders-panel-polish.js"' in source
+    assert 'import "./reminders-panel-robust.js"' in polish_source
     assert "?v=2.2.0" not in source
 
 
@@ -52,7 +57,9 @@ def test_panel_startup_wrapper_allows_retry_after_transient_failure() -> None:
     )
 
     assert "this._started = false" in source
-    assert 'retry.textContent = "Retry"' in source
+    assert 'retry.textContent = "Retry now"' in source
+    assert "const RETRY_DELAYS_MS = [1000, 3000, 10000, 30000]" in source
+    assert "_scheduleRetry(this)" in source
     assert 'import "./reminders-panel-atomic.js"' in source
     assert 'import "./reminders-panel-attention.js"' in atomic_source
 
