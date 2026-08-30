@@ -14,6 +14,7 @@ from custom_components.reminders.models import (
     Reminder,
     ReminderStatus,
 )
+from custom_components.reminders.native_crud import async_update_native_triggered
 from custom_components.reminders.native_manager import NativeReminderManager
 from custom_components.reminders.storage import empty_storage
 
@@ -178,3 +179,50 @@ def test_native_rule_fields_round_trip_through_storage_model() -> None:
     assert restored.activation_triggers == reminder.activation_triggers
     assert restored.completion_triggers == reminder.completion_triggers
     assert restored.delivery_conditions == reminder.delivery_conditions
+
+
+async def test_native_triggered_owner_transfer_rotates_mobile_action_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.reminders.native_crud.async_validate_native_triggers",
+        AsyncMock(return_value=[]),
+    )
+    now = datetime.now(UTC)
+    manager, _ = _manager(monkeypatch)
+    trigger = {
+        "trigger": "state",
+        "entity_id": "binary_sensor.door",
+        "to": "on",
+    }
+    occurrence = Occurrence(
+        "delivered",
+        now,
+        now,
+        notification_action_token="previous-owner-token",
+    )
+    reminder = Reminder(
+        id="native-transfer",
+        user_id="old-owner",
+        title="Native transfer",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        activation_type=ActivationType.TRIGGER,
+        activation_triggers=(trigger,),
+        occurrence_history=(occurrence,),
+    )
+    manager._reminders = {reminder.id: reminder}
+
+    updated = await async_update_native_triggered(
+        manager,
+        reminder.id,
+        activation_triggers=[trigger],
+        user_id="new-owner",
+    )
+
+    assert updated.user_id == "new-owner"
+    assert updated.occurrence_history[0].notification_action_token != (
+        "previous-owner-token"
+    )

@@ -14,6 +14,7 @@ from .manager import (
     _new_occurrence,
     _normalize_due,
     _replace_occurrence,
+    _rotate_notification_action_tokens,
     _validate_expiry_window,
     _validate_external_actions,
     _validate_policy,
@@ -238,6 +239,8 @@ async def async_update_native_scheduled(
                 ),
             )
 
+        if changes.get("user_id", current.user_id) != current.user_id:
+            history = _rotate_notification_action_tokens(history)
         changes["occurrence_history"] = tuple(history)
         changes.setdefault(
             "status", ReminderStatus.PENDING if time_rearmed else current.status

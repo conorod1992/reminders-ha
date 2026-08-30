@@ -9,7 +9,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from custom_components.reminders.delivery import PersistentNotificationProvider
-from custom_components.reminders.models import DeliveryPolicy, Reminder
+from custom_components.reminders.interop_manager import InteropReminderManager
+from custom_components.reminders.models import (
+    DeliveryPolicy,
+    Occurrence,
+    Reminder,
+)
 from custom_components.reminders.native_automation import NativeAutomationRuntime
 from custom_components.reminders.persistent_cleanup import (
     async_register_persistent_cleanup,
@@ -206,3 +211,73 @@ async def test_resolved_lifecycle_event_dismisses_persistent_notification() -> N
 
     dismissed = {call[2]["notification_id"] for call in services.calls}
     assert dismissed == {"reminders_abc-123_occ-1", "reminders_abc-123"}
+
+
+async def test_delete_after_restart_cleans_occurrence_notifications() -> None:
+    """Delete reconstructs occurrence IDs without volatile tracking."""
+
+    class Bus:
+        def __init__(self) -> None:
+            self.callback: Any = None
+
+        def async_listen(self, _event_type: str, callback: Any) -> Any:
+            self.callback = callback
+            return lambda: None
+
+        def async_fire(self, _event_type: str, data: dict[str, Any]) -> None:
+            assert self.callback is not None
+            self.callback(SimpleNamespace(data=data))
+
+    class Services:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, dict[str, Any], dict[str, Any]]] = []
+
+        async def async_call(
+            self,
+            domain: str,
+            service: str,
+            data: dict[str, Any],
+            **kwargs: Any,
+        ) -> None:
+            self.calls.append((domain, service, data, kwargs))
+
+    bus = Bus()
+    services = Services()
+    tasks: list[asyncio.Task[Any]] = []
+
+    def create_task(coroutine: Any, _name: str | None = None) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coroutine)
+        tasks.append(task)
+        return task
+
+    hass = SimpleNamespace(
+        bus=bus,
+        services=services,
+        data={},  # Simulate a fresh HA process with no tracked notification IDs.
+        async_create_task=create_task,
+    )
+    async_register_persistent_cleanup(hass)  # type: ignore[arg-type]
+    now = datetime.now(UTC)
+    first = Occurrence("occ-1", now, now)
+    second = Occurrence("occ-2", now, now)
+    reminder = Reminder(
+        id="series",
+        user_id="user",
+        title="Recurring",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        occurrence_history=(first, second),
+    )
+    manager = object.__new__(InteropReminderManager)
+    manager._hass = hass
+
+    manager._fire_lifecycle_event(reminder, "deleted")
+    await asyncio.gather(*tasks)
+
+    dismissed = {call[2]["notification_id"] for call in services.calls}
+    assert dismissed == {
+        "reminders_series",
+        "reminders_series_occ-1",
+        "reminders_series_occ-2",
+    }
