@@ -45,17 +45,16 @@ def test_frontend_disables_long_lived_module_cache_and_uses_robust_wrapper() -> 
 
 
 def test_panel_startup_wrapper_allows_retry_after_transient_failure() -> None:
-    source = (
-        ROOT
-        / "custom_components"
-        / "reminders"
-        / "frontend"
-        / "reminders-panel-robust.js"
-    ).read_text(encoding="utf-8")
+    frontend_dir = ROOT / "custom_components" / "reminders" / "frontend"
+    source = (frontend_dir / "reminders-panel-robust.js").read_text(encoding="utf-8")
+    atomic_source = (frontend_dir / "reminders-panel-atomic.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "this._started = false" in source
     assert 'retry.textContent = "Retry"' in source
-    assert 'import "./reminders-panel-attention.js"' in source
+    assert 'import "./reminders-panel-atomic.js"' in source
+    assert 'import "./reminders-panel-attention.js"' in atomic_source
 
 
 def test_native_create_rolls_back_if_rule_save_fails() -> None:
