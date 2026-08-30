@@ -379,6 +379,60 @@ update:
     end_date: *end_date
     occurrence_count: *occurrence_count
     timezone: *timezone
+    activation_type:
+      name: Activation type
+      description: Advanced conversion between time and triggered reminders. Changing to time also requires a due time.
+      selector:
+        select:
+          options:
+            - time
+            - trigger
+    trigger:
+      name: Trigger
+      description: Structured trigger definition for a triggered reminder.
+      selector:
+        object:
+    trigger_description:
+      name: Trigger description
+      description: Optional human-readable description for a triggered reminder.
+      selector:
+        text:
+    repeat_policy:
+      name: Trigger repeat policy
+      selector:
+        select:
+          options:
+            - once
+            - every_trigger
+            - rearm_after_acknowledgement
+    fire_if_already_matching:
+      name: Fire immediately if already matching
+      selector:
+        boolean:
+    while_awaiting_acknowledgement:
+      name: While waiting for dismissal
+      description: For every-trigger reminders, skip new matches or deliver a new occurrence while the older one is unresolved.
+      selector:
+        select:
+          options:
+            - skip
+            - deliver_new_occurrence
+    cooldown_seconds:
+      name: Trigger cooldown
+      selector:
+        number:
+          min: 0
+          max: 31536000
+          mode: box
+          unit_of_measurement: seconds
+    available_from:
+      name: Available from
+      selector:
+        datetime:
+    expires_at:
+      name: Expiry
+      selector:
+        datetime:
 
 delete:
   name: Delete a reminder
@@ -388,19 +442,25 @@ delete:
 
 snooze:
   name: Snooze a reminder
-  description: Moves a one-time reminder or only the active occurrence of a recurring series.
+  description: Moves the active occurrence to a later time, or rearms a triggered reminder for its next trigger.
   fields:
     reminder_id: *reminder_id
     due:
       name: New due time
-      description: Exact snooze time. Do not also provide Duration.
+      description: Exact snooze time. Do not also provide Duration or Wait for next trigger.
       selector:
         datetime:
     duration:
       name: Duration
-      description: Relative snooze duration. Do not also provide New due time.
+      description: Relative snooze duration. Do not also provide New due time or Wait for next trigger.
       selector:
         duration:
+    wait_for_next_trigger:
+      name: Wait for next trigger
+      description: Rearm a triggered reminder without waiting for a duration. Cannot be combined with New due time or Duration.
+      default: false
+      selector:
+        boolean:
 
 acknowledge:
   name: Dismiss a reminder
@@ -560,6 +620,17 @@ create_triggered:
       default: false
       selector:
         boolean:
+    while_awaiting_acknowledgement:
+      name: While waiting for dismissal
+      description: For every-trigger reminders, skip new matches or deliver a new occurrence while the older one remains unresolved.
+      default: skip
+      selector:
+        select:
+          options:
+            - label: Skip new matches
+              value: skip
+            - label: Deliver a new occurrence
+              value: deliver_new_occurrence
     cooldown_seconds:
       name: Cooldown
       description: Minimum seconds between occurrence creation for this reminder.
@@ -578,6 +649,11 @@ create_triggered:
       name: Expiry
       selector:
         datetime:
+    trigger_description:
+      name: Trigger description
+      description: Optional human-readable explanation shown with the reminder.
+      selector:
+        text:
     delivery_mode: *delivery_mode
     channels: *channels
     notify_targets: *notify_targets
@@ -605,3 +681,101 @@ fire_trigger:
       selector:
         text:
     user_id: *user
+
+pause:
+  name: Pause a recurring reminder
+  description: Pauses a recurring series without changing its anchored recurrence rule.
+  fields:
+    reminder_id: *reminder_id
+
+resume:
+  name: Resume a recurring reminder
+  description: Resumes a paused recurring series from the next eligible occurrence of its unchanged anchored rule.
+  fields:
+    reminder_id: *reminder_id
+
+skip_next:
+  name: Skip the next recurring occurrence
+  description: Skips exactly the active scheduled occurrence without changing the recurring series phase.
+  fields:
+    reminder_id: *reminder_id
+
+set_native_rules:
+  name: Set Home Assistant-native rules
+  description: Atomically replaces one or more Home Assistant-native activation, delivery, condition, or completion rule lists on a reminder.
+  fields:
+    reminder_id: *reminder_id
+    activation_triggers:
+      name: Activation triggers
+      description: List of Home Assistant trigger dictionaries used to activate a triggered reminder.
+      selector:
+        object:
+    delivery_triggers:
+      name: Delivery triggers
+      description: List of Home Assistant trigger dictionaries that release a due reminder waiting for context.
+      selector:
+        object:
+    delivery_conditions:
+      name: Delivery conditions
+      description: List of Home Assistant condition dictionaries checked when delivery becomes eligible.
+      selector:
+        object:
+    completion_triggers:
+      name: Completion triggers
+      description: List of Home Assistant trigger dictionaries that automatically complete a reminder occurrence.
+      selector:
+        object:
+
+upsert:
+  name: Create or update an external reminder
+  description: Idempotently creates or updates one externally managed reminder identified by owner, source, and source ID.
+  fields:
+    source:
+      name: External source
+      description: Stable integration identifier.
+      required: true
+      selector:
+        text:
+    source_id:
+      name: External source ID
+      description: Stable identifier of the source object within that integration.
+      required: true
+      selector:
+        text:
+    user_id: *user
+    kind:
+      name: Reminder kind
+      required: true
+      selector:
+        select:
+          options:
+            - label: One-time reminder
+              value: one_time
+            - label: Recurring reminder
+              value: recurring
+            - label: Triggered reminder
+              value: triggered
+    data:
+      name: Reminder data
+      description: Complete desired create payload for the selected reminder kind. Ownership and source key fields belong at the top level.
+      required: true
+      selector:
+        object:
+
+reconcile_source:
+  name: Reconcile external reminders
+  description: Deletes stale externally managed reminders for one owner and source while preserving the supplied source IDs and any reminder currently being delivered.
+  fields:
+    source:
+      name: External source
+      description: Stable integration identifier to reconcile.
+      required: true
+      selector:
+        text:
+    user_id: *user
+    keep_source_ids:
+      name: Source IDs to keep
+      description: Complete list of source IDs that still exist for this owner and source. Omitted or empty removes every stale externally managed reminder that is safe to delete.
+      selector:
+        text:
+          multiple: true
