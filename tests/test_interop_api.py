@@ -12,6 +12,7 @@ from custom_components.reminders.const import LIFECYCLE_SCHEMA_VERSION
 from custom_components.reminders.interop_manager import InteropReminderManager
 from custom_components.reminders.interop_services import (
     RECONCILE_SOURCE_SCHEMA,
+    SET_NATIVE_RULES_SCHEMA,
     UPSERT_SCHEMA,
     _validate_existing_kind,
 )
@@ -198,7 +199,20 @@ def test_interop_service_schemas_keep_payload_and_reconciliation_bounded() -> No
             "data": {"title": "Birthday", "due": "2026-09-01T12:00:00+00:00"},
         }
     )
+    native = SET_NATIVE_RULES_SCHEMA(
+        {
+            "reminder_id": "abc",
+            "delivery_conditions": [
+                {
+                    "condition": "state",
+                    "entity_id": "input_boolean.ready",
+                    "state": "on",
+                }
+            ],
+        }
+    )
     assert validated["kind"] == "one_time"
+    assert native["delivery_conditions"][0]["condition"] == "state"
     assert RECONCILE_SOURCE_SCHEMA({"source": "annual_events"})["keep_source_ids"] == []
 
 
