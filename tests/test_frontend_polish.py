@@ -27,7 +27,7 @@ def test_history_uses_incremental_pagination() -> None:
     source = (FRONTEND / "reminders-panel-polish.js").read_text(encoding="utf-8")
 
     assert "const HISTORY_PAGE_SIZE = 50" in source
-    assert "data.offset = appendHistory ? this._history.length : 0" in source
+    assert "data.offset = offset" in source
     assert "this._historyTotal = Number.isFinite(result.total)" in source
     assert 'button.textContent = loadingMore ? "Loading…" : "Load more"' in source
     assert "{ appendHistory: true }" in source
@@ -65,7 +65,18 @@ def test_current_lists_use_incremental_pagination() -> None:
     source = (FRONTEND / "reminders-panel-polish.js").read_text(encoding="utf-8")
 
     assert "const LIST_PAGE_SIZE = 100" in source
-    assert "data.offset = appendList ? this._items.length : 0" in source
+    assert "data.offset = offset" in source
     assert "this._listTotal = Number.isFinite(result.total)" in source
     assert "{ appendList: true }" in source
     assert 'footer.className = "pagination-footer"' in source
+
+
+def test_list_loads_ignore_stale_responses_and_do_not_drop_refreshes() -> None:
+    source = (FRONTEND / "reminders-panel-polish.js").read_text(encoding="utf-8")
+
+    assert "const requestId = (this._loadRequestId || 0) + 1" in source
+    assert source.count("if (requestId !== this._loadRequestId) return true") == 3
+    assert "if (requestId === this._loadRequestId)" in source
+    assert "if (this._historyLoadingMore) return true" in source
+    assert "if (this._listLoadingMore) return true" in source
+    assert "_historyRequestInFlight" not in source

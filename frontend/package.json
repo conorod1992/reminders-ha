@@ -6,7 +6,9 @@
     "build": "npm run check:modules",
     "lint": "npm run check:modules",
     "check:modules": "node --check ../custom_components/reminders/frontend/reminders-panel.js && node --check ../custom_components/reminders/frontend/reminders-panel-native.js && node --check ../custom_components/reminders/frontend/reminders-panel-attention.js && node --check ../custom_components/reminders/frontend/reminders-panel-atomic.js && node --check ../custom_components/reminders/frontend/reminders-panel-robust.js && node --check ../custom_components/reminders/frontend/reminders-panel-polish.js && node --check ../custom_components/reminders/frontend/reminders-utils.js",
-    "test": "node --test reminders-utils.test.mjs"
+    "test": "node --test reminders-utils.test.mjs reminders-panel-load.test.mjs"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }
