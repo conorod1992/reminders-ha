@@ -844,3 +844,43 @@ async def test_recurring_mobile_snooze_keeps_next_occurrence_and_retries_exactly
     assert retried.status is OccurrenceStatus.ACKNOWLEDGED
     assert retried.next_escalation_at is None
     assert finished.current_occurrence_id == next_snapshot[0]
+
+
+async def test_owner_transfer_invalidates_previous_mobile_action_token(
+    fake_store: FakeStore, no_runtime_listeners: None
+) -> None:
+    dispatcher = FakeDispatcher()
+    manager = await _manager(fake_store, dispatcher)
+    reminder = await manager.async_create(
+        user_id="old-owner",
+        title="Transferred reminder",
+        due=datetime.now(UTC) - timedelta(seconds=1),
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        allow_manual_completion=True,
+    )
+    delivered = await manager.async_get(reminder.id)
+    occurrence = delivered.occurrence_history[-1]
+    assert occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+    old_token = occurrence.notification_action_token
+    assert old_token is not None
+
+    transferred = await manager.async_update(reminder.id, user_id="new-owner")
+    transferred_occurrence = transferred.occurrence_history[-1]
+    new_token = transferred_occurrence.notification_action_token
+    assert transferred.user_id == "new-owner"
+    assert new_token is not None
+    assert new_token != old_token
+
+    await manager._async_handle_mobile_action(
+        f"{MOBILE_ACTION_PREFIX}{old_token}:DISMISS"
+    )
+    unchanged = await manager.async_get(reminder.id)
+    assert unchanged.occurrence_history[-1].status is (
+        OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+    )
+
+    await manager._async_handle_mobile_action(
+        f"{MOBILE_ACTION_PREFIX}{new_token}:DISMISS"
+    )
+    acknowledged = await manager.async_get(reminder.id)
+    assert acknowledged.occurrence_history[-1].status is OccurrenceStatus.ACKNOWLEDGED

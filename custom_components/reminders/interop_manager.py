@@ -156,6 +156,13 @@ class InteropReminderManager(NativeReminderManager):
             ),
             "event_time": dt_util.utcnow().isoformat(),
         }
+        if action == "deleted":
+            # Cleanup runs after the reminder has been removed from durable state.
+            # Include retained occurrence IDs so persistent notifications can be
+            # reconstructed even when the in-memory tracking cache was lost on restart.
+            payload["occurrence_ids"] = [
+                item.id for item in reminder.occurrence_history
+            ]
         if external_action_id is not None:
             payload["external_action_id"] = external_action_id
         fire(LIFECYCLE_EVENT, payload)

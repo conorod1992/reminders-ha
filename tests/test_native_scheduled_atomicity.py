@@ -255,3 +255,29 @@ def test_frontend_routes_existing_scheduled_native_edits_to_atomic_command() -> 
     assert "data.delivery_conditions" in atomic_source
     assert "data.completion_triggers" in atomic_source
     assert 'nativeCall.call(this, "set_native_rules"' not in atomic_source
+
+
+async def test_native_scheduled_owner_transfer_rotates_mobile_action_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = _reminder()
+    occurrence = original.occurrence_history[0].updated(
+        notification_action_token="previous-owner-token"
+    )
+    original = original.updated(occurrence_history=(occurrence,))
+    store = FailingStore(serialize_storage({original.id: original}, {}))
+    manager = _manager(monkeypatch, store, original)
+
+    updated = await async_update_native_scheduled(
+        manager,
+        original.id,
+        user_id="u2",
+        delivery_triggers=[dict(item) for item in original.delivery_triggers],
+        delivery_conditions=[dict(item) for item in original.delivery_conditions],
+        completion_triggers=[dict(item) for item in original.completion_triggers],
+    )
+
+    assert updated.user_id == "u2"
+    assert updated.occurrence_history[0].notification_action_token != (
+        "previous-owner-token"
+    )

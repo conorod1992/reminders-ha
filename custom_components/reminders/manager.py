@@ -789,6 +789,8 @@ class ReminderManager:
                         )
                     ),
                 )
+            if changes.get("user_id", current.user_id) != current.user_id:
+                history = _rotate_notification_action_tokens(history)
             changes["occurrence_history"] = tuple(history)
             changes.setdefault(
                 "status",
@@ -3501,6 +3503,16 @@ def _replace_occurrence(
     values: list[Occurrence], replacement: Occurrence
 ) -> list[Occurrence]:
     return [replacement if item.id == replacement.id else item for item in values]
+
+
+def _rotate_notification_action_tokens(values: list[Occurrence]) -> list[Occurrence]:
+    """Invalidate capabilities exposed to a reminder's previous owner."""
+    return [
+        item.updated(notification_action_token=secrets.token_urlsafe(24))
+        if item.notification_action_token
+        else item
+        for item in values
+    ]
 
 
 def _reminder_status(status: OccurrenceStatus) -> ReminderStatus:

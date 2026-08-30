@@ -52,13 +52,20 @@ def async_register_persistent_cleanup(hass: HomeAssistant) -> Callable[[], None]
         action = event.data.get("action")
         reminder_id = event.data.get("reminder_id")
         occurrence_id = event.data.get("occurrence_id")
+        occurrence_ids = event.data.get("occurrence_ids", ())
         if action not in _DISMISS_ACTIONS or not isinstance(reminder_id, str):
             return
+        known_occurrence_ids = (
+            tuple(item for item in occurrence_ids if isinstance(item, str))
+            if isinstance(occurrence_ids, (list, tuple))
+            else ()
+        )
         hass.async_create_task(
             _async_dismiss(
                 hass,
                 reminder_id,
                 occurrence_id if isinstance(occurrence_id, str) else None,
+                occurrence_ids=known_occurrence_ids,
                 dismiss_all=action == "deleted",
             ),
             f"reminders dismiss persistent notification {reminder_id}",
@@ -72,6 +79,7 @@ async def _async_dismiss(
     reminder_id: str,
     occurrence_id: str | None,
     *,
+    occurrence_ids: tuple[str, ...] = (),
     dismiss_all: bool = False,
 ) -> None:
     """Dismiss matching persistent notifications without failing reminder state."""
@@ -79,6 +87,9 @@ async def _async_dismiss(
     known = tracked.get(reminder_id, set())
     if dismiss_all:
         notification_ids = set(known)
+        notification_ids.update(
+            persistent_notification_id(reminder_id, item) for item in occurrence_ids
+        )
         # Also remove the pre-occurrence-scoping ID left by older releases.
         notification_ids.add(persistent_notification_id(reminder_id, None))
     else:

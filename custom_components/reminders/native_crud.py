@@ -14,6 +14,7 @@ from .manager import (
     _find_occurrence,
     _normalize_optional_time,
     _replace_occurrence,
+    _rotate_notification_action_tokens,
     _trigger_waiting_status,
     _validate_external_actions,
     _validate_policy,
@@ -248,6 +249,8 @@ async def async_update_native_triggered(
                 else:
                     rewritten.append(item)
             history = rewritten
+        if user_id is not None and user_id != current.user_id:
+            history = _rotate_notification_action_tokens(history)
         updates: dict[str, Any] = {
             "activation_type": ActivationType.TRIGGER,
             "trigger": None,
