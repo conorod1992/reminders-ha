@@ -17,6 +17,7 @@ from custom_components.reminders.models import (
     QuietHoursPolicy,
     Reminder,
     ReminderStatus,
+    UserPreferences,
 )
 from custom_components.reminders.recurrence import (
     MonthlyMode,
@@ -198,6 +199,71 @@ async def test_quiet_hours_suppress_voice_and_add_fallback(
     assert policy.channels == ("persistent_notification",)
     delivered = await manager.async_get(reminder.id)
     assert delivered.occurrence_history[-1].suppressed_channels == ("voice",)
+
+
+def test_quiet_hours_phone_fallback_uses_default_targets() -> None:
+    hass = SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Dublin"))
+    manager = ReminderManager(hass, FakeStore(), FakeDispatcher())  # type: ignore[arg-type]
+    due = datetime(2027, 1, 2, 0, 30, tzinfo=UTC)
+    reminder = Reminder(
+        id="quiet-phone",
+        user_id="u1",
+        title="Quiet phone",
+        due=due,
+        created_at=due - timedelta(hours=1),
+        updated_at=due - timedelta(hours=1),
+    )
+    policy = DeliveryPolicy(("voice",), voice_targets=("assist_satellite.kitchen",))
+    preferences = UserPreferences(
+        default_delivery_policy=DeliveryPolicy(
+            ("phone",), mobile_app_services=("notify.mobile_app_phone",)
+        ),
+        quiet_hours_enabled=True,
+        quiet_hours_start=time(23),
+        quiet_hours_end=time(7),
+        quiet_hours_channels=("voice",),
+        quiet_hours_fallback_channels=("phone",),
+    )
+
+    delivery, suppressed = manager._delivery_plan(reminder, policy, preferences, due)
+
+    assert suppressed == ("voice",)
+    assert delivery.channels == ("phone",)
+    assert delivery.mobile_app_services == ("notify.mobile_app_phone",)
+    assert delivery.notify_targets == ()
+
+
+def test_quiet_hours_voice_fallback_uses_default_targets() -> None:
+    hass = SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Dublin"))
+    manager = ReminderManager(hass, FakeStore(), FakeDispatcher())  # type: ignore[arg-type]
+    due = datetime(2027, 1, 2, 0, 30, tzinfo=UTC)
+    reminder = Reminder(
+        id="quiet-voice",
+        user_id="u1",
+        title="Quiet voice",
+        due=due,
+        created_at=due - timedelta(hours=1),
+        updated_at=due - timedelta(hours=1),
+    )
+    policy = DeliveryPolicy(
+        ("phone",), mobile_app_services=("notify.mobile_app_phone",)
+    )
+    preferences = UserPreferences(
+        default_delivery_policy=DeliveryPolicy(
+            ("voice",), voice_targets=("assist_satellite.bedroom",)
+        ),
+        quiet_hours_enabled=True,
+        quiet_hours_start=time(23),
+        quiet_hours_end=time(7),
+        quiet_hours_channels=("phone",),
+        quiet_hours_fallback_channels=("voice",),
+    )
+
+    delivery, suppressed = manager._delivery_plan(reminder, policy, preferences, due)
+
+    assert suppressed == ("phone",)
+    assert delivery.channels == ("voice",)
+    assert delivery.voice_targets == ("assist_satellite.bedroom",)
 
 
 async def test_urgent_reminder_ignores_quiet_hours(

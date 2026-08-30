@@ -3029,12 +3029,23 @@ class ReminderManager:
             for fallback in preferences.quiet_hours_fallback_channels:
                 if fallback not in channels:
                     channels.append(fallback)
+
+        notify_targets = policy.notify_targets
+        mobile_app_services = policy.mobile_app_services
+        voice_targets = policy.voice_targets
+        defaults = preferences.default_delivery_policy
+        if "phone" in channels and not (notify_targets or mobile_app_services):
+            notify_targets = defaults.notify_targets
+            mobile_app_services = defaults.mobile_app_services
+        if "voice" in channels and not voice_targets:
+            voice_targets = defaults.voice_targets
+
         return (
             DeliveryPolicy(
                 channels=tuple(channels),
-                notify_targets=policy.notify_targets,
-                mobile_app_services=policy.mobile_app_services,
-                voice_targets=policy.voice_targets,
+                notify_targets=notify_targets,
+                mobile_app_services=mobile_app_services,
+                voice_targets=voice_targets,
             ),
             suppressed,
         )

@@ -20,16 +20,32 @@ if (proto && !proto.__frontendPolishInstalled) {
     const appendHistory = historyView && options?.appendHistory === true;
     const appendList = !historyView && options?.appendList === true;
 
+    if (appendHistory) {
+      if (this._historyLoadingMore) return true;
+      if (this._history.length >= (this._historyTotal || 0)) return true;
+    } else if (appendList) {
+      if (this._listLoadingMore) return true;
+      if (this._items.length >= (this._listTotal || 0)) return true;
+    }
+
+    const requestId = (this._loadRequestId || 0) + 1;
+    this._loadRequestId = requestId;
+    const scope = this._scope;
+    const query = this._query || undefined;
+    const selectedUser = this._selectedUser;
+    const view = this._view;
+    const existingValues = historyView ? this._history : this._items;
+    const offset = appendHistory || appendList ? existingValues.length : 0;
+    const appendBase = appendHistory || appendList ? [...existingValues] : [];
+
     if (historyView) {
       this._listTotal = 0;
       this._listLoadingMore = false;
-      if (this._historyRequestInFlight) return true;
-      if (appendHistory && this._history.length >= (this._historyTotal || 0)) return true;
-      this._historyRequestInFlight = true;
+      if (!appendHistory) this._historyLoadingMore = false;
     } else {
       this._historyTotal = 0;
       this._historyLoadingMore = false;
-      if (appendList && this._items.length >= (this._listTotal || 0)) return true;
+      if (!appendList) this._listLoadingMore = false;
     }
 
     if (appendHistory) {
@@ -42,28 +58,27 @@ if (proto && !proto.__frontendPolishInstalled) {
     this._renderList();
 
     try {
-      const data = {
-        scope: this._scope,
-        query: this._query || undefined,
-      };
-      if (this._scope === "user") data.user_id = this._selectedUser;
+      const data = { scope, query };
+      if (scope === "user") data.user_id = selectedUser;
       if (historyView) {
         data.limit = HISTORY_PAGE_SIZE;
-        data.offset = appendHistory ? this._history.length : 0;
+        data.offset = offset;
         const result = await this._call("history", data);
+        if (requestId !== this._loadRequestId) return true;
         this._history = appendHistory
-          ? [...this._history, ...(result.history || [])]
+          ? [...appendBase, ...(result.history || [])]
           : (result.history || []);
         this._historyTotal = Number.isFinite(result.total)
           ? result.total
           : this._history.length;
       } else {
-        data.view = this._view;
+        data.view = view;
         data.limit = LIST_PAGE_SIZE;
-        data.offset = appendList ? this._items.length : 0;
+        data.offset = offset;
         const result = await this._call("list", data);
+        if (requestId !== this._loadRequestId) return true;
         this._items = appendList
-          ? [...this._items, ...(result.reminders || [])]
+          ? [...appendBase, ...(result.reminders || [])]
           : (result.reminders || []);
         this._listTotal = Number.isFinite(result.total)
           ? result.total
@@ -72,15 +87,17 @@ if (proto && !proto.__frontendPolishInstalled) {
       this._clearError();
       return true;
     } catch (error) {
+      if (requestId !== this._loadRequestId) return true;
       this._showError(error);
       return false;
     } finally {
-      if (historyView) this._historyRequestInFlight = false;
-      this._historyLoadingMore = false;
-      this._listLoadingMore = false;
-      this._loading = false;
-      this._renderFilters();
-      this._renderList();
+      if (requestId === this._loadRequestId) {
+        this._historyLoadingMore = false;
+        this._listLoadingMore = false;
+        this._loading = false;
+        this._renderFilters();
+        this._renderList();
+      }
     }
   };
 
