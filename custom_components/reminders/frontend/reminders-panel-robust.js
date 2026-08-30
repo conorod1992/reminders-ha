@@ -13,8 +13,9 @@ if (proto && !proto.__robustStartupInstalled) {
 
     // _start() intentionally handles its own error, so without resetting this
     // flag one transient startup failure leaves the connected panel unable to
-    // initialise again until it is destroyed and recreated.
-    if (this._started && !this._unsubscribe && !this._preferences) {
+    // initialise again until it is destroyed and recreated. A completed startup
+    // always owns a subscription, regardless of how far the failed attempt got.
+    if (this._started && !this._unsubscribe) {
       this._started = false;
       const host = this.shadowRoot?.querySelector("#error");
       if (!host || host.querySelector(".startup-retry")) return;
