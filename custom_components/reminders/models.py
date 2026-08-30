@@ -124,6 +124,7 @@ class EscalationAttempt:
     failed_channels: tuple[str, ...] = ()
     delivery_errors: tuple[str, ...] = ()
     suppressed_channels: tuple[str, ...] = ()
+    in_flight: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,6 +134,7 @@ class EscalationAttempt:
             "failed_channels": list(self.failed_channels),
             "delivery_errors": list(self.delivery_errors),
             "suppressed_channels": list(self.suppressed_channels),
+            "in_flight": self.in_flight,
         }
 
     @classmethod
@@ -144,6 +146,7 @@ class EscalationAttempt:
             failed_channels=tuple(data.get("failed_channels", ())),
             delivery_errors=tuple(data.get("delivery_errors", ())),
             suppressed_channels=tuple(data.get("suppressed_channels", ())),
+            in_flight=bool(data.get("in_flight", False)),
         )
 
 
