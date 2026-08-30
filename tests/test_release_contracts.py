@@ -32,7 +32,9 @@ def _select_values(field: dict[str, Any]) -> set[str]:
 
 
 def test_all_registered_services_have_action_metadata_and_icons() -> None:
-    services = yaml.safe_load((INTEGRATION / "services.yaml").read_text(encoding="utf-8"))
+    services = yaml.safe_load(
+        (INTEGRATION / "services.yaml").read_text(encoding="utf-8")
+    )
     icons = json.loads((INTEGRATION / "icons.json").read_text(encoding="utf-8"))[
         "services"
     ]
@@ -43,7 +45,9 @@ def test_all_registered_services_have_action_metadata_and_icons() -> None:
 
 
 def test_triggered_acknowledgement_options_match_runtime_enum() -> None:
-    services = yaml.safe_load((INTEGRATION / "services.yaml").read_text(encoding="utf-8"))
+    services = yaml.safe_load(
+        (INTEGRATION / "services.yaml").read_text(encoding="utf-8")
+    )
     expected = set(WhileAwaitingAcknowledgement)
 
     for service in ("create_triggered", "update"):
@@ -54,4 +58,7 @@ def test_triggered_acknowledgement_options_match_runtime_enum() -> None:
 def test_readme_names_current_storage_schema() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert f"Storage schema {const.STORAGE_VERSION}.{const.STORAGE_MINOR_VERSION}" in readme
+    assert (
+        f"Storage schema {const.STORAGE_VERSION}.{const.STORAGE_MINOR_VERSION}"
+        in readme
+    )
