@@ -126,11 +126,19 @@ class InteropReminderManager(NativeReminderManager):
         fire = getattr(bus, "async_fire", None)
         if not callable(fire):
             return
+
+        # Most lifecycle callers retain the pre-transition Reminder object while the
+        # committed replacement is already in manager state. Prefer that committed
+        # snapshot so enriched status fields describe the action that just happened,
+        # not the state immediately before it. Deleted reminders are absent from the
+        # manager, so they deliberately fall back to the retained pre-delete snapshot.
+        current_reminders = getattr(self, "_reminders", {})
+        event_reminder = current_reminders.get(reminder.id, reminder)
         occurrence = (
             next(
                 (
                     item
-                    for item in reminder.occurrence_history
+                    for item in event_reminder.occurrence_history
                     if item.id == occurrence_id
                 ),
                 None,
@@ -140,17 +148,17 @@ class InteropReminderManager(NativeReminderManager):
         )
         payload: dict[str, Any] = {
             "schema_version": LIFECYCLE_SCHEMA_VERSION,
-            "reminder_id": reminder.id,
+            "reminder_id": event_reminder.id,
             "occurrence_id": occurrence_id,
-            "user_id": reminder.user_id,
-            "source": reminder.source,
-            "source_id": reminder.source_id,
-            "source_event": reminder.source_event,
+            "user_id": event_reminder.user_id,
+            "source": event_reminder.source,
+            "source_id": event_reminder.source_id,
+            "source_event": event_reminder.source_event,
             "action": action,
-            "managed_externally": reminder.managed_externally,
-            "activation_type": reminder.activation_type.value,
-            "recurring": reminder.recurrence is not None,
-            "reminder_status": reminder.status.value,
+            "managed_externally": event_reminder.managed_externally,
+            "activation_type": event_reminder.activation_type.value,
+            "recurring": event_reminder.recurrence is not None,
+            "reminder_status": event_reminder.status.value,
             "occurrence_status": (
                 occurrence.status.value if occurrence is not None else None
             ),
@@ -161,7 +169,7 @@ class InteropReminderManager(NativeReminderManager):
             # Include retained occurrence IDs so persistent notifications can be
             # reconstructed even when the in-memory tracking cache was lost on restart.
             payload["occurrence_ids"] = [
-                item.id for item in reminder.occurrence_history
+                item.id for item in event_reminder.occurrence_history
             ]
         if external_action_id is not None:
             payload["external_action_id"] = external_action_id
