@@ -28,9 +28,7 @@ _DISMISS_ACTIONS = {
 }
 
 
-def persistent_notification_id(
-    reminder_id: str, occurrence_id: str | None
-) -> str:
+def persistent_notification_id(reminder_id: str, occurrence_id: str | None) -> str:
     """Return a stable notification ID without conflating series occurrences."""
     if occurrence_id:
         return f"reminders_{reminder_id}_{occurrence_id}"
@@ -84,9 +82,7 @@ async def _async_dismiss(
         # Also remove the pre-occurrence-scoping ID left by older releases.
         notification_ids.add(persistent_notification_id(reminder_id, None))
     else:
-        notification_ids = {
-            persistent_notification_id(reminder_id, occurrence_id)
-        }
+        notification_ids = {persistent_notification_id(reminder_id, occurrence_id)}
         # If an older version delivered this occurrence, its notification used
         # the reminder-scoped ID. Dismissing it as well makes upgrades self-heal.
         notification_ids.add(persistent_notification_id(reminder_id, None))
