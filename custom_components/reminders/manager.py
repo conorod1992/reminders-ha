@@ -41,6 +41,10 @@ from .models import (
     UserPreferences,
     WhileAwaitingAcknowledgement,
 )
+from .persistent_cleanup import (
+    async_finalize_persistent_delivery_cleanup,
+    async_prepare_persistent_cleanup,
+)
 from .recurrence import (
     RecurrenceRule,
     first_due,
@@ -2629,51 +2633,63 @@ class ReminderManager:
         result = await self._dispatcher.async_deliver(
             delivery_reminder, delivery_policy
         )
+        stale_delivery = False
         async with self._lock:
             current = self._reminders.get(reminder_id)
-            if current is None:
-                return
-            occurrence = _find_occurrence(current, occurrence_id)
+            occurrence = (
+                _find_occurrence(current, occurrence_id)
+                if current is not None
+                else None
+            )
             if (
-                occurrence is None
+                current is None
+                or occurrence is None
                 or occurrence.status is not OccurrenceStatus.DELIVERING
             ):
-                return
-            status = (
-                OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                if result.succeeded and ack_required
-                else (
-                    OccurrenceStatus.DELIVERED
-                    if result.succeeded
-                    else OccurrenceStatus.FAILED
+                stale_delivery = True
+            else:
+                status = (
+                    OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                    if result.succeeded and ack_required
+                    else (
+                        OccurrenceStatus.DELIVERED
+                        if result.succeeded
+                        else OccurrenceStatus.FAILED
+                    )
                 )
+                finished = occurrence.updated(
+                    status=status,
+                    delivered_at=effective_now if result.succeeded else None,
+                    succeeded_channels=result.succeeded,
+                    failed_channels=result.failed_channels,
+                    delivery_errors=result.errors,
+                    suppressed_channels=suppressed,
+                    acknowledgement_required=ack_required,
+                    next_escalation_at=(
+                        effective_now
+                        + timedelta(minutes=current.escalation.initial_delay_minutes)
+                        if result.succeeded and ack_required and current.escalation
+                        else None
+                    ),
+                )
+                history = _replace_occurrence(
+                    list(current.occurrence_history), finished
+                )
+                updated = _prune_history(
+                    current.updated(
+                        occurrence_history=tuple(history), updated_at=effective_now
+                    ),
+                    preferences,
+                    effective_now,
+                )
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = updated
+                await self._async_persist_state(candidate, self._users)
+        if stale_delivery:
+            await async_finalize_persistent_delivery_cleanup(
+                self._hass, reminder_id, occurrence_id
             )
-            finished = occurrence.updated(
-                status=status,
-                delivered_at=effective_now if result.succeeded else None,
-                succeeded_channels=result.succeeded,
-                failed_channels=result.failed_channels,
-                delivery_errors=result.errors,
-                suppressed_channels=suppressed,
-                acknowledgement_required=ack_required,
-                next_escalation_at=(
-                    effective_now
-                    + timedelta(minutes=current.escalation.initial_delay_minutes)
-                    if result.succeeded and ack_required and current.escalation
-                    else None
-                ),
-            )
-            history = _replace_occurrence(list(current.occurrence_history), finished)
-            updated = _prune_history(
-                current.updated(
-                    occurrence_history=tuple(history), updated_at=effective_now
-                ),
-                preferences,
-                effective_now,
-            )
-            candidate = dict(self._reminders)
-            candidate[reminder_id] = updated
-            await self._async_persist_state(candidate, self._users)
+            return
         self._notify_changed({claimed.user_id})
 
     async def _async_process_escalations(self, effective_now: datetime) -> None:
@@ -2744,51 +2760,63 @@ class ReminderManager:
                 await self._async_persist_state(candidate, self._users)
         for reminder_id, occurrence_id, number, delivery_reminder, policy in claims:
             result = await self._dispatcher.async_deliver(delivery_reminder, policy)
+            finalize_cleanup = False
             async with self._lock:
                 current = self._reminders.get(reminder_id)
                 if current is None:
-                    continue
-                found_occurrence = _find_occurrence(current, occurrence_id)
-                if found_occurrence is None:
-                    continue
-                attempts = list(found_occurrence.escalation_history)
-                completed_claim = False
-                for index, attempt in enumerate(attempts):
-                    if attempt.number == number and attempt.in_flight:
-                        attempts[index] = EscalationAttempt(
-                            number=number,
-                            attempted_at=attempt.attempted_at,
-                            succeeded_channels=result.succeeded,
-                            failed_channels=result.failed_channels,
-                            delivery_errors=result.errors,
-                            suppressed_channels=attempt.suppressed_channels,
-                            in_flight=False,
+                    finalize_cleanup = True
+                else:
+                    found_occurrence = _find_occurrence(current, occurrence_id)
+                    if found_occurrence is None:
+                        finalize_cleanup = True
+                    else:
+                        finalize_cleanup = (
+                            found_occurrence.status
+                            is not OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
                         )
-                        completed_claim = True
-                        break
-                if not completed_claim:
-                    continue
-                current_escalation = current.escalation
-                next_at = (
-                    effective_now + timedelta(minutes=current_escalation.repeat_minutes)
-                    if found_occurrence.status
-                    is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                    and current_escalation is not None
-                    and number < current_escalation.max_attempts
-                    else None
+                        attempts = list(found_occurrence.escalation_history)
+                        completed_claim = False
+                        for index, attempt in enumerate(attempts):
+                            if attempt.number == number and attempt.in_flight:
+                                attempts[index] = EscalationAttempt(
+                                    number=number,
+                                    attempted_at=attempt.attempted_at,
+                                    succeeded_channels=result.succeeded,
+                                    failed_channels=result.failed_channels,
+                                    delivery_errors=result.errors,
+                                    suppressed_channels=attempt.suppressed_channels,
+                                    in_flight=False,
+                                )
+                                completed_claim = True
+                                break
+                        if completed_claim:
+                            current_escalation = current.escalation
+                            next_at = (
+                                effective_now
+                                + timedelta(minutes=current_escalation.repeat_minutes)
+                                if found_occurrence.status
+                                is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                                and current_escalation is not None
+                                and number < current_escalation.max_attempts
+                                else None
+                            )
+                            updated_occurrence = found_occurrence.updated(
+                                escalation_history=tuple(attempts),
+                                next_escalation_at=next_at,
+                            )
+                            history = _replace_occurrence(
+                                list(current.occurrence_history), updated_occurrence
+                            )
+                            candidate = dict(self._reminders)
+                            candidate[reminder_id] = current.updated(
+                                occurrence_history=tuple(history),
+                                updated_at=effective_now,
+                            )
+                            await self._async_persist_state(candidate, self._users)
+            if finalize_cleanup:
+                await async_finalize_persistent_delivery_cleanup(
+                    self._hass, reminder_id, occurrence_id
                 )
-                updated_occurrence = found_occurrence.updated(
-                    escalation_history=tuple(attempts),
-                    next_escalation_at=next_at,
-                )
-                history = _replace_occurrence(
-                    list(current.occurrence_history), updated_occurrence
-                )
-                candidate = dict(self._reminders)
-                candidate[reminder_id] = current.updated(
-                    occurrence_history=tuple(history), updated_at=effective_now
-                )
-                await self._async_persist_state(candidate, self._users)
         if claims:
             self._notify_changed({item.user_id for item in self._reminders.values()})
 
@@ -2887,6 +2915,7 @@ class ReminderManager:
         result = await self._dispatcher.async_deliver(
             delivery_reminder, delivery_policy
         )
+        stale_delivery = False
         async with self._lock:
             current = self._reminders.get(reminder_id)
             if (
@@ -2894,52 +2923,108 @@ class ReminderManager:
                 or current is None
                 or current.status is not ReminderStatus.DELIVERING
             ):
-                return
-            occurrence = _find_occurrence(current, current.current_occurrence_id)
-            if occurrence is None:
-                raise ReminderValidationError("Active occurrence history is missing")
-            if result.succeeded:
-                occurrence_status = (
-                    OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                    if ack_required
-                    else OccurrenceStatus.DELIVERED
-                )
+                stale_delivery = True
+                occurrence = None
             else:
-                occurrence_status = OccurrenceStatus.FAILED
-            finished = occurrence.updated(
-                status=occurrence_status,
-                delivered_at=effective_now if result.succeeded else None,
-                succeeded_channels=result.succeeded,
-                failed_channels=result.failed_channels,
-                delivery_errors=result.errors,
-                suppressed_channels=suppressed,
-                acknowledgement_required=ack_required,
-                next_escalation_at=(
-                    effective_now
-                    + timedelta(minutes=current.escalation.initial_delay_minutes)
-                    if result.succeeded and ack_required and current.escalation
-                    else None
-                ),
-            )
-            history = _replace_occurrence(list(current.occurrence_history), finished)
-            occurrence_reminder_status = _reminder_status(occurrence_status)
-            if current.recurrence is not None:
-                scheduled_due = current.scheduled_due or occurrence.scheduled_due
-                next_due = next_due_after(
-                    current.recurrence, max(effective_now, scheduled_due)
+                occurrence = _find_occurrence(current, current.current_occurrence_id)
+                if occurrence is None:
+                    raise ReminderValidationError(
+                        "Active occurrence history is missing"
+                    )
+                if result.succeeded:
+                    occurrence_status = (
+                        OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                        if ack_required
+                        else OccurrenceStatus.DELIVERED
+                    )
+                else:
+                    occurrence_status = OccurrenceStatus.FAILED
+                finished = occurrence.updated(
+                    status=occurrence_status,
+                    delivered_at=effective_now if result.succeeded else None,
+                    succeeded_channels=result.succeeded,
+                    failed_channels=result.failed_channels,
+                    delivery_errors=result.errors,
+                    suppressed_channels=suppressed,
+                    acknowledgement_required=ack_required,
+                    next_escalation_at=(
+                        effective_now
+                        + timedelta(minutes=current.escalation.initial_delay_minutes)
+                        if result.succeeded and ack_required and current.escalation
+                        else None
+                    ),
                 )
-                if next_due is not None:
-                    next_item = _new_occurrence(next_due)
-                    history.append(next_item)
+                history = _replace_occurrence(
+                    list(current.occurrence_history), finished
+                )
+                occurrence_reminder_status = _reminder_status(occurrence_status)
+                if current.recurrence is not None:
+                    scheduled_due = current.scheduled_due or occurrence.scheduled_due
+                    next_due = next_due_after(
+                        current.recurrence, max(effective_now, scheduled_due)
+                    )
+                    if next_due is not None:
+                        next_item = _new_occurrence(next_due)
+                        history.append(next_item)
+                        updated = current.updated(
+                            status=ReminderStatus.PENDING,
+                            due=next_due,
+                            scheduled_due=next_due,
+                            current_occurrence_id=next_item.id,
+                            current_occurrence_number=occurrence_number(
+                                current.recurrence, next_due
+                            ),
+                            last_occurrence_due=scheduled_due,
+                            last_occurrence_status=occurrence_reminder_status,
+                            delivered_at=(
+                                effective_now
+                                if result.succeeded
+                                else current.delivered_at
+                            ),
+                            delivery_errors=result.errors,
+                            occurrence_history=tuple(history),
+                            updated_at=effective_now,
+                        )
+                    else:
+                        updated = current.updated(
+                            status=occurrence_reminder_status,
+                            last_occurrence_due=scheduled_due,
+                            last_occurrence_status=occurrence_reminder_status,
+                            delivered_at=(
+                                effective_now
+                                if result.succeeded
+                                else current.delivered_at
+                            ),
+                            delivery_errors=result.errors,
+                            occurrence_history=tuple(history),
+                            updated_at=effective_now,
+                        )
+                elif current.activation_type is ActivationType.TRIGGER:
+                    if current.repeat_policy is TriggerRepeatPolicy.ONCE:
+                        if (
+                            occurrence_status
+                            is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                        ):
+                            status = ReminderStatus.AWAITING_ACKNOWLEDGEMENT
+                        elif occurrence_status is OccurrenceStatus.FAILED:
+                            status = ReminderStatus.FAILED
+                        else:
+                            status = ReminderStatus.COMPLETED
+                    elif (
+                        current.repeat_policy
+                        is TriggerRepeatPolicy.REARM_AFTER_ACKNOWLEDGEMENT
+                        and occurrence_status
+                        is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+                    ):
+                        status = ReminderStatus.AWAITING_ACKNOWLEDGEMENT
+                    else:
+                        status = _trigger_waiting_status(
+                            effective_now, current.available_from, current.expires_at
+                        )
                     updated = current.updated(
-                        status=ReminderStatus.PENDING,
-                        due=next_due,
-                        scheduled_due=next_due,
-                        current_occurrence_id=next_item.id,
-                        current_occurrence_number=occurrence_number(
-                            current.recurrence, next_due
-                        ),
-                        last_occurrence_due=scheduled_due,
+                        status=status,
+                        due=None,
+                        last_occurrence_due=effective_now,
                         last_occurrence_status=occurrence_reminder_status,
                         delivered_at=(
                             effective_now if result.succeeded else current.delivered_at
@@ -2951,58 +3036,21 @@ class ReminderManager:
                 else:
                     updated = current.updated(
                         status=occurrence_reminder_status,
-                        last_occurrence_due=scheduled_due,
-                        last_occurrence_status=occurrence_reminder_status,
-                        delivered_at=(
-                            effective_now if result.succeeded else current.delivered_at
-                        ),
+                        delivered_at=effective_now if result.succeeded else None,
                         delivery_errors=result.errors,
                         occurrence_history=tuple(history),
                         updated_at=effective_now,
                     )
-            elif current.activation_type is ActivationType.TRIGGER:
-                if current.repeat_policy is TriggerRepeatPolicy.ONCE:
-                    if occurrence_status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT:
-                        status = ReminderStatus.AWAITING_ACKNOWLEDGEMENT
-                    elif occurrence_status is OccurrenceStatus.FAILED:
-                        status = ReminderStatus.FAILED
-                    else:
-                        status = ReminderStatus.COMPLETED
-                elif (
-                    current.repeat_policy
-                    is TriggerRepeatPolicy.REARM_AFTER_ACKNOWLEDGEMENT
-                    and occurrence_status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
-                ):
-                    status = ReminderStatus.AWAITING_ACKNOWLEDGEMENT
-                else:
-                    status = _trigger_waiting_status(
-                        effective_now, current.available_from, current.expires_at
-                    )
-                updated = current.updated(
-                    status=status,
-                    due=None,
-                    last_occurrence_due=effective_now,
-                    last_occurrence_status=occurrence_reminder_status,
-                    delivered_at=(
-                        effective_now if result.succeeded else current.delivered_at
-                    ),
-                    delivery_errors=result.errors,
-                    occurrence_history=tuple(history),
-                    updated_at=effective_now,
-                )
-            else:
-                updated = current.updated(
-                    status=occurrence_reminder_status,
-                    delivered_at=effective_now if result.succeeded else None,
-                    delivery_errors=result.errors,
-                    occurrence_history=tuple(history),
-                    updated_at=effective_now,
-                )
-            updated = _prune_history(updated, preferences, effective_now)
-            candidate = dict(self._reminders)
-            candidate[reminder_id] = updated
-            await self._async_persist_state(candidate, self._users)
-            self._reschedule(force=True)
+                updated = _prune_history(updated, preferences, effective_now)
+                candidate = dict(self._reminders)
+                candidate[reminder_id] = updated
+                await self._async_persist_state(candidate, self._users)
+                self._reschedule(force=True)
+        if stale_delivery:
+            await async_finalize_persistent_delivery_cleanup(
+                self._hass, reminder_id, claimed.current_occurrence_id
+            )
+            return
         self._notify_changed({claimed.user_id})
         await self._trigger_registry.async_sync(self._reminders.values())
 
@@ -3135,6 +3183,9 @@ class ReminderManager:
         """Persist proposed state, then commit it to runtime memory."""
         reminder_copy = dict(reminders)
         user_copy = dict(users)
+        await async_prepare_persistent_cleanup(
+            self._hass, self._reminders, reminder_copy
+        )
         await self._store.async_save(serialize_storage(reminder_copy, user_copy))
         self._reminders = reminder_copy
         self._users = user_copy
