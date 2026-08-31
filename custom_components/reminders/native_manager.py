@@ -64,6 +64,7 @@ class NativeReminderManager(ReminderManager):
         self,
         reminder_id: str,
         *,
+        expected_user_id: str | None = None,
         activation_triggers: list[dict[str, Any]] | None = None,
         delivery_triggers: list[dict[str, Any]] | None = None,
         delivery_conditions: list[dict[str, Any]] | None = None,
@@ -98,7 +99,7 @@ class NativeReminderManager(ReminderManager):
             )
 
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
             activation = values.get("activation_triggers", current.activation_triggers)

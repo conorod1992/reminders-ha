@@ -554,11 +554,17 @@ class ReminderManager:
         rows.sort(key=lambda row: row["occurrence"]["scheduled_due"], reverse=True)
         return rows[offset : offset + limit], len(rows)
 
-    async def async_update(self, reminder_id: str, **changes: Any) -> Reminder:
+    async def async_update(
+        self,
+        reminder_id: str,
+        *,
+        expected_user_id: str | None = None,
+        **changes: Any,
+    ) -> Reminder:
         """Update mutable fields and reschedule while retaining prior history."""
         expiry_window_changed = "expires_after_seconds" in changes
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
             allowed = {
@@ -880,10 +886,12 @@ class ReminderManager:
         self._notify_changed({current.user_id, updated.user_id})
         return await self.async_get(updated.id)
 
-    async def async_delete(self, reminder_id: str) -> None:
+    async def async_delete(
+        self, reminder_id: str, *, expected_user_id: str | None = None
+    ) -> None:
         """Delete a reminder or recurring series using legacy delete semantics."""
         async with self._lock:
-            reminder = self._require(reminder_id)
+            reminder = self._require(reminder_id, expected_user_id=expected_user_id)
             if reminder.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
             candidate = dict(self._reminders)
@@ -895,11 +903,13 @@ class ReminderManager:
         self._notify_changed({reminder.user_id})
         self._fire_lifecycle_event(reminder, "deleted")
 
-    async def async_pause(self, reminder_id: str) -> Reminder:
+    async def async_pause(
+        self, reminder_id: str, *, expected_user_id: str | None = None
+    ) -> Reminder:
         """Pause an anchored recurring series without changing its rule."""
         now = dt_util.utcnow()
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.recurrence is None:
                 raise ReminderValidationError("Only recurring reminders can be paused")
             if current.status is ReminderStatus.DELIVERING:
@@ -969,11 +979,13 @@ class ReminderManager:
         self._fire_lifecycle_event(updated, "paused")
         return updated
 
-    async def async_resume(self, reminder_id: str) -> Reminder:
+    async def async_resume(
+        self, reminder_id: str, *, expected_user_id: str | None = None
+    ) -> Reminder:
         """Resume from the next future instant of the unchanged anchored rule."""
         now = dt_util.utcnow()
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.recurrence is None:
                 raise ReminderValidationError("Only recurring reminders can be resumed")
             if not current.paused:
@@ -1045,11 +1057,13 @@ class ReminderManager:
         await self._async_process_due(now)
         return await self.async_get(reminder_id)
 
-    async def async_skip_next(self, reminder_id: str) -> Reminder:
+    async def async_skip_next(
+        self, reminder_id: str, *, expected_user_id: str | None = None
+    ) -> Reminder:
         """Skip exactly the active anchored occurrence and retain series phase."""
         now = dt_util.utcnow()
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.recurrence is None:
                 raise ReminderValidationError("Only recurring reminders can be skipped")
             if current.paused:
@@ -1090,6 +1104,7 @@ class ReminderManager:
         self,
         reminder_id: str,
         *,
+        expected_user_id: str | None = None,
         due: datetime | None = None,
         duration: timedelta | None = None,
     ) -> Reminder:
@@ -1104,7 +1119,7 @@ class ReminderManager:
                 )
             snoozed_until = _normalize_due(dt_util.utcnow() + duration)
             async with self._lock:
-                current = self._require(reminder_id)
+                current = self._require(reminder_id, expected_user_id=expected_user_id)
                 if current.status is ReminderStatus.DELIVERING:
                     raise ReminderValidationError(
                         "Reminder is currently being delivered"
@@ -1152,7 +1167,7 @@ class ReminderManager:
         new_due = due if due is not None else dt_util.utcnow() + duration  # type: ignore[operator]
         new_due = _normalize_due(new_due)
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
             occurrence = _find_occurrence(current, current.current_occurrence_id)
@@ -1226,10 +1241,12 @@ class ReminderManager:
         )
         return await self.async_get(updated.id)
 
-    async def async_wait_for_next_trigger(self, reminder_id: str) -> Reminder:
+    async def async_wait_for_next_trigger(
+        self, reminder_id: str, *, expected_user_id: str | None = None
+    ) -> Reminder:
         """Resolve the active occurrence and re-arm for a future transition."""
         async with self._lock:
-            current = self._require(reminder_id)
+            current = self._require(reminder_id, expected_user_id=expected_user_id)
             if current.activation_type is not ActivationType.TRIGGER:
                 raise ReminderValidationError(
                     "Wait for next trigger is only valid for triggered reminders"
@@ -1268,7 +1285,12 @@ class ReminderManager:
         return updated
 
     async def async_snooze_occurrence(
-        self, reminder_id: str, occurrence_id: str, duration: timedelta
+        self,
+        reminder_id: str,
+        occurrence_id: str,
+        duration: timedelta,
+        *,
+        expected_user_id: str | None = None,
     ) -> Reminder | None:
         """Snooze exactly one delivered occurrence, idempotently."""
         if duration <= timedelta(0):
@@ -1279,6 +1301,7 @@ class ReminderManager:
             current = self._reminders.get(reminder_id)
             if current is None:
                 return None
+            _validate_expected_owner(current, expected_user_id)
             target = _find_occurrence(current, occurrence_id)
             if target is None or target.status not in {
                 OccurrenceStatus.DELIVERED,
@@ -1392,6 +1415,7 @@ class ReminderManager:
         self,
         reminder_id: str,
         *,
+        expected_user_id: str | None = None,
         occurrence_id: str | None = None,
         acknowledged_by: str | None = None,
         completion_source: str = "manual",
@@ -1399,7 +1423,7 @@ class ReminderManager:
     ) -> Occurrence:
         """Acknowledge one delivered occurrence without changing a series schedule."""
         async with self._lock:
-            reminder = self._require(reminder_id)
+            reminder = self._require(reminder_id, expected_user_id=expected_user_id)
             awaiting = [
                 item
                 for item in reminder.occurrence_history
@@ -1467,13 +1491,14 @@ class ReminderManager:
         self,
         reminder_id: str,
         *,
+        expected_user_id: str | None = None,
         occurrence_id: str | None = None,
         completed_by: str | None = None,
         completion_source: str = "manual",
     ) -> Occurrence:
         """Record that a user explicitly completed the underlying task."""
         async with self._lock:
-            reminder = self._require(reminder_id)
+            reminder = self._require(reminder_id, expected_user_id=expected_user_id)
             if not reminder.allow_manual_completion:
                 raise ReminderValidationError("Manual completion is not enabled")
             candidates = [
@@ -1536,12 +1561,13 @@ class ReminderManager:
         reminder_id: str,
         external_action_id: str,
         *,
+        expected_user_id: str | None = None,
         occurrence_id: str | None = None,
         selected_by: str | None = None,
     ) -> Occurrence:
         """Persist and report one bounded source-defined action selection."""
         async with self._lock:
-            reminder = self._require(reminder_id)
+            reminder = self._require(reminder_id, expected_user_id=expected_user_id)
             valid_ids = {item["id"] for item in reminder.external_actions}
             if not reminder.managed_externally or external_action_id not in valid_ids:
                 raise ReminderValidationError("Unknown external action")
@@ -1598,24 +1624,25 @@ class ReminderManager:
         token, separator, operation = payload.partition(":")
         if not separator or not token:
             return
-        match: tuple[str, str] | None = None
+        match: tuple[str, str, str] | None = None
         async with self._lock:
             for reminder in self._reminders.values():
                 for occurrence in reminder.occurrence_history:
                     if secrets.compare_digest(
                         occurrence.notification_action_token or "", token
                     ):
-                        match = (reminder.id, occurrence.id)
+                        match = (reminder.id, occurrence.id, reminder.user_id)
                         break
                 if match is not None:
                     break
         if match is None:
             return
-        reminder_id, occurrence_id = match
+        reminder_id, occurrence_id, expected_user_id = match
         try:
             if operation == "DONE":
                 await self.async_complete(
                     reminder_id,
+                    expected_user_id=expected_user_id,
                     occurrence_id=occurrence_id,
                     completed_by=None,
                     completion_source="mobile_action",
@@ -1623,6 +1650,7 @@ class ReminderManager:
             elif operation == "DISMISS":
                 await self.async_acknowledge(
                     reminder_id,
+                    expected_user_id=expected_user_id,
                     occurrence_id=occurrence_id,
                     acknowledged_by=None,
                     completion_source="mobile_action",
@@ -1632,15 +1660,22 @@ class ReminderManager:
                 await self.async_select_external_action(
                     reminder_id,
                     operation.removeprefix("EXTERNAL_"),
+                    expected_user_id=expected_user_id,
                     occurrence_id=occurrence_id,
                 )
             elif operation == "SNOOZE_10":
                 await self.async_snooze_occurrence(
-                    reminder_id, occurrence_id, timedelta(minutes=10)
+                    reminder_id,
+                    occurrence_id,
+                    timedelta(minutes=10),
+                    expected_user_id=expected_user_id,
                 )
             elif operation == "SNOOZE_60":
                 await self.async_snooze_occurrence(
-                    reminder_id, occurrence_id, timedelta(hours=1)
+                    reminder_id,
+                    occurrence_id,
+                    timedelta(hours=1),
+                    expected_user_id=expected_user_id,
                 )
         except ReminderNotFoundError, ReminderValidationError:
             # Old, duplicate, forged, and already-resolved actions are safe no-ops.
@@ -3344,11 +3379,23 @@ class ReminderManager:
             payload["external_action_id"] = external_action_id
         fire(LIFECYCLE_EVENT, payload)
 
-    def _require(self, reminder_id: str) -> Reminder:
+    def _require(
+        self, reminder_id: str, *, expected_user_id: str | None = None
+    ) -> Reminder:
         try:
-            return self._reminders[reminder_id]
+            reminder = self._reminders[reminder_id]
         except KeyError as err:
             raise ReminderNotFoundError(reminder_id) from err
+        _validate_expected_owner(reminder, expected_user_id)
+        return reminder
+
+
+def _validate_expected_owner(reminder: Reminder, expected_user_id: str | None) -> None:
+    """Reject a stale authorization snapshot after ownership changes."""
+    if expected_user_id is not None and reminder.user_id != expected_user_id:
+        raise ReminderValidationError(
+            "Reminder ownership changed while the action was in progress; retry"
+        )
 
 
 def quiet_hours_active(value: time, start: time, end: time) -> bool:

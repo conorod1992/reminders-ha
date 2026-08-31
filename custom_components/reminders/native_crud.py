@@ -130,6 +130,7 @@ async def async_update_native_triggered(
     manager: NativeReminderManager,
     reminder_id: str,
     *,
+    expected_user_id: str | None = None,
     activation_triggers: list[dict[str, Any]],
     title: str | None = None,
     message: str | object | None = _UNSET,
@@ -157,7 +158,7 @@ async def async_update_native_triggered(
         await async_validate_native_triggers(manager._hass, completion_triggers)
 
     async with manager._lock:
-        current = manager._require(reminder_id)
+        current = manager._require(reminder_id, expected_user_id=expected_user_id)
         if current.status is ReminderStatus.DELIVERING:
             raise ReminderValidationError("Reminder is currently being delivered")
         if title is not None:

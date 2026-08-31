@@ -574,7 +574,9 @@ async def _update(
             )
     if not changes:
         raise ReminderValidationError("No reminder changes were provided")
-    updated = await _manager(hass).async_update(reminder.id, **changes)
+    updated = await _manager(hass).async_update(
+        reminder.id, expected_user_id=reminder.user_id, **changes
+    )
     return {"reminder": updated.to_dict()}
 
 
@@ -585,7 +587,7 @@ async def _delete(
     if response is not None:
         return response
     assert reminder is not None
-    await _manager(hass).async_delete(reminder.id)
+    await _manager(hass).async_delete(reminder.id, expected_user_id=reminder.user_id)
     return {"deleted": True, "reminder_id": reminder.id}
 
 
@@ -597,10 +599,13 @@ async def _snooze(
         return response
     assert reminder is not None
     if args.get("wait_for_next_trigger"):
-        updated = await _manager(hass).async_wait_for_next_trigger(reminder.id)
+        updated = await _manager(hass).async_wait_for_next_trigger(
+            reminder.id, expected_user_id=reminder.user_id
+        )
     else:
         updated = await _manager(hass).async_snooze(
             reminder.id,
+            expected_user_id=reminder.user_id,
             due=_parse_datetime(hass, args["due"]) if "due" in args else None,
             duration=timedelta(minutes=args["minutes"]) if "minutes" in args else None,
         )
@@ -616,6 +621,7 @@ async def _acknowledge(
     assert reminder is not None
     occurrence = await _manager(hass).async_acknowledge(
         reminder.id,
+        expected_user_id=reminder.user_id,
         occurrence_id=args.get("occurrence_id"),
         acknowledged_by=actor.id,
     )
@@ -631,6 +637,7 @@ async def _complete(
     assert reminder is not None
     occurrence = await _manager(hass).async_complete(
         reminder.id,
+        expected_user_id=reminder.user_id,
         occurrence_id=args.get("occurrence_id"),
         completed_by=actor.id,
     )

@@ -93,19 +93,25 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
     async def pause(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         reminder = await _authorized(hass, manager, call, call.data["reminder_id"])
-        updated = await manager.async_pause(reminder.id)
+        updated = await manager.async_pause(
+            reminder.id, expected_user_id=reminder.user_id
+        )
         return {"reminder": updated.to_dict()} if call.return_response else None
 
     async def resume(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         reminder = await _authorized(hass, manager, call, call.data["reminder_id"])
-        updated = await manager.async_resume(reminder.id)
+        updated = await manager.async_resume(
+            reminder.id, expected_user_id=reminder.user_id
+        )
         return {"reminder": updated.to_dict()} if call.return_response else None
 
     async def skip_next(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         reminder = await _authorized(hass, manager, call, call.data["reminder_id"])
-        updated = await manager.async_skip_next(reminder.id)
+        updated = await manager.async_skip_next(
+            reminder.id, expected_user_id=reminder.user_id
+        )
         return {"reminder": updated.to_dict()} if call.return_response else None
 
     async def set_native_rules(call: ServiceCall) -> ServiceResponse:
@@ -113,6 +119,7 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
         reminder = await _authorized(hass, manager, call, call.data["reminder_id"])
         updated = await manager.async_set_native_rules(
             reminder.id,
+            expected_user_id=reminder.user_id,
             **{
                 key: call.data[key]
                 for key in (

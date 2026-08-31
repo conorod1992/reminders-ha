@@ -41,6 +41,7 @@ async def async_update_native_scheduled(
     manager: NativeReminderManager,
     reminder_id: str,
     *,
+    expected_user_id: str | None = None,
     delivery_triggers: list[dict[str, Any]],
     delivery_conditions: list[dict[str, Any]],
     completion_triggers: list[dict[str, Any]],
@@ -60,7 +61,7 @@ async def async_update_native_scheduled(
 
     expiry_window_changed = "expires_after_seconds" in changes
     async with manager._lock:
-        current = manager._require(reminder_id)
+        current = manager._require(reminder_id, expected_user_id=expected_user_id)
         if current.status is ReminderStatus.DELIVERING:
             raise ReminderValidationError("Reminder is currently being delivered")
         if current.activation_type is not ActivationType.TIME:

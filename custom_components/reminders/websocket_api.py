@@ -579,7 +579,9 @@ async def websocket_update(
         if reminder.recurrence is None:
             raise HomeAssistantError("Recurrence fields require a recurring reminder")
         changes["recurrence"] = _recurrence_from_data(hass, msg, reminder.recurrence)
-    updated = await manager.async_update(reminder.id, **changes)
+    updated = await manager.async_update(
+        reminder.id, expected_user_id=reminder.user_id, **changes
+    )
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -596,7 +598,7 @@ async def websocket_delete(
 ) -> None:
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    await manager.async_delete(reminder.id)
+    await manager.async_delete(reminder.id, expected_user_id=reminder.user_id)
     connection.send_result(msg["id"])
 
 
@@ -615,7 +617,7 @@ async def websocket_pause(
 ) -> None:
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    updated = await manager.async_pause(reminder.id)
+    updated = await manager.async_pause(reminder.id, expected_user_id=reminder.user_id)
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -627,7 +629,7 @@ async def websocket_resume(
 ) -> None:
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    updated = await manager.async_resume(reminder.id)
+    updated = await manager.async_resume(reminder.id, expected_user_id=reminder.user_id)
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -639,7 +641,9 @@ async def websocket_skip_next(
 ) -> None:
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    updated = await manager.async_skip_next(reminder.id)
+    updated = await manager.async_skip_next(
+        reminder.id, expected_user_id=reminder.user_id
+    )
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -670,10 +674,13 @@ async def websocket_snooze(
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     if msg.get("wait_for_next_trigger"):
-        updated = await manager.async_wait_for_next_trigger(reminder.id)
+        updated = await manager.async_wait_for_next_trigger(
+            reminder.id, expected_user_id=reminder.user_id
+        )
     else:
         updated = await manager.async_snooze(
             reminder.id,
+            expected_user_id=reminder.user_id,
             due=_parse_datetime(hass, msg["due"]) if "due" in msg else None,
             duration=(
                 timedelta(seconds=msg["duration_seconds"])
@@ -700,6 +707,7 @@ async def websocket_acknowledge(
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     occurrence = await manager.async_acknowledge(
         reminder.id,
+        expected_user_id=reminder.user_id,
         occurrence_id=msg.get("occurrence_id"),
         acknowledged_by=connection.user.id,
     )
@@ -722,6 +730,7 @@ async def websocket_complete(
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     occurrence = await manager.async_complete(
         reminder.id,
+        expected_user_id=reminder.user_id,
         occurrence_id=msg.get("occurrence_id"),
         completed_by=connection.user.id,
     )
@@ -746,6 +755,7 @@ async def websocket_external_action(
     occurrence = await manager.async_select_external_action(
         reminder.id,
         msg["external_action_id"],
+        expected_user_id=reminder.user_id,
         occurrence_id=msg["occurrence_id"],
         selected_by=connection.user.id,
     )
