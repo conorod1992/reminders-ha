@@ -86,7 +86,7 @@ export function recurrenceSummary(reminder, locale = undefined) {
 export function deliverySummary(reminder) {
   const policy = reminder?.delivery_policy;
   if (!policy) return "Use my defaults";
-  const labels = { phone: "Phone", voice: "Voice", persistent_notification: "Persistent notification" };
+  const labels = { phone: "Phone", voice: "Voice", persistent_notification: "Home Assistant alert" };
   return policy.channels.map((channel) => labels[channel] || channel).join(" + ");
 }
 

@@ -24,6 +24,9 @@ from .persistent_cleanup import (
 
 _LOGGER = logging.getLogger(__name__)
 
+PERSISTENT_NOTIFICATION_TITLE = "Reminder due"
+PERSISTENT_NOTIFICATION_MESSAGE = "Open Reminders to view the reminder details."
+
 
 class DeliveryProvider(Protocol):
     """Protocol implemented by a logical delivery channel."""
@@ -65,7 +68,12 @@ def _delivery_occurrence_id(reminder: Reminder) -> str | None:
 
 
 class PersistentNotificationProvider:
-    """Deliver through Home Assistant persistent notifications."""
+    """Deliver a privacy-safe signal through HA persistent notifications.
+
+    Home Assistant exposes persistent notifications as one shared collection
+    rather than filtering them by user. Never put reminder-owned content in
+    this provider payload; the owner can read the details inside Reminders.
+    """
 
     channel = CHANNEL_PERSISTENT_NOTIFICATION
 
@@ -83,8 +91,8 @@ class PersistentNotificationProvider:
                 "persistent_notification",
                 "create",
                 {
-                    "title": reminder.title,
-                    "message": reminder.message or reminder.title,
+                    "title": PERSISTENT_NOTIFICATION_TITLE,
+                    "message": PERSISTENT_NOTIFICATION_MESSAGE,
                     "notification_id": notification_id,
                 },
                 blocking=True,

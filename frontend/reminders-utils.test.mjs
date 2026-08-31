@@ -26,6 +26,7 @@ test("formats supported recurrence rules", () => {
 test("formats default and custom delivery", () => {
   assert.equal(deliverySummary({ delivery_policy: null }), "Use my defaults");
   assert.equal(deliverySummary({ delivery_policy: { channels: ["phone", "voice"] } }), "Phone + Voice");
+  assert.equal(deliverySummary({ delivery_policy: { channels: ["persistent_notification"] } }), "Home Assistant alert");
 });
 
 test("combines date and time without inventing a timezone", () => {

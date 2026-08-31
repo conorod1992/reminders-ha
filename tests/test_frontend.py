@@ -157,3 +157,21 @@ async def test_panel_registers_once_and_reloads_cleanly(
 
     async_unregister_panel(hass)
     remove_panel.assert_called_once_with(hass, PANEL_PATH, warn_if_unknown=False)
+
+
+def test_persistent_notification_privacy_is_explained_in_preferences() -> None:
+    """The shared HA notification channel must not imply private content delivery."""
+    panel_source = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+
+    assert "Home Assistant notification (generic alert)" in panel_source
+    assert (
+        "Home Assistant notifications are shared across Home Assistant users"
+        in panel_source
+    )
+    assert "keeps reminder details inside Reminders" in panel_source
