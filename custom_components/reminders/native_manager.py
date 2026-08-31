@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -33,6 +34,38 @@ from .native_automation import NativeAutomationRuntime
 from .recurrence import next_due_after, occurrence_number
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_NATIVE_RULES_PER_ROLE = 32
+MAX_NATIVE_RULES_TOTAL = 64
+MAX_NATIVE_RULE_BYTES = 65_536
+
+
+def _validate_native_rule_resources(
+    **groups: Sequence[dict[str, Any]],
+) -> None:
+    total = 0
+    payload: dict[str, list[dict[str, Any]]] = {}
+    for role, rules in groups.items():
+        if len(rules) > MAX_NATIVE_RULES_PER_ROLE:
+            raise ReminderValidationError(
+                f"{role} can contain at most {MAX_NATIVE_RULES_PER_ROLE} rules"
+            )
+        total += len(rules)
+        payload[role] = [dict(item) for item in rules]
+    if total > MAX_NATIVE_RULES_TOTAL:
+        raise ReminderValidationError(
+            f"A reminder can contain at most {MAX_NATIVE_RULES_TOTAL} native rules"
+        )
+    try:
+        serialized = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as err:
+        raise ReminderValidationError("Native rules must be JSON-serializable") from err
+    if len(serialized) > MAX_NATIVE_RULE_BYTES:
+        raise ReminderValidationError(
+            f"Native rules must be at most {MAX_NATIVE_RULE_BYTES} serialized bytes"
+        )
 
 
 class NativeReminderManager(ReminderManager):
@@ -96,6 +129,17 @@ class NativeReminderManager(ReminderManager):
             async_validate_native_triggers,
         )
 
+        supplied = {
+            role: rules
+            for role, rules in {
+                "activation_triggers": activation_triggers,
+                "delivery_triggers": delivery_triggers,
+                "delivery_conditions": delivery_conditions,
+                "completion_triggers": completion_triggers,
+            }.items()
+            if rules is not None
+        }
+        _validate_native_rule_resources(**supplied)
         values: dict[str, tuple[dict[str, Any], ...]] = {}
         if activation_triggers is not None:
             await async_validate_native_triggers(self._hass, activation_triggers)
@@ -123,6 +167,15 @@ class NativeReminderManager(ReminderManager):
             if current.status is ReminderStatus.DELIVERING:
                 raise ReminderValidationError("Reminder is currently being delivered")
             activation = values.get("activation_triggers", current.activation_triggers)
+            delivery = values.get("delivery_triggers", current.delivery_triggers)
+            conditions = values.get("delivery_conditions", current.delivery_conditions)
+            completion = values.get("completion_triggers", current.completion_triggers)
+            _validate_native_rule_resources(
+                activation_triggers=activation,
+                delivery_triggers=delivery,
+                delivery_conditions=conditions,
+                completion_triggers=completion,
+            )
             if current.activation_type is ActivationType.TIME and activation:
                 raise ReminderValidationError(
                     "Time reminders cannot contain activation triggers"

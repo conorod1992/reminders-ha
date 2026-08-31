@@ -15,6 +15,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
 from .authorization import async_get_authorized, async_resolve_target_user
+from .const import MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH
 from .models import (
     AcknowledgementPolicy,
     ActivationType,
@@ -27,7 +28,7 @@ from .native_crud import (
     async_create_native_triggered,
     async_update_native_triggered,
 )
-from .native_manager import NativeReminderManager
+from .native_manager import MAX_NATIVE_RULES_PER_ROLE, NativeReminderManager
 from .native_scheduled_crud import async_update_native_scheduled
 from .recurrence import MonthlyMode, RecurrenceFrequency, Weekday
 from .services import (
@@ -44,7 +45,7 @@ from .websocket_api import (
     _manager,
 )
 
-NATIVE_LIST = vol.All(cv.ensure_list, [dict])
+NATIVE_LIST = vol.All(cv.ensure_list, vol.Length(max=MAX_NATIVE_RULES_PER_ROLE), [dict])
 UPDATE_POLICY_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [cv.string]),
@@ -108,8 +109,10 @@ async def websocket_set_native_rules(
 
 CREATE_NATIVE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}create_native_triggered",
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Required("activation_triggers"): vol.All(NATIVE_LIST, vol.Length(min=1)),
     vol.Optional("completion_triggers", default=[]): NATIVE_LIST,
     vol.Optional("user_id"): cv.string,
@@ -180,8 +183,10 @@ UPDATE_NATIVE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}update_native_triggered",
     vol.Required("reminder_id"): cv.string,
     vol.Required("activation_triggers"): vol.All(NATIVE_LIST, vol.Length(min=1)),
-    vol.Optional("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Optional("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Optional("completion_triggers"): NATIVE_LIST,
     vol.Optional("user_id"): cv.string,
     vol.Optional("acknowledgement_policy"): vol.In(tuple(AcknowledgementPolicy)),
@@ -271,8 +276,10 @@ async def websocket_update_native_triggered(
 UPDATE_NATIVE_SCHEDULED_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}update_native_scheduled",
     vol.Required("reminder_id"): cv.string,
-    vol.Optional("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Optional("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Optional("due"): cv.string,
     vol.Optional("user_id"): cv.string,
     vol.Optional("first_reminder"): cv.string,

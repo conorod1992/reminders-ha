@@ -17,6 +17,7 @@ from .manager import (
     _rotate_notification_action_tokens,
     _validate_expiry_window,
     _validate_external_actions,
+    _validate_message,
     _validate_policy,
     _validate_source_metadata,
     _validate_title,
@@ -33,7 +34,7 @@ from .native_automation import (
     async_validate_native_conditions,
     async_validate_native_triggers,
 )
-from .native_manager import NativeReminderManager
+from .native_manager import NativeReminderManager, _validate_native_rule_resources
 from .recurrence import RecurrenceRule, first_due, occurrence_number
 
 
@@ -55,6 +56,11 @@ async def async_update_native_scheduled(
     both halves first, builds one candidate Reminder, and persists it exactly
     once before any runtime subscriptions are changed.
     """
+    _validate_native_rule_resources(
+        delivery_triggers=delivery_triggers,
+        delivery_conditions=delivery_conditions,
+        completion_triggers=completion_triggers,
+    )
     await async_validate_native_triggers(manager._hass, delivery_triggers)
     await async_validate_native_conditions(manager._hass, delivery_conditions)
     await async_validate_native_triggers(manager._hass, completion_triggers)
@@ -95,6 +101,8 @@ async def async_update_native_scheduled(
         if "title" in changes:
             changes["title"] = str(changes["title"]).strip()
             _validate_title(changes["title"])
+        if "message" in changes:
+            changes["message"] = _validate_message(changes["message"])
         if {"source", "source_id", "source_event"}.intersection(changes):
             changes["source"], changes["source_id"], changes["source_event"] = (
                 _validate_source_metadata(

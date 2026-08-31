@@ -17,6 +17,7 @@ from .manager import (
     _rotate_notification_action_tokens,
     _trigger_waiting_status,
     _validate_external_actions,
+    _validate_message,
     _validate_policy,
     _validate_source_metadata,
     _validate_title,
@@ -36,7 +37,7 @@ from .models import (
     WhileAwaitingAcknowledgement,
 )
 from .native_automation import async_validate_native_triggers
-from .native_manager import NativeReminderManager
+from .native_manager import NativeReminderManager, _validate_native_rule_resources
 
 _UNSET = object()
 
@@ -71,11 +72,16 @@ async def async_create_native_triggered(
     """Create and arm a triggered reminder using HA's native trigger model."""
     if not activation_triggers:
         raise ReminderValidationError("Choose at least one activation trigger")
+    _validate_native_rule_resources(
+        activation_triggers=activation_triggers,
+        completion_triggers=completion_triggers or (),
+    )
     await async_validate_native_triggers(manager._hass, activation_triggers)
     if completion_triggers:
         await async_validate_native_triggers(manager._hass, completion_triggers)
     _validate_policy(delivery_policy)
     _validate_title(title)
+    message = _validate_message(message)
     available = _normalize_optional_time(available_from)
     expiry = _normalize_optional_time(expires_at)
     _validate_trigger_options(cooldown_seconds, available, expiry)
@@ -89,7 +95,7 @@ async def async_create_native_triggered(
         id=str(uuid4()),
         user_id=user_id,
         title=title.strip(),
-        message=message.strip() if message else None,
+        message=message,
         due=None,
         created_at=now,
         updated_at=now,
@@ -153,6 +159,10 @@ async def async_update_native_triggered(
     """Update a native triggered reminder without legacy trigger CRUD."""
     if not activation_triggers:
         raise ReminderValidationError("Choose at least one activation trigger")
+    _validate_native_rule_resources(
+        activation_triggers=activation_triggers,
+        completion_triggers=completion_triggers or (),
+    )
     await async_validate_native_triggers(manager._hass, activation_triggers)
     if completion_triggers is not None:
         await async_validate_native_triggers(manager._hass, completion_triggers)
@@ -161,9 +171,21 @@ async def async_update_native_triggered(
         current = manager._require(reminder_id, expected_user_id=expected_user_id)
         if current.status is ReminderStatus.DELIVERING:
             raise ReminderValidationError("Reminder is currently being delivered")
+        _validate_native_rule_resources(
+            activation_triggers=activation_triggers,
+            delivery_triggers=current.delivery_triggers,
+            delivery_conditions=current.delivery_conditions,
+            completion_triggers=(
+                current.completion_triggers
+                if completion_triggers is None
+                else completion_triggers
+            ),
+        )
         if title is not None:
             title = title.strip()
             _validate_title(title)
+        if message is not _UNSET:
+            message = _validate_message(message)
         policy = (
             current.delivery_policy if delivery_policy is _UNSET else delivery_policy
         )
@@ -287,7 +309,7 @@ async def async_update_native_triggered(
         if title is not None:
             updates["title"] = title
         if message is not _UNSET:
-            updates["message"] = str(message).strip() if message else None
+            updates["message"] = message
         if user_id is not None:
             updates["user_id"] = user_id
         if acknowledgement_policy is not None:

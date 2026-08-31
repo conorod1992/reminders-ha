@@ -428,7 +428,7 @@ async def test_quiet_hours_fallback_rejects_missing_default_targets(
             "u1",
             policy,
             quiet_hours_enabled=True,
-            quiet_hours_channels=("voice",),
+            quiet_hours_channels=("persistent_notification",),
             quiet_hours_fallback_channels=fallback_channels,
         )
 
@@ -466,7 +466,7 @@ async def test_quiet_hours_fallback_accepts_configured_default_targets(
         "u1",
         policy,
         quiet_hours_enabled=True,
-        quiet_hours_channels=("voice",),
+        quiet_hours_channels=("persistent_notification",),
         quiet_hours_fallback_channels=fallback_channels,
     )
 
