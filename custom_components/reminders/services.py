@@ -250,6 +250,10 @@ LIST_SCHEMA = vol.Schema(
         vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
         vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
         vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
+        vol.Optional("limit", default=500): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1000)
+        ),
+        vol.Optional("offset", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
     }
 )
 SNOOZE_SCHEMA = vol.All(
@@ -430,7 +434,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         manager = _manager(hass)
         requested = call.data.get("user_id")
         user_id = await _resolve_list_user(hass, call, requested)
-        reminders = await manager.async_list(
+        reminders, total = await manager.async_list_page(
             user_id=user_id,
             pending_only=call.data["pending_only"],
             due_after=(
@@ -451,8 +455,15 @@ def async_register_services(hass: HomeAssistant) -> None:
             ),
             source=call.data.get("source"),
             source_id=call.data.get("source_id"),
+            limit=call.data["limit"],
+            offset=call.data["offset"],
         )
-        return {"reminders": [item.to_dict() for item in reminders]}
+        return {
+            "reminders": [item.to_dict() for item in reminders],
+            "total": total,
+            "limit": call.data["limit"],
+            "offset": call.data["offset"],
+        }
 
     async def update(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
