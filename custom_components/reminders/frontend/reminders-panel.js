@@ -817,7 +817,13 @@ class RemindersManagementPanel extends HTMLElement {
   _openSnooze(reminder) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     const triggered = reminder.activation_type === "trigger";
-    dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint">${triggered ? "Matching triggers are ignored until the snooze ends; it will then wait for the next matching change." : reminder.recurring ? "Only this occurrence moves; the series stays anchored." : reminder.title}</p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button>${triggered ? '<button class="next-trigger">Wait for next trigger</button>' : '<button class="tomorrow">Tomorrow morning</button>'}</div>${triggered ? "" : '<div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div>'}<div class="dialog-actions"><button class="secondary cancel">Cancel</button>${triggered ? "" : '<button class="custom">Choose date/time…</button>'}</div></div>`;
+    const hint = triggered
+      ? "Matching triggers are ignored until the snooze ends; it will then wait for the next matching change."
+      : reminder.recurring
+        ? "Only this occurrence moves; the series stays anchored."
+        : reminder.title;
+    dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint"></p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button>${triggered ? '<button class="next-trigger">Wait for next trigger</button>' : '<button class="tomorrow">Tomorrow morning</button>'}</div>${triggered ? "" : '<div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div>'}<div class="dialog-actions"><button class="secondary cancel">Cancel</button>${triggered ? "" : '<button class="custom">Choose date/time…</button>'}</div></div>`;
+    dialog.querySelector(".hint").textContent = hint;
     const parts = quickTimeParts("1h", this._hass.config.time_zone);
     const inputs = dialog.querySelectorAll("input"); if (!triggered) { inputs[0].value = parts.date; inputs[1].value = parts.time; }
     dialog.querySelector(".cancel").onclick = () => dialog.close();

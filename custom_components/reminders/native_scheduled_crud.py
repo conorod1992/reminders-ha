@@ -268,6 +268,7 @@ async def async_update_native_scheduled(
         updated = current.updated(**changes, updated_at=now)
         if time_rearmed:
             updated = updated.updated(delivered_at=None, delivery_errors=())
+        await manager._async_validate_security(updated)
         candidate = dict(manager._reminders)
         candidate[reminder_id] = updated
         await manager._async_persist_state(candidate, manager._users)

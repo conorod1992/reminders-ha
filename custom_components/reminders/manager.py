@@ -41,6 +41,13 @@ from .models import (
     UserPreferences,
     WhileAwaitingAcknowledgement,
 )
+from .permissions import (
+    ReminderPermissionError,
+    async_filter_delivery_policy_permissions,
+    async_trigger_permitted,
+    async_validate_delivery_policy_permission,
+    async_validate_reminder_permissions,
+)
 from .persistent_cleanup import (
     async_finalize_persistent_delivery_cleanup,
     async_prepare_persistent_cleanup,
@@ -389,6 +396,7 @@ class ReminderManager:
         return await self.async_get(reminder.id)
 
     async def _async_add(self, reminder: Reminder) -> None:
+        await self._async_validate_security(reminder)
         async with self._lock:
             candidate = dict(self._reminders)
             candidate[reminder.id] = reminder
@@ -869,6 +877,7 @@ class ReminderManager:
             updated = current.updated(**changes, updated_at=now)
             if time_rearmed:
                 updated = updated.updated(delivered_at=None, delivery_errors=())
+            await self._async_validate_security(updated)
             candidate = dict(self._reminders)
             candidate[reminder_id] = updated
             await self._async_persist_state(candidate, self._users)
@@ -1739,6 +1748,9 @@ class ReminderManager:
         if self._unloaded:
             return
         duration_role = role if separator else "activation"
+        if not await self._async_trigger_permission_allowed(reminder_id, duration_role):
+            await self._async_clear_trigger_duration(reminder_id, duration_role)
+            return
         if cause == "duration_started":
             await self._async_start_trigger_duration(
                 reminder_id,
@@ -1770,6 +1782,10 @@ class ReminderManager:
         _expected_duration_wait: TriggerDurationWait | None = None,
     ) -> str:
         """Claim a context-waiting occurrence and deliver it once."""
+        if not await self._async_trigger_permission_allowed(
+            reminder_id, "deliver_when"
+        ):
+            return "inactive"
         now = dt_util.utcnow()
         expired = False
         async with self._lock:
@@ -1832,6 +1848,10 @@ class ReminderManager:
         _expected_duration_wait: TriggerDurationWait | None = None,
     ) -> str:
         """Resolve the occurrence affected by a bounded completion trigger."""
+        if not await self._async_trigger_permission_allowed(
+            reminder_id, "complete_when"
+        ):
+            return "inactive"
         now = dt_util.utcnow()
         async with self._lock:
             current = self._reminders.get(reminder_id)
@@ -1938,6 +1958,8 @@ class ReminderManager:
         _expected_duration_wait: TriggerDurationWait | None = None,
     ) -> str:
         """Claim one eligible trigger hit and route it through normal delivery."""
+        if not await self._async_trigger_permission_allowed(reminder_id, "activation"):
+            return "inactive"
         now = dt_util.utcnow()
         owner: str | None = None
         async with self._lock:
@@ -2077,6 +2099,9 @@ class ReminderManager:
                     continue
                 matching = (
                     reminder.fire_if_already_matching
+                    and await async_trigger_permitted(
+                        self._hass, reminder.user_id, reminder.trigger
+                    )
                     and self._trigger_registry.condition_is_currently_matching(
                         reminder.trigger
                     )
@@ -2194,6 +2219,9 @@ class ReminderManager:
                     if (
                         trigger is not None
                         and trigger.for_seconds
+                        and await async_trigger_permitted(
+                            self._hass, reminder.user_id, trigger
+                        )
                         and self._trigger_registry.duration_is_still_matching(
                             trigger, wait.observed_value
                         )
@@ -2249,8 +2277,12 @@ class ReminderManager:
                 self._consume_trigger_duration_timer(key, token)
                 return
             current_trigger = _trigger_for_duration_role(current, role)
-            if current_trigger is None or not (
-                self._trigger_registry.duration_is_still_matching(
+            if (
+                current_trigger is None
+                or not await async_trigger_permitted(
+                    self._hass, current.user_id, current_trigger
+                )
+                or not self._trigger_registry.duration_is_still_matching(
                     current_trigger, wait.observed_value
                 )
             ):
@@ -2320,6 +2352,25 @@ class ReminderManager:
                 continue
             self._cancel_trigger_duration_timer(key)
 
+    async def _async_validate_security(self, reminder: Reminder) -> None:
+        try:
+            await async_validate_reminder_permissions(self._hass, reminder)
+        except ReminderPermissionError as err:
+            raise ReminderValidationError(str(err)) from err
+
+    async def _async_trigger_permission_allowed(
+        self, reminder_id: str, role: str
+    ) -> bool:
+        async with self._lock:
+            reminder = self._reminders.get(reminder_id)
+            if reminder is None:
+                return False
+            trigger = _trigger_for_duration_role(reminder, role)
+            if trigger is None:
+                return False
+            user_id = reminder.user_id
+        return await async_trigger_permitted(self._hass, user_id, trigger)
+
     def _summary(self, trigger: TriggerDefinition) -> str:
         names: dict[str, str] = {}
         for entity_id in (trigger.entity_id, trigger.zone_entity_id):
@@ -2335,6 +2386,10 @@ class ReminderManager:
     ) -> UserPreferences:
         """Durably set live defaults for one HA user."""
         _validate_policy(policy)
+        try:
+            await async_validate_delivery_policy_permission(self._hass, user_id, policy)
+        except ReminderPermissionError as err:
+            raise ReminderValidationError(str(err)) from err
         current = self._users.get(user_id, UserPreferences())
         allowed = {
             "require_acknowledgement",
@@ -2405,6 +2460,10 @@ class ReminderManager:
     ) -> DeliveryResult:
         """Exercise real providers without creating a reminder or history record."""
         _validate_policy(policy)
+        try:
+            await async_validate_delivery_policy_permission(self._hass, user_id, policy)
+        except ReminderPermissionError as err:
+            raise ReminderValidationError(str(err)) from err
         now = dt_util.utcnow()
         test = Reminder(
             id=f"test-{uuid4()}",
@@ -3063,9 +3122,26 @@ class ReminderManager:
                     occurrence.external_action_id,
                 )
             )
-        result = await self._dispatcher.async_deliver(
-            delivery_reminder, delivery_policy
+        (
+            permitted_policy,
+            permission_denied,
+        ) = await async_filter_delivery_policy_permissions(
+            self._hass, delivery_reminder.user_id, delivery_policy
         )
+        result = (
+            await self._dispatcher.async_deliver(delivery_reminder, permitted_policy)
+            if permitted_policy.channels
+            else DeliveryResult((), ())
+        )
+        if permission_denied:
+            result = DeliveryResult(
+                result.succeeded,
+                (
+                    *result.errors,
+                    *(f"{channel}: permission_denied" for channel in permission_denied),
+                ),
+                tuple(dict.fromkeys((*result.failed_channels, *permission_denied))),
+            )
         stale_delivery = False
         async with self._lock:
             current = self._reminders.get(reminder_id)

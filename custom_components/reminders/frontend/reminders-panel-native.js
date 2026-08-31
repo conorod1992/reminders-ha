@@ -17,6 +17,7 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
     const source = reminder || duplicate;
     const form = this.shadowRoot?.querySelector("#reminder-form");
     if (!form) return;
+    if (!this._hass?.user?.is_admin) return;
 
     if (_containsNamedLegacyRule(source)) {
       _addClassicNotice(form);

@@ -1041,6 +1041,10 @@ Malformed individual records are isolated rather than causing the entire Reminde
 
 For more complex logic, use Home Assistant-native rules, a normal Home Assistant automation, or a named trigger.
 
+### Multi-user permission boundaries
+
+Reminders follows Home Assistant user permissions. Non-administrator reminder owners can only use classic state, numeric-state and zone triggers for entities they may read, and phone/Assist entity targets they may control. Home Assistant event triggers, arbitrary Home Assistant-native rules, and explicit Companion App service targets require an administrator-owned reminder because Home Assistant does not expose a safe per-user permission check for those global/service-level capabilities. Permissions are checked again when a delayed reminder actually delivers, so revoking access also revokes future delivery to that target.
+
 ## Technical architecture
 
 For users interested in how Reminders avoids unnecessary Home Assistant overhead:
