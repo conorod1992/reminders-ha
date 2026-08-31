@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -14,6 +15,7 @@ from custom_components.reminders.models import (
     Reminder,
     ReminderStatus,
 )
+from custom_components.reminders.native_automation import NativeAutomationRuntime
 from custom_components.reminders.native_crud import async_update_native_triggered
 from custom_components.reminders.native_manager import NativeReminderManager
 from custom_components.reminders.storage import empty_storage
@@ -226,3 +228,115 @@ async def test_native_triggered_owner_transfer_rotates_mobile_action_token(
     assert updated.occurrence_history[0].notification_action_token != (
         "previous-owner-token"
     )
+
+
+async def test_native_runtime_retries_transient_trigger_attachment_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A startup trigger failure retries without waiting for another reminder change."""
+    now = datetime.now(UTC)
+    reminder = Reminder(
+        id="retry-native",
+        user_id="user",
+        title="Retry native",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        activation_type=ActivationType.TRIGGER,
+        activation_triggers=(
+            {"trigger": "state", "entity_id": "binary_sensor.door", "to": "on"},
+        ),
+    )
+    unsubscribe = Mock()
+    initialize = AsyncMock(
+        side_effect=[RuntimeError("dependency not ready"), unsubscribe]
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.async_validate_native_triggers",
+        AsyncMock(return_value=[{"trigger": "state"}]),
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.trigger_helper.async_initialize_triggers",
+        initialize,
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation._TRIGGER_RETRY_DELAYS",
+        (0.0,),
+    )
+    runtime = NativeAutomationRuntime(SimpleNamespace(), AsyncMock())
+
+    await runtime.async_sync([reminder])
+
+    assert runtime.listener_count == 0
+    assert runtime.failed_listener_count == 1
+    assert runtime.failed_listener_roles == {
+        "activation": 1,
+        "delivery": 0,
+        "completion": 0,
+    }
+
+    for _ in range(5):
+        await asyncio.sleep(0)
+        if runtime.listener_count == 1:
+            break
+
+    assert initialize.await_count == 2
+    assert runtime.listener_count == 1
+    assert runtime.failed_listener_count == 0
+    assert runtime.failed_listener_roles == {
+        "activation": 0,
+        "delivery": 0,
+        "completion": 0,
+    }
+
+    await runtime.async_unload()
+    unsubscribe.assert_called_once_with()
+
+
+async def test_native_runtime_cancels_retry_when_trigger_is_no_longer_armed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removed or resolved rules cannot be resurrected by an old retry task."""
+    now = datetime.now(UTC)
+    reminder = Reminder(
+        id="cancel-native-retry",
+        user_id="user",
+        title="Cancel native retry",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        activation_type=ActivationType.TRIGGER,
+        activation_triggers=(
+            {"trigger": "state", "entity_id": "binary_sensor.door", "to": "on"},
+        ),
+    )
+    initialize = AsyncMock(side_effect=RuntimeError("dependency not ready"))
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.async_validate_native_triggers",
+        AsyncMock(return_value=[{"trigger": "state"}]),
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.trigger_helper.async_initialize_triggers",
+        initialize,
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation._TRIGGER_RETRY_DELAYS",
+        (60.0,),
+    )
+    runtime = NativeAutomationRuntime(SimpleNamespace(), AsyncMock())
+
+    await runtime.async_sync([reminder])
+    assert runtime.failed_listener_count == 1
+    assert runtime._trigger_retry_tasks
+
+    await runtime.async_sync([])
+    await asyncio.sleep(0)
+
+    assert runtime.failed_listener_count == 0
+    assert runtime.listener_count == 0
+    assert not runtime._trigger_retry_tasks
+    assert initialize.await_count == 1
+
+    await runtime.async_unload()

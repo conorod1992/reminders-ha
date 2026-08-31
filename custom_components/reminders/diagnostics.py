@@ -31,6 +31,9 @@ async def async_get_config_entry_diagnostics(
             reminder.activation_type is ActivationType.TRIGGER for reminder in reminders
         ),
         "trigger_listener_count": manager.trigger_listener_count,
+        "native_trigger_listener_count": manager.native_trigger_listener_count,
+        "native_trigger_failure_count": manager.native_trigger_failure_count,
+        "native_trigger_failures_by_role": manager.native_trigger_failures_by_role,
         "contextual_delivery_count": sum(
             reminder.deliver_when is not None for reminder in reminders
         ),
