@@ -687,10 +687,15 @@ class ReminderManager:
                     raise ReminderValidationError(
                         "A trigger definition is required for trigger activation"
                     )
-                if active and active.status in {
-                    OccurrenceStatus.SCHEDULED,
-                    OccurrenceStatus.WAITING_FOR_CONTEXT,
-                }:
+                if (
+                    rearm_trigger
+                    and active
+                    and active.status
+                    in {
+                        OccurrenceStatus.SCHEDULED,
+                        OccurrenceStatus.WAITING_FOR_CONTEXT,
+                    }
+                ):
                     history = _replace_occurrence(
                         history, active.updated(status=OccurrenceStatus.CANCELLED)
                     )
@@ -701,7 +706,9 @@ class ReminderManager:
                     due=None,
                     recurrence=None,
                     scheduled_due=None,
-                    current_occurrence_id=None,
+                    current_occurrence_id=(
+                        None if rearm_trigger else current.current_occurrence_id
+                    ),
                     paused=False,
                     paused_at=None,
                 )

@@ -654,3 +654,74 @@ async def test_attribute_only_duration_restart_requires_original_value(
     hass.states["climate.study"] = State("climate.study", "heat", {"preset": "eco"})
     await callback(datetime.now().astimezone())
     assert (await restarted.async_get(reminder.id)).trigger_duration_waits == ()
+
+
+async def test_classic_trigger_metadata_edit_preserves_awaiting_occurrence(
+    fake_store: FakeStore, no_timers: None
+) -> None:
+    manager = await _manager(fake_store, FakeDispatcher())
+    reminder = await manager.async_create_triggered(
+        user_id="u1",
+        title="Handover",
+        trigger={"type": "named", "trigger_id": "handover"},
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
+        allow_manual_completion=True,
+    )
+    await manager.async_fire_named_trigger("handover", user_id="u1")
+    awaiting = await manager.async_get(reminder.id)
+    occurrence_id = awaiting.current_occurrence_id
+    assert occurrence_id is not None
+    assert awaiting.status is ReminderStatus.AWAITING_ACKNOWLEDGEMENT
+
+    edited = await manager.async_update(reminder.id, title="Renamed handover")
+    assert edited.current_occurrence_id == occurrence_id
+    active = next(
+        item for item in edited.occurrence_history if item.id == occurrence_id
+    )
+    assert active.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+
+    await manager.async_complete(
+        reminder.id, occurrence_id=occurrence_id, completed_by="u1"
+    )
+    completed = await manager.async_get(reminder.id)
+    assert completed.status is ReminderStatus.COMPLETED
+
+
+async def test_classic_trigger_metadata_edit_preserves_context_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    no_timers: None,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.reminders.triggers.registry.async_track_state_change_event",
+        lambda _hass, _entities, _callback: lambda: None,
+    )
+    manager = await _manager(fake_store, FakeDispatcher())
+    reminder = await manager.async_create_triggered(
+        user_id="u1",
+        title="Wait for ready",
+        trigger={"type": "named", "trigger_id": "activate"},
+    )
+    now = datetime.now().astimezone()
+    occurrence = Occurrence(
+        "waiting", now, now, status=OccurrenceStatus.WAITING_FOR_CONTEXT
+    )
+    manager._reminders[reminder.id] = reminder.updated(
+        status=ReminderStatus.WAITING_FOR_CONTEXT,
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        deliver_when=TriggerDefinition.from_dict(
+            {
+                "type": "state",
+                "entity_id": "sensor.context",
+                "to": "ready",
+            }
+        ),
+    )
+
+    edited = await manager.async_update(reminder.id, title="Still wait for ready")
+    assert edited.current_occurrence_id == occurrence.id
+    active = next(
+        item for item in edited.occurrence_history if item.id == occurrence.id
+    )
+    assert active.status is OccurrenceStatus.WAITING_FOR_CONTEXT
