@@ -23,7 +23,7 @@ from .authorization import (
     async_resolve_list_user,
     async_resolve_target_user,
 )
-from .const import DOMAIN, SUPPORTED_CHANNELS
+from .const import DOMAIN, MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH, SUPPORTED_CHANNELS
 from .manager import ReminderManager, ReminderNotFoundError, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
@@ -37,6 +37,7 @@ from .models import (
     WhileAwaitingAcknowledgement,
 )
 from .recurrence import (
+    MAX_RECURRENCE_INTERVAL,
     MonthlyMode,
     RecurrenceError,
     RecurrenceFrequency,
@@ -95,7 +96,9 @@ SOURCE_UPDATE_SCHEMA: dict[Any, Any] = {
 RECURRENCE_SCHEMA: dict[Any, Any] = {
     vol.Required("first_reminder"): cv.string,
     vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
-    vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("interval", default=1): vol.All(
+        vol.Coerce(int), vol.Range(min=1, max=MAX_RECURRENCE_INTERVAL)
+    ),
     vol.Optional("weekdays"): vol.All(
         cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
     ),
@@ -265,8 +268,10 @@ async def websocket_get(
 
 CREATE_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}create",
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Required("due"): cv.string,
     vol.Optional("user_id"): cv.string,
     vol.Optional("acknowledgement_policy", default="default"): vol.In(
@@ -308,8 +313,10 @@ async def websocket_create(
 
 CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}create_recurring",
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Optional("user_id"): cv.string,
     vol.Optional("acknowledgement_policy", default="default"): vol.In(
         tuple(AcknowledgementPolicy)
@@ -357,8 +364,10 @@ async def websocket_create_recurring(
 
 CREATE_TRIGGERED_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}create_triggered",
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Required("trigger"): dict,
     vol.Optional("user_id"): cv.string,
     vol.Optional("acknowledgement_policy", default="default"): vol.In(
@@ -447,7 +456,9 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}update",
     vol.Required("reminder_id"): cv.string,
     vol.Optional("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Optional("due"): cv.string,
     vol.Optional("user_id"): cv.string,
     vol.Optional("first_reminder"): cv.string,

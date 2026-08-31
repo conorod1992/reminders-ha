@@ -29,6 +29,8 @@ from .authorization import (
 )
 from .const import (
     DOMAIN,
+    MAX_MESSAGE_LENGTH,
+    MAX_TITLE_LENGTH,
     SERVICE_ACKNOWLEDGE,
     SERVICE_COMPLETE,
     SERVICE_CREATE,
@@ -57,6 +59,7 @@ from .models import (
     WhileAwaitingAcknowledgement,
 )
 from .recurrence import (
+    MAX_RECURRENCE_INTERVAL,
     MonthlyMode,
     RecurrenceError,
     RecurrenceFrequency,
@@ -106,8 +109,8 @@ SOURCE_UPDATE_FIELDS: dict[Any, Any] = {
 }
 
 CREATE_FIELDS: dict[Any, Any] = {
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): cv.string,
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
     vol.Required("due"): vol.Any(datetime, cv.string),
     vol.Optional("user_id"): cv.string,
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
@@ -123,11 +126,13 @@ CREATE_FIELDS.update(ADVANCED_FIELDS)
 CREATE_FIELDS.update(SOURCE_FIELDS)
 CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
 CREATE_RECURRING_FIELDS: dict[Any, Any] = {
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): cv.string,
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
     vol.Required("first_reminder"): vol.Any(datetime, cv.string),
     vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
-    vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("interval", default=1): vol.All(
+        vol.Coerce(int), vol.Range(min=1, max=MAX_RECURRENCE_INTERVAL)
+    ),
     vol.Optional("weekdays"): vol.All(
         cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
     ),
@@ -155,8 +160,8 @@ CREATE_RECURRING_FIELDS.update(ADVANCED_FIELDS)
 CREATE_RECURRING_FIELDS.update(SOURCE_FIELDS)
 CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
 CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): cv.string,
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
     vol.Required("trigger"): dict,
     vol.Optional("user_id"): cv.string,
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),

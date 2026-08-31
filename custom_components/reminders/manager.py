@@ -18,6 +18,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     LIFECYCLE_EVENT,
+    MAX_MESSAGE_LENGTH,
+    MAX_TITLE_LENGTH,
     MOBILE_ACTION_EVENT,
     MOBILE_ACTION_PREFIX,
     SAVE_DELAY,
@@ -179,6 +181,7 @@ class ReminderManager:
         due = _normalize_due(due)
         _validate_policy(delivery_policy)
         _validate_title(title)
+        message = _validate_message(message)
         delivery_trigger = _coerce_trigger(deliver_when)
         completion_trigger = _coerce_trigger(complete_when)
         escalation_policy = _coerce_escalation(escalation)
@@ -195,7 +198,7 @@ class ReminderManager:
             id=str(uuid4()),
             user_id=user_id,
             title=title.strip(),
-            message=message.strip() if message else None,
+            message=message,
             due=due,
             created_at=now,
             updated_at=now,
@@ -254,6 +257,7 @@ class ReminderManager:
         """Create and durably persist an anchored recurring reminder."""
         _validate_policy(delivery_policy)
         _validate_title(title)
+        message = _validate_message(message)
         delivery_trigger = _coerce_trigger(deliver_when)
         completion_trigger = _coerce_trigger(complete_when)
         escalation_policy = _coerce_escalation(escalation)
@@ -271,7 +275,7 @@ class ReminderManager:
             id=str(uuid4()),
             user_id=user_id,
             title=title.strip(),
-            message=message.strip() if message else None,
+            message=message,
             due=due,
             scheduled_due=due,
             created_at=now,
@@ -336,6 +340,7 @@ class ReminderManager:
         """Create and durably arm a listener-backed triggered reminder."""
         _validate_policy(delivery_policy)
         _validate_title(title)
+        message = _validate_message(message)
         definition = (
             trigger
             if isinstance(trigger, TriggerDefinition)
@@ -358,7 +363,7 @@ class ReminderManager:
             id=str(uuid4()),
             user_id=user_id,
             title=title.strip(),
-            message=message.strip() if message else None,
+            message=message,
             due=None,
             created_at=now,
             updated_at=now,
@@ -611,6 +616,8 @@ class ReminderManager:
             if "title" in changes:
                 changes["title"] = str(changes["title"]).strip()
                 _validate_title(changes["title"])
+            if "message" in changes:
+                changes["message"] = _validate_message(changes["message"])
             if {"source", "source_id", "source_event"}.intersection(changes):
                 changes["source"], changes["source_id"], changes["source_event"] = (
                     _validate_source_metadata(
@@ -3301,7 +3308,10 @@ class ReminderManager:
         )
         channels = [channel for channel in policy.channels if channel not in suppressed]
         if suppressed:
+            suppressed_config = set(preferences.quiet_hours_channels)
             for fallback in preferences.quiet_hours_fallback_channels:
+                if fallback in suppressed_config:
+                    continue
                 if fallback not in channels:
                     channels.append(fallback)
 
@@ -3646,6 +3656,23 @@ def _replace_trigger_duration_wait(
 def _validate_title(title: str) -> None:
     if not title.strip():
         raise ReminderValidationError("Title must not be empty")
+    if len(title.strip()) > MAX_TITLE_LENGTH:
+        raise ReminderValidationError(
+            f"Title must be at most {MAX_TITLE_LENGTH} characters"
+        )
+
+
+def _validate_message(message: object | None) -> str | None:
+    if message is None:
+        return None
+    if not isinstance(message, str):
+        raise ReminderValidationError("Message must be a string")
+    normalized = message.strip()
+    if len(normalized) > MAX_MESSAGE_LENGTH:
+        raise ReminderValidationError(
+            f"Message must be at most {MAX_MESSAGE_LENGTH} characters"
+        )
+    return normalized or None
 
 
 def _validate_policy(policy: DeliveryPolicy | None) -> None:
@@ -3695,6 +3722,12 @@ def _validate_preferences(preferences: UserPreferences) -> None:
             f"Unknown quiet-hours channels: {sorted(unknown)}"
         )
     fallback_channels = set(preferences.quiet_hours_fallback_channels)
+    overlap = set(preferences.quiet_hours_channels) & fallback_channels
+    if overlap:
+        raise ReminderValidationError(
+            "Quiet-hours fallback channels cannot also be suppressed: "
+            f"{sorted(overlap)}"
+        )
     defaults = preferences.default_delivery_policy
     if "phone" in fallback_channels and not (
         defaults.notify_targets or defaults.mobile_app_services
