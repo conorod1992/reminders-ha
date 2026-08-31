@@ -47,6 +47,26 @@ class NativeReminderManager(ReminderManager):
             self._native_changed
         )
 
+    @property
+    def trigger_listener_count(self) -> int:
+        """Return classic and HA-native trigger subscriptions."""
+        return super().trigger_listener_count + self._native_runtime.listener_count
+
+    @property
+    def native_trigger_listener_count(self) -> int:
+        """Return currently attached HA-native trigger subscriptions."""
+        return self._native_runtime.listener_count
+
+    @property
+    def native_trigger_failure_count(self) -> int:
+        """Return HA-native subscriptions currently waiting for retry."""
+        return self._native_runtime.failed_listener_count
+
+    @property
+    def native_trigger_failures_by_role(self) -> dict[str, int]:
+        """Return privacy-safe native trigger failure counts by lifecycle role."""
+        return self._native_runtime.failed_listener_roles
+
     async def async_load(self) -> None:
         """Load legacy state, then arm native rules."""
         await super().async_load()
