@@ -310,7 +310,7 @@ get:
 
 list:
   name: List reminders
-  description: Returns reminders visible to the caller, with optional search and due-time filters.
+  description: Returns one page of reminders visible to the caller plus the total matching count.
   fields:
     user_id: *user
     pending_only:
@@ -334,8 +334,33 @@ list:
       description: Include reminders due at or before this time.
       selector:
         datetime:
+    activation_type:
+      name: Activation type
+      description: Optionally return only time-based or trigger-based reminders.
+      selector:
+        select:
+          options:
+            - time
+            - trigger
     source: *source
     source_id: *source_id
+    limit:
+      name: Page size
+      description: Maximum reminders returned in this page. The response also includes the total matching count.
+      default: 500
+      selector:
+        number:
+          min: 1
+          max: 1000
+          mode: box
+    offset:
+      name: Offset
+      description: Number of matching reminders to skip before this page.
+      default: 0
+      selector:
+        number:
+          min: 0
+          mode: box
 
 update:
   name: Update a reminder
