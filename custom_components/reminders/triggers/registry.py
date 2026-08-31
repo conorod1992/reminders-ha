@@ -14,6 +14,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from ..models import (
     ActivationType,
+    OccurrenceStatus,
     Reminder,
     ReminderStatus,
     TriggerRepeatPolicy,
@@ -294,11 +295,23 @@ class TriggerRegistry:
             entry.unsubscribe()
 
 
+def _has_pending_trigger_delivery(reminder: Reminder) -> bool:
+    """Return whether a claimed/snoozed trigger occurrence still needs delivery."""
+    if reminder.due is None or reminder.current_occurrence_id is None:
+        return False
+    return any(
+        occurrence.id == reminder.current_occurrence_id
+        and occurrence.status is OccurrenceStatus.SCHEDULED
+        for occurrence in reminder.occurrence_history
+    )
+
+
 def _should_listen(reminder: Reminder) -> bool:
     """Return whether the legacy activation trigger remains armed."""
     return (
         reminder.activation_type is ActivationType.TRIGGER
         and reminder.trigger is not None
+        and not _has_pending_trigger_delivery(reminder)
         and not (
             reminder.repeat_policy is TriggerRepeatPolicy.ONCE
             and reminder.last_triggered_at is not None
