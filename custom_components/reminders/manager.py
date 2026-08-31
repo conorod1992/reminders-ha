@@ -3618,6 +3618,18 @@ def _validate_preferences(preferences: UserPreferences) -> None:
         raise ReminderValidationError(
             f"Unknown quiet-hours channels: {sorted(unknown)}"
         )
+    fallback_channels = set(preferences.quiet_hours_fallback_channels)
+    defaults = preferences.default_delivery_policy
+    if "phone" in fallback_channels and not (
+        defaults.notify_targets or defaults.mobile_app_services
+    ):
+        raise ReminderValidationError(
+            "Quiet-hours phone fallback needs at least one default notify target"
+        )
+    if "voice" in fallback_channels and not defaults.voice_targets:
+        raise ReminderValidationError(
+            "Quiet-hours voice fallback needs at least one default Assist satellite"
+        )
 
 
 def _coerce_trigger(
