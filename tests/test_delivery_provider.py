@@ -55,14 +55,16 @@ async def test_generic_notify_entity_never_receives_actions() -> None:
         reminder(), DeliveryPolicy(("phone",), ("notify.kitchen",))
     )
 
-    assert services.calls == [
-        (
-            "notify",
-            "send_message",
-            {"title": "Take medicine", "message": "Now"},
-            {"target": {"entity_id": ["notify.kitchen"]}, "blocking": True},
-        )
-    ]
+    assert len(services.calls) == 1
+    domain, service, data, kwargs = services.calls[0]
+    assert (domain, service, data) == (
+        "notify",
+        "send_message",
+        {"title": "Take medicine", "message": "Now"},
+    )
+    assert kwargs["target"] == {"entity_id": ["notify.kitchen"]}
+    assert kwargs["blocking"] is True
+    assert kwargs["context"].user_id == "user"
 
 
 async def test_mobile_service_receives_actions_without_done_when_not_required() -> None:

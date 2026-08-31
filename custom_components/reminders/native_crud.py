@@ -318,6 +318,7 @@ async def async_update_native_triggered(
         if allow_manual_completion is not None:
             updates["allow_manual_completion"] = allow_manual_completion
         updated = current.updated(**updates)
+        await manager._async_validate_security(updated)
         candidate = dict(manager._reminders)
         candidate[reminder_id] = updated
         await manager._async_persist_state(candidate, manager._users)

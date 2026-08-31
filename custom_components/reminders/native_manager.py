@@ -136,6 +136,7 @@ class NativeReminderManager(ReminderManager):
                     "Triggered reminder requires at least one activation trigger"
                 )
             updated = current.updated(**values, updated_at=dt_util.utcnow())
+            await self._async_validate_security(updated)
             candidate = dict(self._reminders)
             candidate[reminder_id] = updated
             await self._async_persist_state(candidate, self._users)
@@ -159,6 +160,13 @@ class NativeReminderManager(ReminderManager):
             and (reminder.delivery_triggers or reminder.delivery_conditions)
         ]
         for reminder in candidates:
+            try:
+                await self._async_validate_security(reminder)
+            except ReminderValidationError:
+                await self._async_skip_native_condition_failure(
+                    reminder.id, effective_now, reason="permission_denied"
+                )
+                continue
             conditions_match = await self._native_runtime.async_conditions_match(
                 reminder
             )
@@ -222,7 +230,7 @@ class NativeReminderManager(ReminderManager):
         self._notify_changed({reminder.user_id})
 
     async def _async_skip_native_condition_failure(
-        self, reminder_id: str, now: datetime
+        self, reminder_id: str, now: datetime, *, reason: str = "conditions_not_met"
     ) -> None:
         async with self._lock:
             reminder = self._reminders.get(reminder_id)
@@ -237,7 +245,7 @@ class NativeReminderManager(ReminderManager):
             skipped = occurrence.updated(
                 status=OccurrenceStatus.SKIPPED,
                 completed_at=now,
-                completion_reason="conditions_not_met",
+                completion_reason=reason,
             )
             history = _replace_occurrence(list(reminder.occurrence_history), skipped)
             if reminder.recurrence is not None:
@@ -271,6 +279,11 @@ class NativeReminderManager(ReminderManager):
         context: Context | None,
     ) -> None:
         """Route one HA-native trigger firing to the reminder lifecycle."""
+        try:
+            reminder = await self.async_get(reminder_id)
+            await self._async_validate_security(reminder)
+        except ReminderValidationError:
+            return
         trigger_context = _native_trigger_context(run_variables)
         cause = _native_trigger_cause(run_variables)
         if role == "activation":

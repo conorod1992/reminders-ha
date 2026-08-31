@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
 from .const import (
@@ -122,6 +122,7 @@ class NotifyProvider:
                     ordinary_data,
                     target={"entity_id": list(policy.notify_targets)},
                     blocking=True,
+                    context=Context(user_id=reminder.user_id),
                 )
             except Exception as err:
                 errors.append(f"generic notify: {type(err).__name__}")
@@ -136,7 +137,11 @@ class NotifyProvider:
                 }
             try:
                 await self._hass.services.async_call(
-                    "notify", service, actionable_data, blocking=True
+                    "notify",
+                    service,
+                    actionable_data,
+                    blocking=True,
+                    context=Context(user_id=reminder.user_id),
                 )
             except ServiceValidationError as action_err:
                 if not reminder.notification_actions:
@@ -146,7 +151,11 @@ class NotifyProvider:
                 # the reminder deliverable by retrying once without buttons.
                 try:
                     await self._hass.services.async_call(
-                        "notify", service, ordinary_data, blocking=True
+                        "notify",
+                        service,
+                        ordinary_data,
+                        blocking=True,
+                        context=Context(user_id=reminder.user_id),
                     )
                 except Exception as fallback_err:
                     errors.append(
@@ -186,6 +195,7 @@ class VoiceProvider:
             {"message": reminder.message or reminder.title},
             target={"entity_id": list(policy.voice_targets)},
             blocking=True,
+            context=Context(user_id=reminder.user_id),
         )
 
 
