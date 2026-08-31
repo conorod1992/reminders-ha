@@ -532,13 +532,15 @@ def async_register_services(hass: HomeAssistant) -> None:
             changes["recurrence"] = _recurrence_from_data(
                 hass, call.data, reminder.recurrence
             )
-        updated = await manager.async_update(reminder.id, **changes)
+        updated = await manager.async_update(
+            reminder.id, expected_user_id=reminder.user_id, **changes
+        )
         return {"reminder": updated.to_dict()} if call.return_response else None
 
     async def delete(call: ServiceCall) -> None:
         manager = _manager(hass)
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
-        await manager.async_delete(reminder.id)
+        await manager.async_delete(reminder.id, expected_user_id=reminder.user_id)
 
     async def snooze(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
@@ -550,10 +552,13 @@ def async_register_services(hass: HomeAssistant) -> None:
                 raise ServiceValidationError(
                     "Wait for next trigger cannot be combined with due or duration"
                 )
-            updated = await manager.async_wait_for_next_trigger(reminder.id)
+            updated = await manager.async_wait_for_next_trigger(
+                reminder.id, expected_user_id=reminder.user_id
+            )
             return {"reminder": updated.to_dict()} if call.return_response else None
         updated = await manager.async_snooze(
             reminder.id,
+            expected_user_id=reminder.user_id,
             due=(
                 _parse_datetime(hass, call.data["due"]) if "due" in call.data else None
             ),
@@ -597,6 +602,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
         occurrence = await manager.async_acknowledge(
             reminder.id,
+            expected_user_id=reminder.user_id,
             occurrence_id=call.data.get("occurrence_id"),
             acknowledged_by=call.context.user_id,
         )
@@ -607,6 +613,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
         occurrence = await manager.async_complete(
             reminder.id,
+            expected_user_id=reminder.user_id,
             occurrence_id=call.data.get("occurrence_id"),
             completed_by=call.context.user_id,
         )
@@ -618,6 +625,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         occurrence = await manager.async_select_external_action(
             reminder.id,
             call.data["external_action_id"],
+            expected_user_id=reminder.user_id,
             occurrence_id=call.data["occurrence_id"],
             selected_by=call.context.user_id,
         )

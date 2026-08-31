@@ -91,6 +91,7 @@ async def websocket_set_native_rules(
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     updated = await manager.async_set_native_rules(
         reminder.id,
+        expected_user_id=reminder.user_id,
         **{
             key: msg[key]
             for key in (
@@ -261,7 +262,9 @@ async def websocket_update_native_triggered(
         )
     ):
         kwargs["delivery_policy"] = _policy_from_data(msg)
-    updated = await async_update_native_triggered(manager, reminder.id, **kwargs)
+    updated = await async_update_native_triggered(
+        manager, reminder.id, expected_user_id=reminder.user_id, **kwargs
+    )
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -370,6 +373,7 @@ async def websocket_update_native_scheduled(
     updated = await async_update_native_scheduled(
         manager,
         reminder.id,
+        expected_user_id=reminder.user_id,
         delivery_triggers=msg["delivery_triggers"],
         delivery_conditions=msg["delivery_conditions"],
         completion_triggers=msg["completion_triggers"],
