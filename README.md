@@ -16,7 +16,7 @@ For most users, getting started is simply:
 - Quick choices for **10 minutes**, **30 minutes**, **1 hour**, **later today**, and **tomorrow morning**
 - Daily, weekly, monthly, and yearly repeating reminders
 - Reminders through:
-  - Home Assistant persistent notifications
+  - Home Assistant persistent notifications (generic alert; reminder details stay inside Reminders)
   - phone notifications
   - Assist satellites
 - Optional **Snooze**, **Dismiss**, and **Done**
@@ -104,9 +104,9 @@ You can configure:
 - Assist satellite voice targets
 - whether reminders should normally stay active until dismissed
 
-Persistent notifications are the simple, reliable default.
+Home Assistant persistent notifications are the simple zero-configuration default. Home Assistant exposes persistent notifications as a shared collection to all Home Assistant users, so Reminders deliberately sends only a generic **Reminder due** alert through this channel and keeps the reminder title and message inside the permission-filtered Reminders UI/API. Another Home Assistant user can dismiss that shared generic alert, but doing so does not dismiss, complete, or otherwise change the reminder itself.
 
-Phone and voice delivery are optional and can be skipped.
+Use phone or voice delivery when you want the delivered notification itself to contain the reminder details. Phone and voice delivery are optional and can be skipped.
 
 Entity choices use friendly Home Assistant names, so you do not need to type entity IDs into the panel.
 

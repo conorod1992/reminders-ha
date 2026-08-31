@@ -9,7 +9,12 @@ from typing import Any
 import pytest
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.reminders.delivery import NotifyProvider
+from custom_components.reminders.delivery import (
+    PERSISTENT_NOTIFICATION_MESSAGE,
+    PERSISTENT_NOTIFICATION_TITLE,
+    NotifyProvider,
+    PersistentNotificationProvider,
+)
 from custom_components.reminders.models import DeliveryPolicy, Reminder
 
 
@@ -146,3 +151,41 @@ async def test_all_phone_targets_failing_raises() -> None:
                 mobile_app_services=("notify.mobile_app_conor",),
             ),
         )
+
+
+async def test_persistent_notification_omits_private_reminder_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    services = Services()
+
+    async def track(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "custom_components.reminders.delivery.async_track_persistent_notification",
+        track,
+    )
+    provider = PersistentNotificationProvider(  # type: ignore[arg-type]
+        SimpleNamespace(services=services)
+    )
+    private = reminder().updated(
+        title="Private medical appointment",
+        message="Sensitive details that other HA users must not see",
+    )
+
+    await provider.async_deliver(
+        private,
+        DeliveryPolicy(("persistent_notification",)),
+    )
+
+    assert len(services.calls) == 1
+    domain, service, data, kwargs = services.calls[0]
+    assert (domain, service) == ("persistent_notification", "create")
+    assert data["title"] == PERSISTENT_NOTIFICATION_TITLE
+    assert data["message"] == PERSISTENT_NOTIFICATION_MESSAGE
+    assert private.title not in data["title"]
+    assert private.title not in data["message"]
+    assert private.message not in data["title"]
+    assert private.message not in data["message"]
+    assert data["notification_id"].startswith("reminders_")
+    assert kwargs == {"blocking": True}
