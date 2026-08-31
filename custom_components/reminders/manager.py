@@ -756,10 +756,27 @@ class ReminderManager:
                 time_rearmed = True
                 new_due = _normalize_due(changes["due"])
                 changes["due"] = new_due
-                if active and active.status is OccurrenceStatus.SCHEDULED:
+                if active and active.status in {
+                    OccurrenceStatus.SCHEDULED,
+                    OccurrenceStatus.WAITING_FOR_CONTEXT,
+                }:
+                    if active.status is OccurrenceStatus.WAITING_FOR_CONTEXT:
+                        changes["trigger_duration_waits"] = tuple(
+                            wait
+                            for wait in changes.get(
+                                "trigger_duration_waits", current.trigger_duration_waits
+                            )
+                            if wait.role != "deliver_when"
+                        )
                     history = _replace_occurrence(
                         history,
-                        active.updated(scheduled_due=new_due, due=new_due),
+                        active.updated(
+                            status=OccurrenceStatus.SCHEDULED,
+                            scheduled_due=new_due,
+                            due=new_due,
+                            context_eligible_at=None,
+                            expires_at=None,
+                        ),
                     )
                 else:
                     new_occurrence = _new_occurrence(new_due)

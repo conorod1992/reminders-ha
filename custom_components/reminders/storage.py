@@ -11,6 +11,7 @@ from homeassistant.helpers.storage import Store
 from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
 from .models import (
     ActivationType,
+    Occurrence,
     OccurrenceStatus,
     Reminder,
     ReminderStatus,
@@ -218,9 +219,7 @@ def deserialize_storage(
                 raise ValueError("Reminder ID does not match storage key")
             interrupted_delivery = reminder.status is ReminderStatus.DELIVERING
             recovered_history = tuple(
-                occurrence.updated(status=OccurrenceStatus.SCHEDULED)
-                if occurrence.status is OccurrenceStatus.DELIVERING
-                else occurrence
+                _recover_occurrence_state(reminder, occurrence)
                 for occurrence in reminder.occurrence_history
             )
             recovered_history = tuple(
@@ -263,6 +262,25 @@ def deserialize_storage(
                 "Skipping malformed stored user preferences for %s: %s", user_id, err
             )
     return reminders, users
+
+
+def _recover_occurrence_state(reminder: Reminder, occurrence: Occurrence) -> Occurrence:
+    """Recover interrupted work and stale context waits from durable history."""
+    if occurrence.status is OccurrenceStatus.DELIVERING:
+        return occurrence.updated(status=OccurrenceStatus.SCHEDULED)
+    if (
+        occurrence.status is OccurrenceStatus.WAITING_FOR_CONTEXT
+        and occurrence.id != reminder.current_occurrence_id
+    ):
+        return occurrence.updated(
+            status=OccurrenceStatus.CANCELLED,
+            context_eligible_at=None,
+            expires_at=None,
+            completion_reason=(
+                occurrence.completion_reason or "superseded_context_wait_recovered"
+            ),
+        )
+    return occurrence
 
 
 def _recover_interrupted_escalation(occurrence: Any) -> Any:
