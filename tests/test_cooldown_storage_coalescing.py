@@ -58,8 +58,7 @@ def test_real_reminder_changes_are_never_coalesced() -> None:
         is False
     )
     assert (
-        _is_cooldown_counter_only_update(previous, _data(11, status="expired"))
-        is False
+        _is_cooldown_counter_only_update(previous, _data(11, status="expired")) is False
     )
     assert (
         _is_cooldown_counter_only_update(
