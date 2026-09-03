@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +13,7 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.reminders.delivery import (
     PERSISTENT_NOTIFICATION_MESSAGE,
     PERSISTENT_NOTIFICATION_TITLE,
+    DeliveryDispatcher,
     NotifyProvider,
     PersistentNotificationProvider,
 )
@@ -151,6 +153,59 @@ async def test_all_phone_targets_failing_raises() -> None:
                 mobile_app_services=("notify.mobile_app_conor",),
             ),
         )
+
+
+async def test_partial_phone_target_failure_marks_channel_failed() -> None:
+    class PartialServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            self.calls.append((domain, service, data, kwargs))
+            if service == "mobile_app_tablet":
+                raise RuntimeError("offline")
+
+    provider = NotifyProvider(  # type: ignore[arg-type]
+        SimpleNamespace(services=PartialServices())
+    )
+    dispatcher = DeliveryDispatcher([provider])
+    result = await dispatcher.async_deliver(
+        reminder(),
+        DeliveryPolicy(
+            channels=("phone",),
+            mobile_app_services=(
+                "notify.mobile_app_conor",
+                "notify.mobile_app_tablet",
+            ),
+        ),
+    )
+
+    assert result.succeeded == ()
+    assert result.failed_channels == ("phone",)
+    assert result.errors == ("phone: RuntimeError",)
+
+
+async def test_dispatcher_times_out_hung_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HungProvider:
+        channel = "phone"
+
+        async def async_deliver(
+            self, reminder: Reminder, policy: DeliveryPolicy
+        ) -> None:
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "custom_components.reminders.delivery.DELIVERY_TIMEOUT_SECONDS", 0.01
+    )
+    dispatcher = DeliveryDispatcher([HungProvider()])  # type: ignore[list-item]
+    result = await dispatcher.async_deliver(
+        reminder(), DeliveryPolicy(channels=("phone",))
+    )
+
+    assert result.succeeded == ()
+    assert result.failed_channels == ("phone",)
+    assert result.errors == ("phone: TimeoutError",)
 
 
 async def test_persistent_notification_omits_private_reminder_content(
