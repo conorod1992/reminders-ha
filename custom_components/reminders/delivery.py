@@ -197,7 +197,9 @@ class NotifyProvider:
             # A phone channel represents the complete configured destination set.
             # Treat partial delivery as a failure so the occurrence cannot be marked
             # fully delivered when an intended endpoint did not receive it.
-            outcome = "Partial phone delivery failed" if succeeded else "Phone delivery failed"
+            outcome = (
+                "Partial phone delivery failed" if succeeded else "Phone delivery failed"
+            )
             raise RuntimeError(f"{outcome}: {'; '.join(errors)}")
 
 
