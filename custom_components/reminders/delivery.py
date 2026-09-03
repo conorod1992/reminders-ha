@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -26,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PERSISTENT_NOTIFICATION_TITLE = "Reminder due"
 PERSISTENT_NOTIFICATION_MESSAGE = "Open Reminders to view the reminder details."
+DELIVERY_TIMEOUT_SECONDS = 30.0
 
 
 class DeliveryProvider(Protocol):
@@ -35,6 +37,18 @@ class DeliveryProvider(Protocol):
 
     async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
         """Deliver a reminder."""
+
+
+async def _async_service_call(
+    hass: HomeAssistant,
+    domain: str,
+    service: str,
+    data: dict[str, Any],
+    **kwargs: Any,
+) -> None:
+    """Call one delivery service without allowing it to stall indefinitely."""
+    async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
+        await hass.services.async_call(domain, service, data, **kwargs)
 
 
 def _delivery_occurrence_id(reminder: Reminder) -> str | None:
@@ -87,7 +101,8 @@ class PersistentNotificationProvider:
             self._hass, reminder.id, occurrence_id, notification_id
         )
         try:
-            await self._hass.services.async_call(
+            await _async_service_call(
+                self._hass,
                 "persistent_notification",
                 "create",
                 {
@@ -124,7 +139,8 @@ class NotifyProvider:
         if policy.notify_targets:
             try:
                 # The generic NotifyEntity API supports message and title only.
-                await self._hass.services.async_call(
+                await _async_service_call(
+                    self._hass,
                     "notify",
                     "send_message",
                     ordinary_data,
@@ -144,7 +160,8 @@ class NotifyProvider:
                     "actions": list(reminder.notification_actions)
                 }
             try:
-                await self._hass.services.async_call(
+                await _async_service_call(
+                    self._hass,
                     "notify",
                     service,
                     actionable_data,
@@ -158,7 +175,8 @@ class NotifyProvider:
                 # A registered target may stop supporting action metadata. Keep
                 # the reminder deliverable by retrying once without buttons.
                 try:
-                    await self._hass.services.async_call(
+                    await _async_service_call(
+                        self._hass,
                         "notify",
                         service,
                         ordinary_data,
@@ -175,13 +193,12 @@ class NotifyProvider:
                 errors.append(f"{action_name}: {type(err).__name__}")
                 continue
             succeeded += 1
-        if not succeeded:
-            raise RuntimeError("; ".join(errors) or "Phone delivery failed")
         if errors:
-            _LOGGER.warning(
-                "Some phone targets failed after another target succeeded: %s",
-                "; ".join(errors),
-            )
+            # A phone channel represents the complete configured destination set.
+            # Treat partial delivery as a failure so the occurrence cannot be marked
+            # fully delivered when an intended endpoint did not receive it.
+            outcome = "Partial phone delivery failed" if succeeded else "Phone delivery failed"
+            raise RuntimeError(f"{outcome}: {'; '.join(errors)}")
 
 
 class VoiceProvider:
@@ -197,7 +214,8 @@ class VoiceProvider:
             raise ValueError(
                 "Voice delivery has no configured Assist satellite targets"
             )
-        await self._hass.services.async_call(
+        await _async_service_call(
+            self._hass,
             "assist_satellite",
             "announce",
             {"message": reminder.message or reminder.title},
@@ -243,7 +261,8 @@ class DeliveryDispatcher:
                 failed.append(channel)
                 continue
             try:
-                await provider.async_deliver(reminder, policy)
+                async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
+                    await provider.async_deliver(reminder, policy)
             except Exception as err:
                 _LOGGER.warning(
                     "Reminder %s delivery through %s failed: %s",
