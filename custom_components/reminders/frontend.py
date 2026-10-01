@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
+
 # HA 2026.9 implicitly re-exports this; keep the path compatible with HA 2026.7.
 from homeassistant.components.http import StaticPathConfig  # type: ignore[attr-defined]
 from homeassistant.core import HomeAssistant
