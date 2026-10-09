@@ -35,6 +35,12 @@ if (proto && !proto.__frontendPolishInstalled) {
     const selectedUser = this._selectedUser;
     const view = this._view;
     const existingValues = historyView ? this._history : this._items;
+    const filterKey = JSON.stringify([view, scope, selectedUser, query]);
+    const preserveDepth = !appendHistory && !appendList
+      && this._loadedFilterKey === filterKey;
+    const restoredLimit = preserveDepth
+      ? Math.max(historyView ? HISTORY_PAGE_SIZE : LIST_PAGE_SIZE, existingValues.length)
+      : historyView ? HISTORY_PAGE_SIZE : LIST_PAGE_SIZE;
     const offset = appendHistory || appendList ? existingValues.length : 0;
     const appendBase = appendHistory || appendList ? [...existingValues] : [];
 
@@ -61,7 +67,7 @@ if (proto && !proto.__frontendPolishInstalled) {
       const data = { scope, query };
       if (scope === "user") data.user_id = selectedUser;
       if (historyView) {
-        data.limit = HISTORY_PAGE_SIZE;
+        data.limit = appendHistory ? HISTORY_PAGE_SIZE : Math.min(200, restoredLimit);
         data.offset = offset;
         const result = await this._call("history", data);
         if (requestId !== this._loadRequestId) return true;
@@ -73,7 +79,7 @@ if (proto && !proto.__frontendPolishInstalled) {
           : this._history.length;
       } else {
         data.view = view;
-        data.limit = LIST_PAGE_SIZE;
+        data.limit = appendList ? LIST_PAGE_SIZE : Math.min(1000, restoredLimit);
         data.offset = offset;
         const result = await this._call("list", data);
         if (requestId !== this._loadRequestId) return true;
@@ -84,6 +90,7 @@ if (proto && !proto.__frontendPolishInstalled) {
           ? result.total
           : this._items.length;
       }
+      this._loadedFilterKey = filterKey;
       this._clearError();
       return true;
     } catch (error) {
