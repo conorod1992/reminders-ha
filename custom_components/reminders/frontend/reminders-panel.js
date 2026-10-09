@@ -260,6 +260,13 @@ class RemindersManagementPanel extends HTMLElement {
     actions.className = "actions";
     const awaiting = awaitingOccurrences(reminder);
     const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
+    const upcomingTask = (reminder.occurrence_history || []).find(
+      (item) => item.id === reminder.current_occurrence_id && item.status === "scheduled"
+    );
+    if (upcomingTask && reminder.status === "pending" && !reminder.paused
+        && reminder.activation_type === "time" && reminder.allow_manual_completion) {
+      actions.append(this._action("Done now", () => this._complete(reminder, upcomingTask.id)));
+    }
     if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
     if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
     if (reminder.status === "failed" && reminder.activation_type === "time"
