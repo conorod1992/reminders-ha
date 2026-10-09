@@ -133,6 +133,7 @@ async def test_recurring_voice_handlers_reuse_owner_checked_manager_operations(
         ("resume", _resume_series),
         ("skip_next", _skip_next_series),
     ):
+
         async def operation(
             reminder_id: str,
             *,
