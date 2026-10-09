@@ -239,7 +239,11 @@ class VoiceProvider:
             self._hass,
             "assist_satellite",
             "announce",
-            {"message": f"{reminder.title}. {reminder.message}" if reminder.message and reminder.message != reminder.title else reminder.title},
+            {
+                "message": f"{reminder.title}. {reminder.message}"
+                if reminder.message and reminder.message != reminder.title
+                else reminder.title
+            },
             target={"entity_id": list(policy.voice_targets)},
             blocking=True,
             context=Context(user_id=reminder.user_id),
