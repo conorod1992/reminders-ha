@@ -278,3 +278,57 @@ async def test_voice_announcement_includes_title_and_notes() -> None:
         DeliveryPolicy(channels=("voice",), voice_targets=("assist_satellite.kitchen",)),
     )
     assert services.calls[0][2]["message"] == "Take parcel to the post office. Label is in the kitchen drawer"
+
+
+async def test_a_failing_generic_notify_entity_does_not_block_another() -> None:
+    class SelectiveServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            self.calls.append((domain, service, data, kwargs))
+            if kwargs.get("target") == {"entity_id": ["notify.offline"]}:
+                raise RuntimeError("device unavailable")
+
+    services = SelectiveServices()
+    provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="notify.offline"):
+        await provider.async_deliver(
+            reminder(),
+            DeliveryPolicy(
+                channels=("phone",),
+                notify_targets=("notify.offline", "notify.healthy"),
+            ),
+        )
+    assert [
+        item[3]["target"]["entity_id"][0] for item in services.calls
+    ] == ["notify.offline", "notify.healthy"]
+
+
+async def test_phone_channel_allows_each_target_its_own_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class SlowServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            calls.append(service)
+            if service == "mobile_app_hung":
+                await asyncio.sleep(0.08)
+
+    monkeypatch.setattr(
+        "custom_components.reminders.delivery.DELIVERY_TIMEOUT_SECONDS", 0.03
+    )
+    dispatcher = DeliveryDispatcher(
+        [NotifyProvider(SimpleNamespace(services=SlowServices()))]  # type: ignore[list-item]
+    )
+    result = await dispatcher.async_deliver(
+        reminder(),
+        DeliveryPolicy(
+            channels=("phone",),
+            mobile_app_services=("notify.mobile_app_hung", "notify.mobile_app_healthy"),
+        ),
+    )
+    assert calls == ["mobile_app_hung", "mobile_app_healthy"]
+    assert result.failed_channels == ("phone",)
