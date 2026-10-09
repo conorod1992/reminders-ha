@@ -124,3 +124,28 @@ test("refresh supersedes an in-flight load-more page", async () => {
   assert.deepEqual(panel._items, [{ id: "fresh" }]);
   assert.equal(panel._listTotal, 1);
 });
+
+
+test("routine list refresh does not replace the focused search field", () => {
+  const panel = makePanel();
+  panel._hass = { user: { is_admin: false } };
+  panel._view = "upcoming";
+  panel._scope = "mine";
+  panel._selectedUser = "";
+  panel._query = "remind";
+  panel._filtersKey = "upcoming|mine||false";
+  const search = { value: "reminder in progress" };
+  let replaced = false;
+  const host = {
+    childElementCount: 1,
+    querySelector: () => search,
+    replaceChildren: () => { replaced = true; },
+  };
+  panel.shadowRoot = {
+    activeElement: search,
+    querySelector: (selector) => selector === "#filters" ? host : null,
+  };
+  panel._renderFilters();
+  assert.equal(replaced, false);
+  assert.equal(search.value, "reminder in progress");
+});
