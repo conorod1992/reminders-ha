@@ -504,7 +504,7 @@ async def _list(
             ReminderStatus.WAITING_FOR_TRIGGER,
             ReminderStatus.INACTIVE_BEFORE_AVAILABLE_FROM,
         }
-    reminders = await _manager(hass).async_list(
+    reminders, total = await _manager(hass).async_list_page(
         user_id=user_id,
         statuses=statuses,
         query=args.get("query"),
@@ -522,7 +522,11 @@ async def _list(
         ),
         limit=args["limit"],
     )
-    return {"reminders": [_compact_reminder(item) for item in reminders]}
+    return {
+        "reminders": [_compact_reminder(item) for item in reminders],
+        "total": total,
+        "has_more": len(reminders) < total,
+    }
 
 
 async def _resolve_reminder(
