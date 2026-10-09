@@ -2976,7 +2976,9 @@ class ReminderManager:
             if claims:
                 await self._async_persist_state(candidate, self._users)
         for reminder_id, occurrence_id, number, delivery_reminder, policy in claims:
-            result = await self._async_deliver_with_current_permissions(delivery_reminder, policy)
+            result = await self._async_deliver_with_current_permissions(
+                delivery_reminder, policy
+            )
             finalize_cleanup = False
             async with self._lock:
                 current = self._reminders.get(reminder_id)
