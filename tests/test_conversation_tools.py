@@ -188,6 +188,7 @@ async def test_voice_list_discloses_when_results_are_truncated(
     assert result["total"] == 2
     assert result["has_more"] is True
 
+
 async def test_voice_list_can_retrieve_following_page(
     runtime: tuple[Any, ReminderManager],
 ) -> None:
@@ -201,6 +202,7 @@ async def test_voice_list_can_retrieve_following_page(
     assert second["next_offset"] == 2
     assert second["has_more"] is False
     assert first["reminders"][0]["id"] != second["reminders"][0]["id"]
+
 
 async def test_voice_can_edit_existing_recurring_pattern(
     runtime: tuple[Any, ReminderManager],
