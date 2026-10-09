@@ -119,6 +119,21 @@ class PersistentNotificationProvider:
             raise
 
 
+def _mobile_actions(actions: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+    """Keep the three most useful actions on Companion App notifications.
+
+    Android limits notification action buttons to three. Preserve explicit
+    completion/dismissal first, then one snooze; any remaining actions are
+    available through the reminder panel rather than invisible notification
+    buttons.
+    """
+    priority = {"DONE": 0, "DISMISS": 1, "SNOOZE_10": 2, "SNOOZE_60": 3}
+    def rank(action: dict[str, Any]) -> int:
+        name = str(action.get("action", "")).rsplit(":", 1)[-1]
+        return priority.get(name, 4)
+    return sorted(actions, key=rank)[:3]
+
+
 class NotifyProvider:
     """Deliver through generic entities and explicit Companion App services."""
 
@@ -157,7 +172,7 @@ class NotifyProvider:
             actionable_data = dict(ordinary_data)
             if reminder.notification_actions:
                 actionable_data["data"] = {
-                    "actions": list(reminder.notification_actions)
+                    "actions": _mobile_actions(reminder.notification_actions)
                 }
             try:
                 await _async_service_call(
@@ -222,7 +237,7 @@ class VoiceProvider:
             self._hass,
             "assist_satellite",
             "announce",
-            {"message": reminder.message or reminder.title},
+            {"message": f"{reminder.title}. {reminder.message}" if reminder.message and reminder.message != reminder.title else reminder.title},
             target={"entity_id": list(policy.voice_targets)},
             blocking=True,
             context=Context(user_id=reminder.user_id),
