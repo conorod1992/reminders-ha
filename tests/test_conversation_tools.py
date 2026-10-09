@@ -22,6 +22,7 @@ from custom_components.reminders.conversation import (
     _update,
 )
 from custom_components.reminders.manager import ReminderManager
+from custom_components.reminders.recurrence import RecurrenceFrequency, RecurrenceRule
 
 from .conftest import FakeDispatcher, FakeStore
 
@@ -200,3 +201,41 @@ async def test_voice_list_can_retrieve_following_page(
     assert second["next_offset"] == 2
     assert second["has_more"] is False
     assert first["reminders"][0]["id"] != second["reminders"][0]["id"]
+
+async def test_voice_can_edit_existing_recurring_pattern(
+    runtime: tuple[Any, ReminderManager],
+) -> None:
+    hass, manager = runtime
+    start = (datetime.now(UTC) + timedelta(days=2)).replace(tzinfo=None)
+    series = await manager.async_create_recurring(
+        user_id="u1",
+        title="Scheduled chore",
+        recurrence=RecurrenceRule(RecurrenceFrequency.DAILY, 1, "UTC", start),
+    )
+    response = await _update(
+        hass,
+        {
+            "reminder_id": series.id,
+            "frequency": "weekly",
+            "weekdays": ["monday", "wednesday"],
+        },
+        context("u1"),
+    )
+    assert response["reminder"]["recurrence"]["frequency"] == "weekly"
+    assert set(response["reminder"]["recurrence"]["weekdays"]) == {
+        "monday",
+        "wednesday",
+    }
+
+
+async def test_voice_cannot_add_recurrence_to_one_time_reminder(
+    runtime: tuple[Any, ReminderManager],
+) -> None:
+    from custom_components.reminders.manager import ReminderValidationError
+
+    hass, manager = runtime
+    item = (await manager.async_list(user_id="u1"))[0]
+    with pytest.raises(ReminderValidationError, match="recurring"):
+        await _update(
+            hass, {"reminder_id": item.id, "frequency": "daily"}, context("u1")
+        )
