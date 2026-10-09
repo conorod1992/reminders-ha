@@ -261,7 +261,9 @@ def _tools() -> list[llm.Tool]:
                             vol.Optional("escalation"): vol.Any(None, dict),
                             vol.Optional("allow_manual_completion"): cv.boolean,
                             vol.Optional("first_reminder"): cv.string,
-                            vol.Optional("frequency"): vol.In(tuple(RecurrenceFrequency)),
+                            vol.Optional("frequency"): vol.In(
+                                tuple(RecurrenceFrequency)
+                            ),
                             vol.Optional("interval"): vol.All(
                                 vol.Coerce(int), vol.Range(min=1)
                             ),
@@ -679,9 +681,7 @@ async def _update(
             raise ReminderValidationError(
                 "Recurrence fields can only update a recurring reminder"
             )
-        changes["recurrence"] = _recurrence_from_data(
-            hass, args, reminder.recurrence
-        )
+        changes["recurrence"] = _recurrence_from_data(hass, args, reminder.recurrence)
     if not changes:
         raise ReminderValidationError("No reminder changes were provided")
     updated = await _manager(hass).async_update(
