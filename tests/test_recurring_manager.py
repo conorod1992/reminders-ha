@@ -11,6 +11,7 @@ import pytest
 from custom_components.reminders.delivery import DeliveryResult
 from custom_components.reminders.manager import ReminderManager
 from custom_components.reminders.models import (
+    AcknowledgementPolicy,
     DeliveryPolicy,
     MissedOccurrencePolicy,
     Occurrence,
@@ -237,6 +238,7 @@ async def test_partial_phone_success_remains_delivered_and_actionable(
         id="partial-phone",
         user_id="u1",
         title="Check medication",
+        acknowledgement_policy=AcknowledgementPolicy.REQUIRED,
         due=now - timedelta(minutes=1),
         created_at=now,
         updated_at=now,
@@ -249,7 +251,7 @@ async def test_partial_phone_success_remains_delivered_and_actionable(
     )
     await runtime.async_load()
     updated = await runtime.async_get(reminder.id)
-    assert updated.status is ReminderStatus.DELIVERED
+    assert updated.status is ReminderStatus.AWAITING_ACKNOWLEDGEMENT
     assert updated.delivery_errors == (
         "phone: notify.mobile_app_tablet: RuntimeError",
     )
