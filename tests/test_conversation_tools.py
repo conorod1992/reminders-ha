@@ -12,7 +12,14 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import llm
 
 from custom_components.reminders.const import DOMAIN
-from custom_components.reminders.conversation import _list, _tools, _update
+from custom_components.reminders.conversation import (
+    _list,
+    _pause_series,
+    _resume_series,
+    _skip_next_series,
+    _tools,
+    _update,
+)
 from custom_components.reminders.manager import ReminderManager
 
 from .conftest import FakeDispatcher, FakeStore
@@ -105,3 +112,37 @@ def test_recurring_voice_controls_are_exposed() -> None:
         "resume_recurring_reminder",
         "skip_next_reminder",
     } <= names
+
+
+async def test_recurring_voice_handlers_reuse_owner_checked_manager_operations(
+    runtime: tuple[Any, ReminderManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, manager = runtime
+    item = (await manager.async_list(user_id="u1"))[0]
+    expected = [
+        ("pause", item.id, "u1"),
+        ("resume", item.id, "u1"),
+        ("skip_next", item.id, "u1"),
+    ]
+    calls: list[tuple[str, str, str | None]] = []
+
+    for name, handler in (
+        ("pause", _pause_series),
+        ("resume", _resume_series),
+        ("skip_next", _skip_next_series),
+    ):
+        async def operation(
+            reminder_id: str,
+            *,
+            expected_user_id: str | None = None,
+            action: str = name,
+        ) -> Any:
+            calls.append((action, reminder_id, expected_user_id))
+            return item
+
+        monkeypatch.setattr(manager, f"async_{name}", operation)
+        result = await handler(hass, {"reminder_id": item.id}, context("u1"))
+        assert result["reminder"]["id"] == item.id
+
+    assert calls == expected
