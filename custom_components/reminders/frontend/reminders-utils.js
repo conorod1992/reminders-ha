@@ -126,8 +126,11 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
     const hour = Math.min(23, Math.max(18, currentHour + 2));
     return { date: today.date, time: `${String(hour).padStart(2, "0")}:${hour === 23 ? "59" : "00"}` };
   }
-  const tomorrow = zonedInputParts(new Date(instant.getTime() + 36 * 3600000), timeZone);
-  return { date: tomorrow.date, time: "09:00" };
+  const [year, month, day] = today.date.split("-").map(Number);
+  // Advance the calendar date, not the instant: +36h can skip tomorrow
+  // when the shortcut is used in the afternoon or evening.
+  const nextDate = new Date(Date.UTC(year, month - 1, day + 1));
+  return { date: nextDate.toISOString().slice(0, 10), time: "09:00" };
 }
 
 export function acknowledgementSummary(reminder) {
