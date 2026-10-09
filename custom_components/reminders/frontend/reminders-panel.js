@@ -940,8 +940,6 @@ class RemindersManagementPanel extends HTMLElement {
       quiet_hours_enabled: dialog.querySelector("[name=quiet_enabled]").checked,
       quiet_hours_start: dialog.querySelector("[name=quiet_start]").value,
       quiet_hours_end: dialog.querySelector("[name=quiet_end]").value,
-      quiet_hours_channels: ["voice"],
-      quiet_hours_fallback_channels: ["persistent_notification"],
       history_retention_days: Number(dialog.querySelector("[name=retention_days]").value),
       history_max_occurrences: Number(dialog.querySelector("[name=retention_count]").value),
     };
@@ -952,7 +950,12 @@ class RemindersManagementPanel extends HTMLElement {
       const result = await this._call("set_preferences", this._preferencesPayload(dialog, target));
       if (target === this._hass.user.id) this._preferences = result.preferences;
       return true;
-    } catch (error) { this._showError(error); return false; }
+    } catch (error) {
+      const host = dialog.querySelector(".test-result");
+      if (host) { host.className = "test-result hint"; host.textContent = error.message || String(error); }
+      else this._showError(error);
+      return false;
+    }
   }
 
   async _testDelivery(dialog, target, channel) {
@@ -981,6 +984,11 @@ class RemindersManagementPanel extends HTMLElement {
   _entitySelect(domain, selected = []) {
     const select = document.createElement("select"); select.multiple = true;
     for (const [id, state] of Object.entries(this._hass.states || {}).filter(([id]) => id.startsWith(`${domain}.`))) select.add(new Option(state.attributes.friendly_name || id, id, false, selected.includes(id)));
+    for (const id of selected) {
+      if (![...select.options].some((option) => option.value === id)) {
+        select.add(new Option(`${id} (currently unavailable)`, id, true, true));
+      }
+    }
     return select;
   }
 
