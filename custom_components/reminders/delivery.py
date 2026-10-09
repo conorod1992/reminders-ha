@@ -132,6 +132,7 @@ def _mobile_actions(actions: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]
     def rank(action: dict[str, Any]) -> int:
         name = str(action.get("action", "")).rsplit(":", 1)[-1]
         return priority.get(name, 4)
+
     return sorted(actions, key=rank)[:3]
 
 
