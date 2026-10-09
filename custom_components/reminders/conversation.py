@@ -563,7 +563,9 @@ async def _resolve_reminder(
             "message": (
                 "Too many possible matches to identify a reminder safely"
                 if not search_exhausted
-                else "No exact match" if not matches else "Several reminders match"
+                else "No exact match"
+                if not matches
+                else "Several reminders match"
             ),
             "candidates": [
                 {
