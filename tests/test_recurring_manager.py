@@ -252,9 +252,7 @@ async def test_partial_phone_success_remains_delivered_and_actionable(
     await runtime.async_load()
     updated = await runtime.async_get(reminder.id)
     assert updated.status is ReminderStatus.AWAITING_ACKNOWLEDGEMENT
-    assert updated.delivery_errors == (
-        "phone: notify.mobile_app_tablet: RuntimeError",
-    )
+    assert updated.delivery_errors == ("phone: notify.mobile_app_tablet: RuntimeError",)
     assert updated.occurrence_history[-1].succeeded_channels == ("phone",)
     assert updated.occurrence_history[-1].failed_channels == ("phone",)
 
