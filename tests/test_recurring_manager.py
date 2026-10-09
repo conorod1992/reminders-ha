@@ -788,16 +788,25 @@ async def test_overdue_secondary_deadlines_remain_scheduled(
     now = datetime.now(UTC)
     earlier = now - timedelta(minutes=2)
     pending = Occurrence(
-        "old-snooze", earlier, earlier,
-        status=OccurrenceStatus.SCHEDULED, snoozed=True,
+        "old-snooze",
+        earlier,
+        earlier,
+        status=OccurrenceStatus.SCHEDULED,
+        snoozed=True,
     )
     future = Occurrence(
-        "next", now + timedelta(days=1), now + timedelta(days=1),
+        "next",
+        now + timedelta(days=1),
+        now + timedelta(days=1),
         status=OccurrenceStatus.SCHEDULED,
     )
     reminder = Reminder(
-        id="overdue-secondary", user_id="u1", title="Recurrence",
-        due=future.due, created_at=now, updated_at=now,
+        id="overdue-secondary",
+        user_id="u1",
+        title="Recurrence",
+        due=future.due,
+        created_at=now,
+        updated_at=now,
         recurrence=daily(now.replace(tzinfo=None) + timedelta(days=1)),
         current_occurrence_id=future.id,
         occurrence_history=(pending, future),
