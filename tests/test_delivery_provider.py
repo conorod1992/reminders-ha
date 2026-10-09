@@ -244,3 +244,37 @@ async def test_persistent_notification_omits_private_reminder_content(
     assert private.message not in data["message"]
     assert data["notification_id"].startswith("reminders_")
     assert kwargs == {"blocking": True}
+
+
+async def test_mobile_actions_prioritise_done_dismiss_and_one_snooze() -> None:
+    services = Services()
+    provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
+    source = reminder().updated(
+        notification_actions=(
+            {"action": "token:SNOOZE_60", "title": "Snooze 1 hour"},
+            {"action": "token:SNOOZE_10", "title": "Snooze 10 min"},
+            {"action": "token:DISMISS", "title": "Dismiss"},
+            {"action": "token:DONE", "title": "Done"},
+            {"action": "token:EXTERNAL_other", "title": "Other"},
+        ),
+    )
+    await provider.async_deliver(
+        source,
+        DeliveryPolicy(channels=("phone",), mobile_app_services=("notify.mobile_app_conor",)),
+    )
+    actions = services.calls[0][2]["data"]["actions"]
+    assert [item["title"] for item in actions] == ["Done", "Dismiss", "Snooze 10 min"]
+    assert len(actions) == 3
+
+
+async def test_voice_announcement_includes_title_and_notes() -> None:
+    from custom_components.reminders.delivery import VoiceProvider
+
+    services = Services()
+    provider = VoiceProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
+    source = reminder().updated(title="Take parcel to the post office", message="Label is in the kitchen drawer")
+    await provider.async_deliver(
+        source,
+        DeliveryPolicy(channels=("voice",), voice_targets=("assist_satellite.kitchen",)),
+    )
+    assert services.calls[0][2]["message"] == "Take parcel to the post office. Label is in the kitchen drawer"
