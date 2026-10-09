@@ -300,7 +300,7 @@ async def test_a_failing_generic_notify_entity_does_not_block_another() -> None:
 
     services = SelectiveServices()
     provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
-    with pytest.raises(RuntimeError, match="notify.offline"):
+    with pytest.raises(RuntimeError, match=r"notify\.offline"):
         await provider.async_deliver(
             reminder(),
             DeliveryPolicy(
