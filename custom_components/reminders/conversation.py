@@ -299,7 +299,7 @@ def _tools() -> list[llm.Tool]:
         ),
         RemindersTool(
             "skip_next_reminder",
-            "Skip only the next occurrence of a recurring series without cancelling future occurrences.",
+            "Skip the next occurrence of a recurring series without cancelling the series.",
             vol.Schema(
                 vol.All(
                     vol.Schema(TARGET_SCHEMA),
