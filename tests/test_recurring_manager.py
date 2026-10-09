@@ -221,6 +221,42 @@ async def test_partial_provider_failure_advances_as_success(
     assert advanced.delivery_errors == ("phone: RuntimeError",)
 
 
+async def test_partial_phone_success_remains_delivered_and_actionable(
+    scheduler: Scheduler,
+) -> None:
+    class PartialPhoneDispatcher:
+        async def async_deliver(self, reminder: Any, policy: Any) -> DeliveryResult:
+            return DeliveryResult(
+                ("phone",),
+                ("phone: notify.mobile_app_tablet: RuntimeError",),
+                ("phone",),
+            )
+
+    now = datetime.now(UTC)
+    reminder = Reminder(
+        id="partial-phone",
+        user_id="u1",
+        title="Check medication",
+        due=now - timedelta(minutes=1),
+        created_at=now,
+        updated_at=now,
+        delivery_policy=DeliveryPolicy(("phone",)),
+    )
+    runtime = ReminderManager(  # type: ignore[arg-type]
+        SimpleNamespace(),
+        FakeStore(serialize_storage({reminder.id: reminder}, {})),
+        PartialPhoneDispatcher(),  # type: ignore[arg-type]
+    )
+    await runtime.async_load()
+    updated = await runtime.async_get(reminder.id)
+    assert updated.status is ReminderStatus.DELIVERED
+    assert updated.delivery_errors == (
+        "phone: notify.mobile_app_tablet: RuntimeError",
+    )
+    assert updated.occurrence_history[-1].succeeded_channels == ("phone",)
+    assert updated.occurrence_history[-1].failed_channels == ("phone",)
+
+
 async def test_long_outage_delivers_once_and_keeps_anchor_phase(
     scheduler: Scheduler,
 ) -> None:
