@@ -37,6 +37,13 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
       ? _clone(source.delivery_conditions)
       : _legacyDeliveryConditions(source?.deliver_when);
 
+    // Native rule arrays are the source of truth when editing an existing
+    // reminder; legacy context fields may be absent even when rules exist.
+    if (completion.length) form.elements.complete_when_enabled.checked = true;
+    if (deliveryTriggers.length || deliveryConditions.length) {
+      form.elements.deliver_when_enabled.checked = true;
+    }
+
     form._nativeRules = {
       activation,
       completion,
@@ -334,7 +341,7 @@ function _installClassicFallback(panel, form) {
       for (const field of legacy.querySelectorAll("input,select,textarea")) field.disabled = false;
     }
     for (const native of form.querySelectorAll(".native-rule-section,.native-delivery-section,.native-classic-fallback")) native.classList.add("hidden");
-    panel._syncActivationUI(form);
+    panel._syncActivation(form);
     panel._syncAdvancedContexts(form);
     panel._updateBehaviorSummary(form);
   };
