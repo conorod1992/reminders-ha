@@ -35,7 +35,9 @@ class DeliveryProvider(Protocol):
 
     channel: str
 
-    async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
+    async def async_deliver(
+        self, reminder: Reminder, policy: DeliveryPolicy
+    ) -> PartialDeliveryOutcome | None:
         """Deliver a reminder."""
 
 
