@@ -155,7 +155,7 @@ async def test_all_phone_targets_failing_raises() -> None:
         )
 
 
-async def test_partial_phone_target_failure_marks_channel_failed() -> None:
+async def test_partial_phone_target_failure_preserves_actionable_success() -> None:
     class PartialServices(Services):
         async def async_call(
             self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
@@ -179,9 +179,9 @@ async def test_partial_phone_target_failure_marks_channel_failed() -> None:
         ),
     )
 
-    assert result.succeeded == ()
+    assert result.succeeded == ("phone",)
     assert result.failed_channels == ("phone",)
-    assert result.errors == ("phone: RuntimeError",)
+    assert result.errors == ("phone: notify.mobile_app_tablet: RuntimeError",)
 
 
 async def test_dispatcher_times_out_hung_provider(
