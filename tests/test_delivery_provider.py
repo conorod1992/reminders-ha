@@ -308,9 +308,10 @@ async def test_a_failing_generic_notify_entity_does_not_block_another() -> None:
                 notify_targets=("notify.offline", "notify.healthy"),
             ),
         )
-    assert [
-        item[3]["target"]["entity_id"][0] for item in services.calls
-    ] == ["notify.offline", "notify.healthy"]
+    assert [item[3]["target"]["entity_id"][0] for item in services.calls] == [
+        "notify.offline",
+        "notify.healthy",
+    ]
 
 
 async def test_phone_channel_allows_each_target_its_own_timeout(
