@@ -780,3 +780,29 @@ async def test_pause_holds_independent_snoozed_retry_until_resume(
         item for item in resumed.occurrence_history if item.id == retry.id
     )
     assert restored_retry.status is OccurrenceStatus.DELIVERED
+
+
+async def test_overdue_secondary_deadlines_remain_scheduled(
+    scheduler: Scheduler,
+) -> None:
+    now = datetime.now(UTC)
+    earlier = now - timedelta(minutes=2)
+    pending = Occurrence(
+        "old-snooze", earlier, earlier,
+        status=OccurrenceStatus.SCHEDULED, snoozed=True,
+    )
+    future = Occurrence(
+        "next", now + timedelta(days=1), now + timedelta(days=1),
+        status=OccurrenceStatus.SCHEDULED,
+    )
+    reminder = Reminder(
+        id="overdue-secondary", user_id="u1", title="Recurrence",
+        due=future.due, created_at=now, updated_at=now,
+        recurrence=daily(now.replace(tzinfo=None) + timedelta(days=1)),
+        current_occurrence_id=future.id,
+        occurrence_history=(pending, future),
+    )
+    runtime = await manager(FakeStore(), FakeDispatcher(), scheduler)
+    runtime._reminders = {reminder.id: reminder}
+    runtime._reschedule(force=True)
+    assert scheduler.calls[-1] == earlier
