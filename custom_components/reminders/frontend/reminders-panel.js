@@ -3,6 +3,7 @@ import {
   acknowledgementSummary,
   awaitingOccurrences,
   deliverySummary,
+  historyHighlights,
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
@@ -302,6 +303,7 @@ class RemindersManagementPanel extends HTMLElement {
     if (occurrence.failed_channels.length) extras.push(`Failed: ${occurrence.failed_channels.join(", ")}`);
     if (occurrence.suppressed_channels.length) extras.push(`Quiet hours suppressed: ${occurrence.suppressed_channels.join(", ")}`);
     if (occurrence.snoozed) extras.push("Snoozed");
+    extras.push(...historyHighlights(occurrence, (value) => this._formatDate(value)));
     if (row.owner_name) extras.push(row.owner_name);
     details.textContent = extras.join(" · ");
     body.append(title, status, details);
