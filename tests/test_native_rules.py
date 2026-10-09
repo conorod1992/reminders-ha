@@ -340,3 +340,41 @@ async def test_native_runtime_cancels_retry_when_trigger_is_no_longer_armed(
     assert initialize.await_count == 1
 
     await runtime.async_unload()
+
+
+async def test_native_skip_on_recovery_precedes_wait_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import timedelta
+
+    from custom_components.reminders.models import (
+        MissedOccurrencePolicy,
+        ReminderStatus,
+    )
+    from custom_components.reminders.recurrence import (
+        RecurrenceFrequency,
+        RecurrenceRule,
+    )
+
+    now = datetime.now(UTC)
+    overdue = now - timedelta(hours=6)
+    manager, dispatcher = _manager(monkeypatch)
+    rule = RecurrenceRule(
+        RecurrenceFrequency.DAILY, 1, "UTC", overdue.replace(tzinfo=None)
+    )
+    reminder = _timed_reminder(
+        overdue,
+        recurrence=rule,
+        missed_occurrence_policy=MissedOccurrencePolicy.SKIP,
+        delivery_triggers=(
+            {"trigger": "state", "entity_id": "person.user", "to": "home"},
+        ),
+    )
+    manager._reminders = {reminder.id: reminder}
+    manager._native_runtime.async_conditions_match = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    await manager._async_process_due(now, recover_missed=True)
+    updated = manager._reminders[reminder.id]
+    assert updated.status is ReminderStatus.PENDING
+    assert updated.due is not None and updated.due > now
+    assert any(item.status.value == "skipped" for item in updated.occurrence_history)
+    assert dispatcher.calls == []

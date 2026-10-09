@@ -24,6 +24,7 @@ from .manager import (
 )
 from .models import (
     ActivationType,
+    MissedOccurrencePolicy,
     OccurrenceStatus,
     Reminder,
     ReminderStatus,
@@ -213,6 +214,16 @@ class NativeReminderManager(ReminderManager):
             and (reminder.delivery_triggers or reminder.delivery_conditions)
         ]
         for reminder in candidates:
+            # Let the shared recovery processor apply the series skip policy
+            # before native gates can change PENDING into WAITING_FOR_CONTEXT.
+            if (
+                recover_missed
+                and reminder.recurrence is not None
+                and reminder.missed_occurrence_policy is MissedOccurrencePolicy.SKIP
+                and reminder.due is not None
+                and reminder.due < effective_now
+            ):
+                continue
             try:
                 await self._async_validate_security(reminder)
             except ReminderValidationError:
