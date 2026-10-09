@@ -524,14 +524,14 @@ async def _list(
             else None
         ),
         limit=args["limit"],
-        offset=args["offset"],
+        offset=args.get("offset", 0),
     )
     return {
         "reminders": [_compact_reminder(item) for item in reminders],
         "total": total,
-        "offset": args["offset"],
-        "next_offset": args["offset"] + len(reminders),
-        "has_more": args["offset"] + len(reminders) < total,
+        "offset": args.get("offset", 0),
+        "next_offset": args.get("offset", 0) + len(reminders),
+        "has_more": args.get("offset", 0) + len(reminders) < total,
     }
 
 
