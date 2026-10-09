@@ -186,3 +186,17 @@ async def test_voice_list_discloses_when_results_are_truncated(
     assert len(result["reminders"]) == 1
     assert result["total"] == 2
     assert result["has_more"] is True
+
+async def test_voice_list_can_retrieve_following_page(
+    runtime: tuple[Any, ReminderManager],
+) -> None:
+    hass, _ = runtime
+    first = await _list(hass, {"limit": 1, "offset": 0}, context("u1"))
+    second = await _list(hass, {"limit": 1, "offset": 1}, context("u1"))
+    assert first["total"] == second["total"] == 2
+    assert first["next_offset"] == 1
+    assert first["has_more"] is True
+    assert second["offset"] == 1
+    assert second["next_offset"] == 2
+    assert second["has_more"] is False
+    assert first["reminders"][0]["id"] != second["reminders"][0]["id"]
