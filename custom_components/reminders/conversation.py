@@ -535,18 +535,36 @@ async def _resolve_reminder(
     if reminder_id := args.get("reminder_id"):
         return await async_get_authorized(manager, actor, reminder_id), None, actor
     user_id = await async_resolve_list_user(hass, actor, args.get("user_id"))
-    matches = [
-        item
-        for item in await manager.async_list(user_id=user_id, query=args["title"])
-        if item.title.casefold() == args["title"].strip().casefold()
-    ]
-    if len(matches) == 1:
+    # Check the full bounded search rather than its first 500 rows: an
+    # exact duplicate beyond that page must never be silently overlooked.
+    matches: list[Reminder] = []
+    offset = 0
+    page_size = 1000
+    search_exhausted = False
+    while offset < 20_000 and len(matches) < 2:
+        page, total = await manager.async_list_page(
+            user_id=user_id, query=args["title"], limit=page_size, offset=offset
+        )
+        matches.extend(
+            item
+            for item in page
+            if item.title.casefold() == args["title"].strip().casefold()
+        )
+        offset += len(page)
+        if offset >= total or not page:
+            search_exhausted = True
+            break
+    if len(matches) == 1 and search_exhausted:
         return matches[0], None, actor
     return (
         None,
         {
             "needs_disambiguation": True,
-            "message": "No exact match" if not matches else "Several reminders match",
+            "message": (
+                "Too many possible matches to identify a reminder safely"
+                if not search_exhausted
+                else "No exact match" if not matches else "Several reminders match"
+            ),
             "candidates": [
                 {
                     "id": item.id,
