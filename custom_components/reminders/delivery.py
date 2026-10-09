@@ -320,7 +320,5 @@ class DeliveryDispatcher:
                 succeeded.append(channel)
                 if isinstance(outcome, PartialDeliveryOutcome):
                     failed.append(channel)
-                    errors.extend(
-                        f"{channel}: {error}" for error in outcome.errors
-                    )
+                    errors.extend(f"{channel}: {error}" for error in outcome.errors)
         return DeliveryResult(tuple(succeeded), tuple(errors), tuple(failed))
