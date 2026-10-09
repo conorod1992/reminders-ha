@@ -36,6 +36,9 @@ test("combines date and time without inventing a timezone", () => {
 test("creates quick choices in the configured timezone", () => {
   assert.deepEqual(quickTimeParts("10m", "UTC", Date.parse("2026-08-04T09:00:00Z")), { date: "2026-08-04", time: "09:10" });
   assert.deepEqual(quickTimeParts("tomorrow", "UTC", Date.parse("2026-08-04T09:00:00Z")), { date: "2026-08-05", time: "09:00" });
+  assert.deepEqual(quickTimeParts("tomorrow", "Europe/Dublin", Date.parse("2026-10-09T22:30:00Z")), { date: "2026-10-10", time: "09:00" });
+  assert.deepEqual(quickTimeParts("tomorrow", "Europe/Dublin", Date.parse("2026-10-09T14:00:00Z")), { date: "2026-10-10", time: "09:00" });
+  assert.deepEqual(quickTimeParts("tomorrow", "UTC", Date.parse("2026-12-31T22:00:00Z")), { date: "2027-01-01", time: "09:00" });
 });
 
 test("summarizes acknowledgement and finds actionable occurrences", () => {
