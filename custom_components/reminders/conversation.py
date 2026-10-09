@@ -208,6 +208,9 @@ def _tools() -> list[llm.Tool]:
                     vol.Optional("limit", default=20): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=100)
                     ),
+                    vol.Optional("offset", default=0): vol.All(
+                        vol.Coerce(int), vol.Range(min=0)
+                    ),
                 }
             ),
             _list,
@@ -521,11 +524,14 @@ async def _list(
             else None
         ),
         limit=args["limit"],
+        offset=args["offset"],
     )
     return {
         "reminders": [_compact_reminder(item) for item in reminders],
         "total": total,
-        "has_more": len(reminders) < total,
+        "offset": args["offset"],
+        "next_offset": args["offset"] + len(reminders),
+        "has_more": args["offset"] + len(reminders) < total,
     }
 
 
