@@ -186,3 +186,22 @@ export function relativeTime(value, locale = undefined, now = Date.now()) {
   if (Math.abs(seconds) < 86400) return formatter.format(Math.round(seconds / 3600), "hour");
   return formatter.format(Math.round(seconds / 86400), "day");
 }
+
+export function historyHighlights(occurrence, formatDate) {
+  const result = [];
+  const display = (value) => formatDate(value);
+  if (occurrence.scheduled_due && occurrence.due
+      && occurrence.scheduled_due !== occurrence.due) {
+    result.push(`Moved to ${display(occurrence.due)}`);
+  }
+  if (occurrence.delivered_at) result.push(`Sent ${display(occurrence.delivered_at)}`);
+  if (occurrence.acknowledged_at) result.push(`Dismissed ${display(occurrence.acknowledged_at)}`);
+  else if (occurrence.completed_at && occurrence.status === "completed") {
+    result.push(`Completed ${display(occurrence.completed_at)}`);
+  }
+  if (occurrence.next_escalation_at) result.push(`Next follow-up ${display(occurrence.next_escalation_at)}`);
+  if (occurrence.delivery_errors?.length) {
+    result.push(`Delivery errors: ${occurrence.delivery_errors.join(", ")}`);
+  }
+  return result;
+}
