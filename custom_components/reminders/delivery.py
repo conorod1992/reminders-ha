@@ -304,7 +304,7 @@ class DeliveryDispatcher:
                     else 1
                 )
                 async with asyncio.timeout(
-                    DELIVERY_TIMEOUT_SECONDS * max(1, destination_count * 2)
+                    min(180.0, DELIVERY_TIMEOUT_SECONDS * max(1, destination_count * 2))
                     if channel == CHANNEL_PHONE
                     else DELIVERY_TIMEOUT_SECONDS
                 ):
