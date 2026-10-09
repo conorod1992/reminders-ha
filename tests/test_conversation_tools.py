@@ -104,6 +104,8 @@ async def test_admin_targeting_is_explicit(
     other = await _list(hass, {"user_id": "u2", "limit": 20}, context("admin"))
     assert own["reminders"] == []
     assert [item["title"] for item in other["reminders"]] == ["Private"]
+    assert other["total"] == 1
+    assert other["has_more"] is False
 
 
 def test_recurring_voice_controls_are_exposed() -> None:
@@ -174,3 +176,13 @@ async def test_exact_title_disambiguation_searches_past_first_page(
     assert response is not None
     assert response["needs_disambiguation"] is True
     assert len(response["candidates"]) == 2
+
+
+async def test_voice_list_discloses_when_results_are_truncated(
+    runtime: tuple[Any, ReminderManager],
+) -> None:
+    hass, _ = runtime
+    result = await _list(hass, {"limit": 1}, context("u1"))
+    assert len(result["reminders"]) == 1
+    assert result["total"] == 2
+    assert result["has_more"] is True
