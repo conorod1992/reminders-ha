@@ -1480,13 +1480,12 @@ class ReminderManager:
                     now, reminder.available_from, reminder.expires_at
                 )
                 current_occurrence_id = None
-            if updated is None:
-                updated = reminder.updated(
-                    occurrence_history=tuple(history),
-                    status=status,
-                    current_occurrence_id=current_occurrence_id,
-                    updated_at=now,
-                )
+            updated = reminder.updated(
+                occurrence_history=tuple(history),
+                status=status,
+                current_occurrence_id=current_occurrence_id,
+                updated_at=now,
+            )
             candidate = dict(self._reminders)
             candidate[reminder.id] = updated
             await self._async_persist_state(candidate, self._users)
