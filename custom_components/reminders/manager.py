@@ -2847,7 +2847,7 @@ class ReminderManager:
                     occurrence.external_action_id,
                 )
             )
-        result = await self._dispatcher.async_deliver(
+        result = await self._async_deliver_with_current_permissions(
             delivery_reminder, delivery_policy
         )
         stale_delivery = False
@@ -2976,7 +2976,7 @@ class ReminderManager:
             if claims:
                 await self._async_persist_state(candidate, self._users)
         for reminder_id, occurrence_id, number, delivery_reminder, policy in claims:
-            result = await self._dispatcher.async_deliver(delivery_reminder, policy)
+            result = await self._async_deliver_with_current_permissions(delivery_reminder, policy)
             finalize_cleanup = False
             async with self._lock:
                 current = self._reminders.get(reminder_id)
@@ -3335,6 +3335,26 @@ class ReminderManager:
             suppressed,
         )
 
+    async def _async_deliver_with_current_permissions(
+        self, reminder: Reminder, policy: DeliveryPolicy
+    ) -> DeliveryResult:
+        """Enforce current owner access for every secondary delivery attempt."""
+        permitted, denied = await async_filter_delivery_policy_permissions(
+            self._hass, reminder.user_id, policy
+        )
+        result = (
+            await self._dispatcher.async_deliver(reminder, permitted)
+            if permitted.channels
+            else DeliveryResult((), ())
+        )
+        if not denied:
+            return result
+        return DeliveryResult(
+            result.succeeded,
+            (*result.errors, *(f"{channel}: permission_denied" for channel in denied)),
+            tuple(dict.fromkeys((*result.failed_channels, *denied))),
+        )
+
     def _reschedule_if_needed(self, candidate: datetime) -> None:
         if self._scheduled_for is None or candidate < self._scheduled_for:
             self._reschedule(force=True)
@@ -3349,7 +3369,6 @@ class ReminderManager:
                 if not reminder.paused
                 and occurrence.status is OccurrenceStatus.WAITING_FOR_CONTEXT
                 and occurrence.expires_at is not None
-                and occurrence.expires_at > now
             )
             candidates.extend(
                 occurrence.next_escalation_at
@@ -3357,7 +3376,6 @@ class ReminderManager:
                 if not reminder.paused
                 and occurrence.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
                 and occurrence.next_escalation_at is not None
-                and occurrence.next_escalation_at > now
             )
             candidates.extend(
                 occurrence.due
@@ -3367,7 +3385,6 @@ class ReminderManager:
                 and occurrence.id != reminder.current_occurrence_id
                 and occurrence.snoozed
                 and occurrence.status is OccurrenceStatus.SCHEDULED
-                and occurrence.due > now
             )
             if (
                 reminder.activation_type is ActivationType.TIME
