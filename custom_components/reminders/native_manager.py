@@ -220,6 +220,7 @@ class NativeReminderManager(ReminderManager):
                 recover_missed
                 and reminder.recurrence is not None
                 and reminder.missed_occurrence_policy is MissedOccurrencePolicy.SKIP
+                and reminder.due is not None
                 and reminder.due < effective_now
             ):
                 continue
