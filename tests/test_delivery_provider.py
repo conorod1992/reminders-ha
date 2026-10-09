@@ -260,7 +260,9 @@ async def test_mobile_actions_prioritise_done_dismiss_and_one_snooze() -> None:
     )
     await provider.async_deliver(
         source,
-        DeliveryPolicy(channels=("phone",), mobile_app_services=("notify.mobile_app_conor",)),
+        DeliveryPolicy(
+            channels=("phone",), mobile_app_services=("notify.mobile_app_conor",)
+        ),
     )
     actions = services.calls[0][2]["data"]["actions"]
     assert [item["title"] for item in actions] == ["Done", "Dismiss", "Snooze 10 min"]
@@ -272,12 +274,19 @@ async def test_voice_announcement_includes_title_and_notes() -> None:
 
     services = Services()
     provider = VoiceProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
-    source = reminder().updated(title="Take parcel to the post office", message="Label is in the kitchen drawer")
+    source = reminder().updated(
+        title="Take parcel to the post office", message="Label is in the kitchen drawer"
+    )
     await provider.async_deliver(
         source,
-        DeliveryPolicy(channels=("voice",), voice_targets=("assist_satellite.kitchen",)),
+        DeliveryPolicy(
+            channels=("voice",), voice_targets=("assist_satellite.kitchen",)
+        ),
     )
-    assert services.calls[0][2]["message"] == "Take parcel to the post office. Label is in the kitchen drawer"
+    assert (
+        services.calls[0][2]["message"]
+        == "Take parcel to the post office. Label is in the kitchen drawer"
+    )
 
 
 async def test_a_failing_generic_notify_entity_does_not_block_another() -> None:
