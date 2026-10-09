@@ -128,9 +128,11 @@ def _mobile_actions(actions: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]
     buttons.
     """
     priority = {"DONE": 0, "DISMISS": 1, "SNOOZE_10": 2, "SNOOZE_60": 3}
+
     def rank(action: dict[str, Any]) -> int:
         name = str(action.get("action", "")).rsplit(":", 1)[-1]
         return priority.get(name, 4)
+
     return sorted(actions, key=rank)[:3]
 
 
@@ -151,22 +153,23 @@ class NotifyProvider:
         }
         succeeded = 0
         errors: list[str] = []
-        if policy.notify_targets:
+        for notify_target in policy.notify_targets:
             try:
-                # The generic NotifyEntity API supports message and title only.
+                # Dispatch individually so one unavailable entity does not
+                # block independent, healthy notification targets.
                 await _async_service_call(
                     self._hass,
                     "notify",
                     "send_message",
                     ordinary_data,
-                    target={"entity_id": list(policy.notify_targets)},
+                    target={"entity_id": [notify_target]},
                     blocking=True,
                     context=Context(user_id=reminder.user_id),
                 )
             except Exception as err:
-                errors.append(f"generic notify: {type(err).__name__}")
+                errors.append(f"{notify_target}: {type(err).__name__}")
             else:
-                succeeded += len(policy.notify_targets)
+                succeeded += 1
         for action_name in policy.mobile_app_services:
             _domain, service = action_name.split(".", 1)
             actionable_data = dict(ordinary_data)
@@ -237,7 +240,11 @@ class VoiceProvider:
             self._hass,
             "assist_satellite",
             "announce",
-            {"message": f"{reminder.title}. {reminder.message}" if reminder.message and reminder.message != reminder.title else reminder.title},
+            {
+                "message": f"{reminder.title}. {reminder.message}"
+                if reminder.message and reminder.message != reminder.title
+                else reminder.title
+            },
             target={"entity_id": list(policy.voice_targets)},
             blocking=True,
             context=Context(user_id=reminder.user_id),
@@ -280,7 +287,19 @@ class DeliveryDispatcher:
                 failed.append(channel)
                 continue
             try:
-                async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
+                # Each phone destination has its own bounded service deadline.
+                # The channel envelope must not cancel later targets merely
+                # because the first destination consumed its own timeout.
+                destination_count = (
+                    len(policy.notify_targets) + len(policy.mobile_app_services)
+                    if channel == CHANNEL_PHONE
+                    else 1
+                )
+                async with asyncio.timeout(
+                    DELIVERY_TIMEOUT_SECONDS * max(1, destination_count * 2)
+                    if channel == CHANNEL_PHONE
+                    else DELIVERY_TIMEOUT_SECONDS
+                ):
                     await provider.async_deliver(reminder, policy)
             except Exception as err:
                 _LOGGER.warning(

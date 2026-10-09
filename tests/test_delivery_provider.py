@@ -260,7 +260,9 @@ async def test_mobile_actions_prioritise_done_dismiss_and_one_snooze() -> None:
     )
     await provider.async_deliver(
         source,
-        DeliveryPolicy(channels=("phone",), mobile_app_services=("notify.mobile_app_conor",)),
+        DeliveryPolicy(
+            channels=("phone",), mobile_app_services=("notify.mobile_app_conor",)
+        ),
     )
     actions = services.calls[0][2]["data"]["actions"]
     assert [item["title"] for item in actions] == ["Done", "Dismiss", "Snooze 10 min"]
@@ -272,9 +274,71 @@ async def test_voice_announcement_includes_title_and_notes() -> None:
 
     services = Services()
     provider = VoiceProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
-    source = reminder().updated(title="Take parcel to the post office", message="Label is in the kitchen drawer")
+    source = reminder().updated(
+        title="Take parcel to the post office", message="Label is in the kitchen drawer"
+    )
     await provider.async_deliver(
         source,
-        DeliveryPolicy(channels=("voice",), voice_targets=("assist_satellite.kitchen",)),
+        DeliveryPolicy(
+            channels=("voice",), voice_targets=("assist_satellite.kitchen",)
+        ),
     )
-    assert services.calls[0][2]["message"] == "Take parcel to the post office. Label is in the kitchen drawer"
+    assert (
+        services.calls[0][2]["message"]
+        == "Take parcel to the post office. Label is in the kitchen drawer"
+    )
+
+
+async def test_a_failing_generic_notify_entity_does_not_block_another() -> None:
+    class SelectiveServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            self.calls.append((domain, service, data, kwargs))
+            if kwargs.get("target") == {"entity_id": ["notify.offline"]}:
+                raise RuntimeError("device unavailable")
+
+    services = SelectiveServices()
+    provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="notify.offline"):
+        await provider.async_deliver(
+            reminder(),
+            DeliveryPolicy(
+                channels=("phone",),
+                notify_targets=("notify.offline", "notify.healthy"),
+            ),
+        )
+    assert [item[3]["target"]["entity_id"][0] for item in services.calls] == [
+        "notify.offline",
+        "notify.healthy",
+    ]
+
+
+async def test_phone_channel_allows_each_target_its_own_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class SlowServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            calls.append(service)
+            if service == "mobile_app_hung":
+                await asyncio.sleep(0.08)
+
+    monkeypatch.setattr(
+        "custom_components.reminders.delivery.DELIVERY_TIMEOUT_SECONDS", 0.03
+    )
+    dispatcher = DeliveryDispatcher(
+        [NotifyProvider(SimpleNamespace(services=SlowServices()))]  # type: ignore[list-item]
+    )
+    result = await dispatcher.async_deliver(
+        reminder(),
+        DeliveryPolicy(
+            channels=("phone",),
+            mobile_app_services=("notify.mobile_app_hung", "notify.mobile_app_healthy"),
+        ),
+    )
+    assert calls == ["mobile_app_hung", "mobile_app_healthy"]
+    assert result.failed_channels == ("phone",)
