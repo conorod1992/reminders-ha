@@ -278,19 +278,34 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "pause_recurring_reminder",
             "Pause an anchored recurring reminder series until explicitly resumed.",
-            vol.Schema(vol.All(vol.Schema(TARGET_SCHEMA), cv.has_at_least_one_key("reminder_id", "title"))),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
             _pause_series,
         ),
         RemindersTool(
             "resume_recurring_reminder",
             "Resume a paused recurring series on its existing anchored schedule.",
-            vol.Schema(vol.All(vol.Schema(TARGET_SCHEMA), cv.has_at_least_one_key("reminder_id", "title"))),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
             _resume_series,
         ),
         RemindersTool(
             "skip_next_reminder",
             "Skip only the next occurrence of a recurring series without cancelling future occurrences.",
-            vol.Schema(vol.All(vol.Schema(TARGET_SCHEMA), cv.has_at_least_one_key("reminder_id", "title"))),
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
             _skip_next_series,
         ),
         RemindersTool(
