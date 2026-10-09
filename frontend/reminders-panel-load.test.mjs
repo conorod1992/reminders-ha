@@ -149,3 +149,35 @@ test("routine list refresh does not replace the focused search field", () => {
   assert.equal(replaced, false);
   assert.equal(search.value, "reminder in progress");
 });
+
+
+test("automatic refresh preserves previously loaded list depth", async () => {
+  const panel = makePanel();
+  panel._view = "upcoming";
+  panel._items = Array.from({ length: 150 }, (_, i) => ({ id: String(i) }));
+  panel._loadedFilterKey = JSON.stringify(["upcoming", "mine", "", undefined]);
+  let requestedLimit = 0;
+  panel._call = async (_action, data) => {
+    requestedLimit = data.limit;
+    return { reminders: panel._items, total: 175 };
+  };
+  await panel._load();
+  assert.equal(requestedLimit, 150);
+  assert.equal(panel._items.length, 150);
+});
+
+test("changing search resets loaded list depth", async () => {
+  const panel = makePanel();
+  panel._view = "upcoming";
+  panel._items = Array.from({ length: 150 }, (_, i) => ({ id: String(i) }));
+  panel._loadedFilterKey = JSON.stringify(["upcoming", "mine", "", undefined]);
+  panel._query = "new search";
+  let requestedLimit = 0;
+  panel._call = async (_action, data) => {
+    requestedLimit = data.limit;
+    return { reminders: [{ id: "matching" }], total: 1 };
+  };
+  await panel._load();
+  assert.equal(requestedLimit, 100);
+  assert.deepEqual(panel._items, [{ id: "matching" }]);
+});
