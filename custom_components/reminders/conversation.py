@@ -469,6 +469,7 @@ async def _list(
             ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
             ReminderStatus.WAITING_FOR_CONTEXT,
             ReminderStatus.WAITING_FOR_TRIGGER,
+            ReminderStatus.INACTIVE_BEFORE_AVAILABLE_FROM,
         }
     reminders = await _manager(hass).async_list(
         user_id=user_id,
