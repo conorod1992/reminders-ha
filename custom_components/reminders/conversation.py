@@ -276,6 +276,24 @@ def _tools() -> list[llm.Tool]:
             _delete,
         ),
         RemindersTool(
+            "pause_recurring_reminder",
+            "Pause an anchored recurring reminder series until explicitly resumed.",
+            vol.Schema(vol.All(vol.Schema(TARGET_SCHEMA), cv.has_at_least_one_key("reminder_id", "title"))),
+            _pause_series,
+        ),
+        RemindersTool(
+            "resume_recurring_reminder",
+            "Resume a paused recurring series on its existing anchored schedule.",
+            vol.Schema(vol.All(vol.Schema(TARGET_SCHEMA), cv.has_at_least_one_key("reminder_id", "title"))),
+            _resume_series,
+        ),
+        RemindersTool(
+            "skip_next_reminder",
+            "Skip only the next occurrence of a recurring series without cancelling future occurrences.",
+            vol.Schema(vol.All(vol.Schema(TARGET_SCHEMA), cv.has_at_least_one_key("reminder_id", "title"))),
+            _skip_next_series,
+        ),
+        RemindersTool(
             "snooze_reminder",
             "Snooze only the active occurrence by due time or minutes.",
             vol.Schema(
@@ -594,6 +612,45 @@ async def _delete(
     assert reminder is not None
     await _manager(hass).async_delete(reminder.id, expected_user_id=reminder.user_id)
     return {"deleted": True, "reminder_id": reminder.id}
+
+
+async def _pause_series(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, _ = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    updated = await _manager(hass).async_pause(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    return {"reminder": updated.to_dict()}
+
+
+async def _resume_series(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, _ = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    updated = await _manager(hass).async_resume(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    return {"reminder": updated.to_dict()}
+
+
+async def _skip_next_series(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, _ = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    updated = await _manager(hass).async_skip_next(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    return {"reminder": updated.to_dict()}
 
 
 async def _snooze(
