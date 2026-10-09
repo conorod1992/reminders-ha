@@ -12,7 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import llm
 
 from custom_components.reminders.const import DOMAIN
-from custom_components.reminders.conversation import _list, _update
+from custom_components.reminders.conversation import _list, _tools, _update
 from custom_components.reminders.manager import ReminderManager
 
 from .conftest import FakeDispatcher, FakeStore
@@ -96,3 +96,8 @@ async def test_admin_targeting_is_explicit(
     other = await _list(hass, {"user_id": "u2", "limit": 20}, context("admin"))
     assert own["reminders"] == []
     assert [item["title"] for item in other["reminders"]] == ["Private"]
+
+
+def test_recurring_voice_controls_are_exposed() -> None:
+    names = {tool.name for tool in _tools()}
+    assert {'pause_recurring_reminder', 'resume_recurring_reminder', 'skip_next_reminder'} <= names
