@@ -136,6 +136,13 @@ def _mobile_actions(actions: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]
     return sorted(actions, key=rank)[:3]
 
 
+@dataclass(frozen=True, slots=True)
+class PartialDeliveryOutcome:
+    """A channel reached at least one destination but not all of them."""
+
+    errors: tuple[str, ...]
+
+
 class NotifyProvider:
     """Deliver through generic entities and explicit Companion App services."""
 
@@ -144,7 +151,9 @@ class NotifyProvider:
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
 
-    async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
+    async def async_deliver(
+        self, reminder: Reminder, policy: DeliveryPolicy
+    ) -> PartialDeliveryOutcome | None:
         if not policy.notify_targets and not policy.mobile_app_services:
             raise ValueError("Phone delivery has no configured notify targets")
         ordinary_data: dict[str, Any] = {
@@ -212,15 +221,12 @@ class NotifyProvider:
                 continue
             succeeded += 1
         if errors:
-            # A phone channel represents the complete configured destination set.
-            # Treat partial delivery as a failure so the occurrence cannot be marked
-            # fully delivered when an intended endpoint did not receive it.
-            outcome = (
-                "Partial phone delivery failed"
-                if succeeded
-                else "Phone delivery failed"
-            )
-            raise RuntimeError(f"{outcome}: {'; '.join(errors)}")
+            if succeeded:
+                # Preserve actionable success for a phone which did receive the
+                # reminder while retaining failure details for other targets.
+                return PartialDeliveryOutcome(tuple(errors))
+            raise RuntimeError(f"Phone delivery failed: {'; '.join(errors)}")
+        return None
 
 
 class VoiceProvider:
@@ -300,7 +306,7 @@ class DeliveryDispatcher:
                     if channel == CHANNEL_PHONE
                     else DELIVERY_TIMEOUT_SECONDS
                 ):
-                    await provider.async_deliver(reminder, policy)
+                    outcome = await provider.async_deliver(reminder, policy)
             except Exception as err:
                 _LOGGER.warning(
                     "Reminder %s delivery through %s failed: %s",
@@ -312,4 +318,9 @@ class DeliveryDispatcher:
                 failed.append(channel)
             else:
                 succeeded.append(channel)
+                if isinstance(outcome, PartialDeliveryOutcome):
+                    failed.append(channel)
+                    errors.extend(
+                        f"{channel}: {error}" for error in outcome.errors
+                    )
         return DeliveryResult(tuple(succeeded), tuple(errors), tuple(failed))
