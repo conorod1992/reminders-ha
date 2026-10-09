@@ -206,3 +206,31 @@ async def test_legacy_unauthorized_trigger_cannot_activate(
     assert result == "inactive"
     assert dispatcher.calls == []
     assert manager._reminders[reminder.id].status is ReminderStatus.WAITING_FOR_TRIGGER
+
+
+async def test_secondary_delivery_rechecks_revoked_owner_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.reminders.manager.async_track_point_in_utc_time",
+        lambda _hass, _callback, _when: lambda: None,
+    )
+    hass = hass_with(user("u1", control=set()))
+    dispatcher = FakeDispatcher()
+    runtime = ReminderManager(
+        hass,  # type: ignore[arg-type]
+        FakeStore(),
+        dispatcher,  # type: ignore[arg-type]
+    )
+    now = datetime.now(UTC)
+    reminder = Reminder(
+        id="follow-up", user_id="u1", title="Reminder", due=now,
+        created_at=now, updated_at=now,
+    )
+    result = await runtime._async_deliver_with_current_permissions(
+        reminder,
+        DeliveryPolicy(("phone",), notify_targets=("notify.revoked",)),
+    )
+    assert result.succeeded == ()
+    assert result.failed_channels == ("phone",)
+    assert dispatcher.calls == []
