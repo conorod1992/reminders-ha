@@ -184,10 +184,17 @@ class NotifyProvider:
         for action_name in policy.mobile_app_services:
             _domain, service = action_name.split(".", 1)
             actionable_data = dict(ordinary_data)
+            # A stable occurrence tag replaces repeated announcements instead
+            # of accumulating independent notifications on the same device.
+            occurrence_id = _delivery_occurrence_id(reminder)
+            actionable_data["data"] = {
+                "tag": f"reminders_{reminder.id}_{occurrence_id or 'current'}",
+                "url": "/reminders",
+            }
             if reminder.notification_actions:
-                actionable_data["data"] = {
-                    "actions": _mobile_actions(reminder.notification_actions)
-                }
+                actionable_data["data"]["actions"] = _mobile_actions(
+                    reminder.notification_actions
+                )
             try:
                 await _async_service_call(
                     self._hass,
