@@ -15,6 +15,7 @@ from custom_components.reminders.const import DOMAIN
 from custom_components.reminders.conversation import (
     _list,
     _pause_series,
+    _resolve_reminder,
     _resume_series,
     _skip_next_series,
     _tools,
@@ -146,3 +147,29 @@ async def test_recurring_voice_handlers_reuse_owner_checked_manager_operations(
         assert result["reminder"]["id"] == item.id
 
     assert calls == expected
+
+
+async def test_exact_title_disambiguation_searches_past_first_page(
+    runtime: tuple[Any, ReminderManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass, manager = runtime
+    found = (await manager.async_list(user_id="u1"))[0]
+    duplicate = found.updated(id="another-exact-title")
+    calls: list[int] = []
+
+    async def pages(**kwargs: Any) -> tuple[list[Any], int]:
+        offset = kwargs["offset"]
+        calls.append(offset)
+        if offset == 0:
+            return [found], 2
+        return [duplicate], 2
+
+    monkeypatch.setattr(manager, "async_list_page", pages)
+    _, response, _ = await _resolve_reminder(
+        hass, {"title": found.title}, context("u1")
+    )
+    assert calls == [0, 1]
+    assert response is not None
+    assert response["needs_disambiguation"] is True
+    assert len(response["candidates"]) == 2
