@@ -224,8 +224,12 @@ async def test_secondary_delivery_rechecks_revoked_owner_access(
     )
     now = datetime.now(UTC)
     reminder = Reminder(
-        id="follow-up", user_id="u1", title="Reminder", due=now,
-        created_at=now, updated_at=now,
+        id="follow-up",
+        user_id="u1",
+        title="Reminder",
+        due=now,
+        created_at=now,
+        updated_at=now,
     )
     result = await runtime._async_deliver_with_current_permissions(
         reminder,
