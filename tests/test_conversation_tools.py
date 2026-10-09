@@ -100,4 +100,8 @@ async def test_admin_targeting_is_explicit(
 
 def test_recurring_voice_controls_are_exposed() -> None:
     names = {tool.name for tool in _tools()}
-    assert {'pause_recurring_reminder', 'resume_recurring_reminder', 'skip_next_reminder'} <= names
+    assert {
+        "pause_recurring_reminder",
+        "resume_recurring_reminder",
+        "skip_next_reminder",
+    } <= names
