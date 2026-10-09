@@ -209,6 +209,7 @@ async def test_voice_can_edit_existing_recurring_pattern(
 ) -> None:
     hass, manager = runtime
     start = (datetime.now(UTC) + timedelta(days=2)).replace(tzinfo=None)
+    start += timedelta(days=(0 - start.weekday()) % 7)
     series = await manager.async_create_recurring(
         user_id="u1",
         title="Scheduled chore",
