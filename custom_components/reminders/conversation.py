@@ -228,7 +228,7 @@ def _tools() -> list[llm.Tool]:
         ),
         RemindersTool(
             "update_reminder",
-            "Update an unambiguous reminder's title, message, due time, or policies.",
+            "Update an unambiguous reminder's details, policies, or recurrence rule.",
             vol.Schema(
                 vol.All(
                     vol.Schema(
@@ -260,6 +260,27 @@ def _tools() -> list[llm.Tool]:
                             vol.Optional("complete_when"): vol.Any(None, dict),
                             vol.Optional("escalation"): vol.Any(None, dict),
                             vol.Optional("allow_manual_completion"): cv.boolean,
+                            vol.Optional("first_reminder"): cv.string,
+                            vol.Optional("frequency"): vol.In(tuple(RecurrenceFrequency)),
+                            vol.Optional("interval"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1)
+                            ),
+                            vol.Optional("weekdays"): vol.All(
+                                cv.ensure_list, [cv.string]
+                            ),
+                            vol.Optional("day_of_month"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1, max=31)
+                            ),
+                            vol.Optional("monthly_mode"): cv.string,
+                            vol.Optional("monthly_weekday"): cv.string,
+                            vol.Optional("monthly_week"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1, max=5)
+                            ),
+                            vol.Optional("end_date"): cv.string,
+                            vol.Optional("occurrence_count"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1)
+                            ),
+                            vol.Optional("timezone"): cv.string,
                         }
                     ),
                     cv.has_at_least_one_key("reminder_id", "title"),
@@ -640,6 +661,27 @@ async def _update(
             changes[key] = (
                 _parse_datetime(hass, args[key]) if args[key] is not None else None
             )
+    recurrence_fields = {
+        "first_reminder",
+        "frequency",
+        "interval",
+        "weekdays",
+        "day_of_month",
+        "monthly_mode",
+        "monthly_weekday",
+        "monthly_week",
+        "end_date",
+        "occurrence_count",
+        "timezone",
+    }
+    if recurrence_fields.intersection(args):
+        if reminder.recurrence is None:
+            raise ReminderValidationError(
+                "Recurrence fields can only update a recurring reminder"
+            )
+        changes["recurrence"] = _recurrence_from_data(
+            hass, args, reminder.recurrence
+        )
     if not changes:
         raise ReminderValidationError("No reminder changes were provided")
     updated = await _manager(hass).async_update(
