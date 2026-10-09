@@ -131,6 +131,20 @@ class RemindersManagementPanel extends HTMLElement {
   _renderFilters() {
     const host = this.shadowRoot?.querySelector("#filters");
     if (!host) return;
+    // Reminder updates and debounced searches should not replace a focused
+    // search control; rebuilding it loses focus, caret and the user's typing.
+    const filterKey = [
+      this._view, this._scope, this._selectedUser,
+      Boolean(this._hass?.user?.is_admin),
+    ].join("|");
+    if (host.childElementCount && this._filtersKey === filterKey) {
+      const existingSearch = host.querySelector('input[type="search"]');
+      if (existingSearch && this.shadowRoot.activeElement !== existingSearch) {
+        existingSearch.value = this._query;
+      }
+      return;
+    }
+    this._filtersKey = filterKey;
     host.replaceChildren();
     const tabs = document.createElement("div");
     tabs.className = "tabs";
