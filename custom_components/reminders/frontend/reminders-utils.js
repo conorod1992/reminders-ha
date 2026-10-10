@@ -83,8 +83,8 @@ export function recurrenceSummary(reminder, locale = undefined) {
     : `${every} months on ${pattern} at ${time}`;
 }
 
-export function deliverySummary(reminder) {
-  const policy = reminder?.delivery_policy;
+export function deliverySummary(reminder, preferences = null) {
+  const policy = reminder?.delivery_policy || preferences?.default_delivery_policy;
   if (!policy) return "Use my defaults";
   const labels = { phone: "Phone", voice: "Voice", persistent_notification: "Home Assistant alert" };
   return policy.channels.map((channel) => labels[channel] || channel).join(" + ");
