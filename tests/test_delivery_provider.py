@@ -376,4 +376,3 @@ async def test_tag_only_mobile_metadata_rejection_falls_back_to_plain_notificati
     assert len(services.calls) == 2
     assert "data" in services.calls[0][2]
     assert services.calls[1][2] == {"title": source.title, "message": source.message}
-
