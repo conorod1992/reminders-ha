@@ -155,7 +155,7 @@ test("automatic refresh preserves previously loaded list depth", async () => {
   const panel = makePanel();
   panel._view = "upcoming";
   panel._items = Array.from({ length: 150 }, (_, i) => ({ id: String(i) }));
-  panel._loadedFilterKey = JSON.stringify(["upcoming", "mine", "", undefined]);
+  panel._loadedFilterKey = JSON.stringify(["upcoming", "mine", "", undefined, "all"]);
   let requestedLimit = 0;
   panel._call = async (_action, data) => {
     requestedLimit = data.limit;
@@ -170,7 +170,7 @@ test("changing search resets loaded list depth", async () => {
   const panel = makePanel();
   panel._view = "upcoming";
   panel._items = Array.from({ length: 150 }, (_, i) => ({ id: String(i) }));
-  panel._loadedFilterKey = JSON.stringify(["upcoming", "mine", "", undefined]);
+  panel._loadedFilterKey = JSON.stringify(["upcoming", "mine", "", undefined, "all"]);
   panel._query = "new search";
   let requestedLimit = 0;
   panel._call = async (_action, data) => {
@@ -180,4 +180,22 @@ test("changing search resets loaded list depth", async () => {
   await panel._load();
   assert.equal(requestedLimit, 100);
   assert.deepEqual(panel._items, [{ id: "matching" }]);
+});
+
+
+test("history outcome filter is forwarded and changes invalidate page depth", async () => {
+  const panel = makePanel();
+  panel._view = "history";
+  panel._historyOutcomeFilter = "failed";
+  panel._history = Array.from({ length: 85 }, (_, i) => ({ id: String(i) }));
+  panel._loadedFilterKey = JSON.stringify(["history", "mine", "", undefined, "all"]);
+  let seen;
+  panel._call = async (_action, data) => {
+    seen = data;
+    return { history: [{ id: "failed-item" }], total: 1 };
+  };
+  await panel._load();
+  assert.deepEqual(seen.statuses, ["failed"]);
+  assert.equal(seen.limit, 50);
+  assert.equal(panel._history.length, 1);
 });
