@@ -20,7 +20,7 @@ from .authorization import (
     async_resolve_list_user,
     async_resolve_target_user,
 )
-from .const import DOMAIN
+from .const import DOMAIN, SUPPORTED_CHANNELS
 from .manager import ReminderManager, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
@@ -32,7 +32,7 @@ from .models import (
     WhileAwaitingAcknowledgement,
 )
 from .recurrence import RecurrenceFrequency
-from .services import _parse_datetime, _recurrence_from_data
+from .services import _parse_datetime, _policy_from_data, _recurrence_from_data
 from .triggers.models import TriggerDefinition
 
 ToolHandler = Callable[
@@ -260,6 +260,21 @@ def _tools() -> list[llm.Tool]:
                             vol.Optional("complete_when"): vol.Any(None, dict),
                             vol.Optional("escalation"): vol.Any(None, dict),
                             vol.Optional("allow_manual_completion"): cv.boolean,
+                            vol.Optional("delivery_mode"): vol.In(
+                                ("default", "custom")
+                            ),
+                            vol.Optional("channels"): vol.All(
+                                cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]
+                            ),
+                            vol.Optional("notify_targets"): vol.All(
+                                cv.ensure_list, [cv.entity_id]
+                            ),
+                            vol.Optional("mobile_app_services"): vol.All(
+                                cv.ensure_list, [cv.string]
+                            ),
+                            vol.Optional("voice_targets"): vol.All(
+                                cv.ensure_list, [cv.entity_id]
+                            ),
                             vol.Optional("first_reminder"): cv.string,
                             vol.Optional("frequency"): vol.In(
                                 tuple(RecurrenceFrequency)
@@ -682,6 +697,11 @@ async def _update(
                 "Recurrence fields can only update a recurring reminder"
             )
         changes["recurrence"] = _recurrence_from_data(hass, args, reminder.recurrence)
+    delivery_fields = {
+        "channels", "notify_targets", "mobile_app_services", "voice_targets"
+    }
+    if "delivery_mode" in args or delivery_fields.intersection(args):
+        changes["delivery_policy"] = _policy_from_data(args)
     if not changes:
         raise ReminderValidationError("No reminder changes were provided")
     updated = await _manager(hass).async_update(
