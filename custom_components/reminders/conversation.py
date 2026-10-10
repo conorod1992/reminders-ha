@@ -20,7 +20,7 @@ from .authorization import (
     async_resolve_list_user,
     async_resolve_target_user,
 )
-from .const import DOMAIN
+from .const import DOMAIN, SUPPORTED_CHANNELS
 from .manager import ReminderManager, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
@@ -32,7 +32,7 @@ from .models import (
     WhileAwaitingAcknowledgement,
 )
 from .recurrence import RecurrenceFrequency
-from .services import _parse_datetime, _recurrence_from_data
+from .services import _parse_datetime, _policy_from_data, _recurrence_from_data
 from .triggers.models import TriggerDefinition
 
 ToolHandler = Callable[
@@ -208,6 +208,9 @@ def _tools() -> list[llm.Tool]:
                     vol.Optional("limit", default=20): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=100)
                     ),
+                    vol.Optional("offset", default=0): vol.All(
+                        vol.Coerce(int), vol.Range(min=0)
+                    ),
                 }
             ),
             _list,
@@ -225,7 +228,7 @@ def _tools() -> list[llm.Tool]:
         ),
         RemindersTool(
             "update_reminder",
-            "Update an unambiguous reminder's title, message, due time, or policies.",
+            "Update an unambiguous reminder's details, policies, or recurrence rule.",
             vol.Schema(
                 vol.All(
                     vol.Schema(
@@ -257,6 +260,44 @@ def _tools() -> list[llm.Tool]:
                             vol.Optional("complete_when"): vol.Any(None, dict),
                             vol.Optional("escalation"): vol.Any(None, dict),
                             vol.Optional("allow_manual_completion"): cv.boolean,
+                            vol.Optional("delivery_mode"): vol.In(
+                                ("default", "custom")
+                            ),
+                            vol.Optional("channels"): vol.All(
+                                cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]
+                            ),
+                            vol.Optional("notify_targets"): vol.All(
+                                cv.ensure_list, [cv.entity_id]
+                            ),
+                            vol.Optional("mobile_app_services"): vol.All(
+                                cv.ensure_list, [cv.string]
+                            ),
+                            vol.Optional("voice_targets"): vol.All(
+                                cv.ensure_list, [cv.entity_id]
+                            ),
+                            vol.Optional("first_reminder"): cv.string,
+                            vol.Optional("frequency"): vol.In(
+                                tuple(RecurrenceFrequency)
+                            ),
+                            vol.Optional("interval"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1)
+                            ),
+                            vol.Optional("weekdays"): vol.All(
+                                cv.ensure_list, [cv.string]
+                            ),
+                            vol.Optional("day_of_month"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1, max=31)
+                            ),
+                            vol.Optional("monthly_mode"): cv.string,
+                            vol.Optional("monthly_weekday"): cv.string,
+                            vol.Optional("monthly_week"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1, max=5)
+                            ),
+                            vol.Optional("end_date"): cv.string,
+                            vol.Optional("occurrence_count"): vol.All(
+                                vol.Coerce(int), vol.Range(min=1)
+                            ),
+                            vol.Optional("timezone"): cv.string,
                         }
                     ),
                     cv.has_at_least_one_key("reminder_id", "title"),
@@ -274,6 +315,39 @@ def _tools() -> list[llm.Tool]:
                 )
             ),
             _delete,
+        ),
+        RemindersTool(
+            "pause_recurring_reminder",
+            "Pause an anchored recurring reminder series until explicitly resumed.",
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
+            _pause_series,
+        ),
+        RemindersTool(
+            "resume_recurring_reminder",
+            "Resume a paused recurring series on its existing anchored schedule.",
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
+            _resume_series,
+        ),
+        RemindersTool(
+            "skip_next_reminder",
+            "Skip the next occurrence without cancelling the recurring series.",
+            vol.Schema(
+                vol.All(
+                    vol.Schema(TARGET_SCHEMA),
+                    cv.has_at_least_one_key("reminder_id", "title"),
+                )
+            ),
+            _skip_next_series,
         ),
         RemindersTool(
             "snooze_reminder",
@@ -471,7 +545,7 @@ async def _list(
             ReminderStatus.WAITING_FOR_TRIGGER,
             ReminderStatus.INACTIVE_BEFORE_AVAILABLE_FROM,
         }
-    reminders = await _manager(hass).async_list(
+    reminders, total = await _manager(hass).async_list_page(
         user_id=user_id,
         statuses=statuses,
         query=args.get("query"),
@@ -488,8 +562,15 @@ async def _list(
             else None
         ),
         limit=args["limit"],
+        offset=args.get("offset", 0),
     )
-    return {"reminders": [_compact_reminder(item) for item in reminders]}
+    return {
+        "reminders": [_compact_reminder(item) for item in reminders],
+        "total": total,
+        "offset": args.get("offset", 0),
+        "next_offset": args.get("offset", 0) + len(reminders),
+        "has_more": args.get("offset", 0) + len(reminders) < total,
+    }
 
 
 async def _resolve_reminder(
@@ -502,18 +583,38 @@ async def _resolve_reminder(
     if reminder_id := args.get("reminder_id"):
         return await async_get_authorized(manager, actor, reminder_id), None, actor
     user_id = await async_resolve_list_user(hass, actor, args.get("user_id"))
-    matches = [
-        item
-        for item in await manager.async_list(user_id=user_id, query=args["title"])
-        if item.title.casefold() == args["title"].strip().casefold()
-    ]
-    if len(matches) == 1:
+    # Check the full bounded search rather than its first 500 rows: an
+    # exact duplicate beyond that page must never be silently overlooked.
+    matches: list[Reminder] = []
+    offset = 0
+    page_size = 1000
+    search_exhausted = False
+    while offset < 20_000 and len(matches) < 2:
+        page, total = await manager.async_list_page(
+            user_id=user_id, query=args["title"], limit=page_size, offset=offset
+        )
+        matches.extend(
+            item
+            for item in page
+            if item.title.casefold() == args["title"].strip().casefold()
+        )
+        offset += len(page)
+        if offset >= total or not page:
+            search_exhausted = True
+            break
+    if len(matches) == 1 and search_exhausted:
         return matches[0], None, actor
     return (
         None,
         {
             "needs_disambiguation": True,
-            "message": "No exact match" if not matches else "Several reminders match",
+            "message": (
+                "Too many possible matches to identify a reminder safely"
+                if not search_exhausted
+                else "No exact match"
+                if not matches
+                else "Several reminders match"
+            ),
             "candidates": [
                 {
                     "id": item.id,
@@ -577,6 +678,33 @@ async def _update(
             changes[key] = (
                 _parse_datetime(hass, args[key]) if args[key] is not None else None
             )
+    recurrence_fields = {
+        "first_reminder",
+        "frequency",
+        "interval",
+        "weekdays",
+        "day_of_month",
+        "monthly_mode",
+        "monthly_weekday",
+        "monthly_week",
+        "end_date",
+        "occurrence_count",
+        "timezone",
+    }
+    if recurrence_fields.intersection(args):
+        if reminder.recurrence is None:
+            raise ReminderValidationError(
+                "Recurrence fields can only update a recurring reminder"
+            )
+        changes["recurrence"] = _recurrence_from_data(hass, args, reminder.recurrence)
+    delivery_fields = {
+        "channels",
+        "notify_targets",
+        "mobile_app_services",
+        "voice_targets",
+    }
+    if "delivery_mode" in args or delivery_fields.intersection(args):
+        changes["delivery_policy"] = _policy_from_data(args)
     if not changes:
         raise ReminderValidationError("No reminder changes were provided")
     updated = await _manager(hass).async_update(
@@ -594,6 +722,45 @@ async def _delete(
     assert reminder is not None
     await _manager(hass).async_delete(reminder.id, expected_user_id=reminder.user_id)
     return {"deleted": True, "reminder_id": reminder.id}
+
+
+async def _pause_series(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, _ = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    updated = await _manager(hass).async_pause(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    return {"reminder": updated.to_dict()}
+
+
+async def _resume_series(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, _ = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    updated = await _manager(hass).async_resume(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    return {"reminder": updated.to_dict()}
+
+
+async def _skip_next_series(
+    hass: HomeAssistant, args: dict[str, Any], context: llm.LLMContext
+) -> dict[str, Any]:
+    reminder, response, _ = await _resolve_reminder(hass, args, context)
+    if response is not None:
+        return response
+    assert reminder is not None
+    updated = await _manager(hass).async_skip_next(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    return {"reminder": updated.to_dict()}
 
 
 async def _snooze(
