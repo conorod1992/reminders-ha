@@ -22,11 +22,6 @@ if event == "release":
     tag = os.environ.get("RELEASE_TAG", "")
 elif os.environ.get("REF_TYPE") == "tag":
     tag = os.environ.get("REF_NAME", "")
-if event == "release"
-    else os.environ.get("REF_NAME", "")
-    if os.environ.get("REF_TYPE") == "tag"
-    else ""
-)
 if event == "release" and not tag:
     raise SystemExit("Release event did not supply a tag")
 if tag:
