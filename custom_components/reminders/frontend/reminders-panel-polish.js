@@ -35,7 +35,7 @@ if (proto && !proto.__frontendPolishInstalled) {
     const selectedUser = this._selectedUser;
     const view = this._view;
     const existingValues = historyView ? this._history : this._items;
-    const filterKey = JSON.stringify([view, scope, selectedUser, query]);
+    const filterKey = JSON.stringify([view, scope, selectedUser, query, this._historyOutcomeFilter || "all"]);
     const preserveDepth = !appendHistory && !appendList
       && this._loadedFilterKey === filterKey;
     const restoredLimit = preserveDepth
@@ -67,6 +67,9 @@ if (proto && !proto.__frontendPolishInstalled) {
       const data = { scope, query };
       if (scope === "user") data.user_id = selectedUser;
       if (historyView) {
+        if (this._historyOutcomeFilter && this._historyOutcomeFilter !== "all") {
+          data.statuses = [this._historyOutcomeFilter];
+        }
         data.limit = appendHistory ? HISTORY_PAGE_SIZE : Math.min(200, restoredLimit);
         data.offset = offset;
         const result = await this._call("history", data);
@@ -136,6 +139,29 @@ if (proto && !proto.__frontendPolishInstalled) {
       tabs.append(button);
     }
 
+    toolbar.querySelector(".history-outcome-wrap")?.remove();
+    if (this._view === "history") {
+      const wrap = document.createElement("label");
+      wrap.className = "view-filter-wrap history-outcome-wrap";
+      wrap.textContent = "Outcome";
+      const select = document.createElement("select");
+      select.className = "view-filter";
+      for (const [value, label] of [
+        ["all", "All outcomes"],
+        ["completed", "Completed"],
+        ["acknowledged", "Dismissed"],
+        ["failed", "Failed"],
+        ["expired", "Expired"],
+      ]) {
+        select.add(new Option(label, value, false, value === (this._historyOutcomeFilter || "all")));
+      }
+      select.onchange = () => {
+        this._historyOutcomeFilter = select.value;
+        this._load();
+      };
+      wrap.append(select);
+      toolbar.prepend(wrap);
+    }
     toolbar.querySelector(".view-filter-wrap")?.remove();
     if (SECONDARY_VIEWS.has(this._view)) {
       const wrap = document.createElement("label");
