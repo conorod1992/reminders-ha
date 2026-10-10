@@ -889,3 +889,20 @@ async def test_early_done_advances_recurring_series_without_schedule_drift(
     assert updated.due == first_due + timedelta(days=1)
     assert updated.last_occurrence_status is ReminderStatus.COMPLETED
     assert updated.occurrence_history[-2].id == completed.id
+
+
+async def test_history_exposes_manual_completion_eligibility(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    due = datetime.now(UTC) - timedelta(minutes=2)
+    await runtime.async_create(
+        user_id="u1", title="Can complete", due=due, allow_manual_completion=True
+    )
+    await runtime.async_create(
+        user_id="u1", title="Cannot complete", due=due, allow_manual_completion=False
+    )
+    records, _ = await runtime.async_history(user_id="u1")
+    flags = {row["title"]: row["allow_manual_completion"] for row in records}
+    assert flags["Can complete"] is True
+    assert flags["Cannot complete"] is False
