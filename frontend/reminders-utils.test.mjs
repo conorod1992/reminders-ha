@@ -5,6 +5,7 @@ import {
   awaitingOccurrences,
   canSnooze,
   deliverySummary,
+  historyHighlights,
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
@@ -25,6 +26,7 @@ test("formats supported recurrence rules", () => {
 
 test("formats default and custom delivery", () => {
   assert.equal(deliverySummary({ delivery_policy: null }), "Use my defaults");
+  assert.equal(deliverySummary({ delivery_policy: null }, { default_delivery_policy: { channels: ["phone", "voice"] } }), "Phone + Voice");
   assert.equal(deliverySummary({ delivery_policy: { channels: ["phone", "voice"] } }), "Phone + Voice");
   assert.equal(deliverySummary({ delivery_policy: { channels: ["persistent_notification"] } }), "Home Assistant alert");
 });
@@ -36,10 +38,15 @@ test("combines date and time without inventing a timezone", () => {
 test("creates quick choices in the configured timezone", () => {
   assert.deepEqual(quickTimeParts("10m", "UTC", Date.parse("2026-08-04T09:00:00Z")), { date: "2026-08-04", time: "09:10" });
   assert.deepEqual(quickTimeParts("tomorrow", "UTC", Date.parse("2026-08-04T09:00:00Z")), { date: "2026-08-05", time: "09:00" });
+  assert.deepEqual(quickTimeParts("tomorrow", "Europe/Dublin", Date.parse("2026-10-09T22:30:00Z")), { date: "2026-10-10", time: "09:00" });
+  assert.deepEqual(quickTimeParts("tomorrow", "Europe/Dublin", Date.parse("2026-10-09T14:00:00Z")), { date: "2026-10-10", time: "09:00" });
+  assert.deepEqual(quickTimeParts("tomorrow", "UTC", Date.parse("2026-12-31T22:00:00Z")), { date: "2027-01-01", time: "09:00" });
 });
 
 test("summarizes acknowledgement and finds actionable occurrences", () => {
-  assert.equal(acknowledgementSummary({ acknowledgement_policy: "required" }), "Keep reminding until dismissed");
+  assert.equal(acknowledgementSummary({ acknowledgement_policy: "required" }), "Keep active until dismissed");
+  assert.equal(acknowledgementSummary({ acknowledgement_policy: "default" }, { require_acknowledgement: false }), "Dismissal not required");
+  assert.equal(acknowledgementSummary({ acknowledgement_policy: "default" }, { require_acknowledgement: true }), "Keep active until dismissed");
   assert.deepEqual(awaitingOccurrences({ occurrence_history: [{ id: "a", status: "awaiting_acknowledgement" }, { id: "b", status: "delivered" }] }).map((item) => item.id), ["a"]);
 });
 
@@ -83,4 +90,25 @@ test("only offers snooze where it can produce a valid retry", () => {
   assert.equal(canSnooze({ activation_type: "trigger", status: "acknowledged" }), true);
   assert.equal(canSnooze({ activation_type: "trigger", status: "expired" }), false);
   assert.equal(canSnooze({ activation_type: "time", status: "pending", paused: true }), false);
+});
+
+test("history highlights distinguish planned, actual and resolved times", () => {
+  const highlights = historyHighlights({
+    scheduled_due: "2026-10-10T17:00:00Z",
+    due: "2026-10-10T18:00:00Z",
+    delivered_at: "2026-10-10T18:01:00Z",
+    completed_at: "2026-10-10T18:04:00Z",
+    status: "completed",
+    delivery_errors: ["phone: TimeoutError"],
+  }, (time) => time.slice(11, 16));
+  assert.deepEqual(highlights, [
+    "Moved to 18:00",
+    "Sent 18:01",
+    "Completed 18:04",
+    "Delivery errors: phone: TimeoutError",
+  ]);
+});
+
+test("history highlights tolerate sparse older occurrence records", () => {
+  assert.deepEqual(historyHighlights({}, (time) => time), []);
 });

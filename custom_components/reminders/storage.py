@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
+from .const import SAVE_DELAY, STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
 from .models import (
     ActivationType,
     Occurrence,
@@ -40,6 +40,27 @@ class ReminderStore(Store[StoredData]):
             minor_version=STORAGE_MINOR_VERSION,
             atomic_writes=True,
         )
+        self._last_requested_data: StoredData | None = None
+
+    async def async_load(self) -> StoredData | None:
+        """Load storage and remember the latest logical state."""
+        data = await super().async_load()
+        self._last_requested_data = data
+        return data
+
+    async def async_save(self, data: StoredData) -> None:
+        """Persist state, debouncing diagnostic-only cooldown counter changes."""
+        previous = self._last_requested_data
+        self._last_requested_data = data
+        if _is_cooldown_counter_only_update(previous, data):
+            self.async_delay_save(self._latest_requested_data, SAVE_DELAY)
+            return
+        await super().async_save(data)
+
+    def _latest_requested_data(self) -> StoredData:
+        """Return the most recent state for a delayed write."""
+        assert self._last_requested_data is not None
+        return self._last_requested_data
 
     async def _async_migrate_func(
         self, old_major_version: int, old_minor_version: int, old_data: Any
@@ -328,6 +349,48 @@ def serialize_storage(
         "reminders": {key: value.to_dict() for key, value in reminders.items()},
         "users": {key: value.to_dict() for key, value in users.items()},
     }
+
+
+def _is_cooldown_counter_only_update(
+    previous: StoredData | None, current: StoredData
+) -> bool:
+    """Return whether only cooldown diagnostics advanced since the last save request."""
+    if previous is None or previous["users"] != current["users"]:
+        return False
+    before_reminders = previous["reminders"]
+    after_reminders = current["reminders"]
+    if before_reminders.keys() != after_reminders.keys():
+        return False
+
+    changed = False
+    for reminder_id, before in before_reminders.items():
+        after = after_reminders[reminder_id]
+        if before == after:
+            continue
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            return False
+        before_count = before.get("cooldown_skip_count")
+        after_count = after.get("cooldown_skip_count")
+        if (
+            not isinstance(before_count, int)
+            or not isinstance(after_count, int)
+            or after_count <= before_count
+        ):
+            return False
+        before_payload = {
+            key: value
+            for key, value in before.items()
+            if key not in {"cooldown_skip_count", "updated_at"}
+        }
+        after_payload = {
+            key: value
+            for key, value in after.items()
+            if key not in {"cooldown_skip_count", "updated_at"}
+        }
+        if before_payload != after_payload:
+            return False
+        changed = True
+    return changed
 
 
 def _normalize_storage(data: Any) -> StoredData:

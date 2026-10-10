@@ -83,8 +83,8 @@ export function recurrenceSummary(reminder, locale = undefined) {
     : `${every} months on ${pattern} at ${time}`;
 }
 
-export function deliverySummary(reminder) {
-  const policy = reminder?.delivery_policy;
+export function deliverySummary(reminder, preferences = null) {
+  const policy = reminder?.delivery_policy || preferences?.default_delivery_policy;
   if (!policy) return "Use my defaults";
   const labels = { phone: "Phone", voice: "Voice", persistent_notification: "Home Assistant alert" };
   return policy.channels.map((channel) => labels[channel] || channel).join(" + ");
@@ -126,14 +126,22 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
     const hour = Math.min(23, Math.max(18, currentHour + 2));
     return { date: today.date, time: `${String(hour).padStart(2, "0")}:${hour === 23 ? "59" : "00"}` };
   }
-  const tomorrow = zonedInputParts(new Date(instant.getTime() + 36 * 3600000), timeZone);
-  return { date: tomorrow.date, time: "09:00" };
+  const [year, month, day] = today.date.split("-").map(Number);
+  // Advance the calendar date, not the instant: +36h can skip tomorrow
+  // when the shortcut is used in the afternoon or evening.
+  const nextDate = new Date(Date.UTC(year, month - 1, day + 1));
+  return { date: nextDate.toISOString().slice(0, 10), time: "09:00" };
 }
 
-export function acknowledgementSummary(reminder) {
+export function acknowledgementSummary(reminder, preferences = null) {
+  if ((reminder?.acknowledgement_policy || "default") === "default"
+      && preferences?.require_acknowledgement !== undefined) {
+    return preferences.require_acknowledgement
+      ? "Keep active until dismissed" : "Dismissal not required";
+  }
   return {
     default: "Use my default",
-    required: "Keep reminding until dismissed",
+    required: "Keep active until dismissed",
     not_required: "Dismissal not required",
   }[reminder?.acknowledgement_policy || "default"];
 }
@@ -182,4 +190,23 @@ export function relativeTime(value, locale = undefined, now = Date.now()) {
   if (Math.abs(seconds) < 3600) return formatter.format(Math.round(seconds / 60), "minute");
   if (Math.abs(seconds) < 86400) return formatter.format(Math.round(seconds / 3600), "hour");
   return formatter.format(Math.round(seconds / 86400), "day");
+}
+
+export function historyHighlights(occurrence, formatDate) {
+  const result = [];
+  const display = (value) => formatDate(value);
+  if (occurrence.scheduled_due && occurrence.due
+      && occurrence.scheduled_due !== occurrence.due) {
+    result.push(`Moved to ${display(occurrence.due)}`);
+  }
+  if (occurrence.delivered_at) result.push(`Sent ${display(occurrence.delivered_at)}`);
+  if (occurrence.acknowledged_at) result.push(`Dismissed ${display(occurrence.acknowledged_at)}`);
+  else if (occurrence.completed_at && occurrence.status === "completed") {
+    result.push(`Completed ${display(occurrence.completed_at)}`);
+  }
+  if (occurrence.next_escalation_at) result.push(`Next follow-up ${display(occurrence.next_escalation_at)}`);
+  if (occurrence.delivery_errors?.length) {
+    result.push(`Delivery errors: ${occurrence.delivery_errors.join(", ")}`);
+  }
+  return result;
 }

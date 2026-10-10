@@ -3,6 +3,7 @@ import {
   acknowledgementSummary,
   awaitingOccurrences,
   deliverySummary,
+  historyHighlights,
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
@@ -131,6 +132,20 @@ class RemindersManagementPanel extends HTMLElement {
   _renderFilters() {
     const host = this.shadowRoot?.querySelector("#filters");
     if (!host) return;
+    // Reminder updates and debounced searches should not replace a focused
+    // search control; rebuilding it loses focus, caret and the user's typing.
+    const filterKey = [
+      this._view, this._scope, this._selectedUser,
+      Boolean(this._hass?.user?.is_admin),
+    ].join("|");
+    if (host.childElementCount && this._filtersKey === filterKey) {
+      const existingSearch = host.querySelector('input[type="search"]');
+      if (existingSearch && this.shadowRoot.activeElement !== existingSearch) {
+        existingSearch.value = this._query;
+      }
+      return;
+    }
+    this._filtersKey = filterKey;
     host.replaceChildren();
     const tabs = document.createElement("div");
     tabs.className = "tabs";
@@ -235,8 +250,9 @@ class RemindersManagementPanel extends HTMLElement {
     meta.className = "meta";
     const displayStatus = reminder.status === "acknowledged" ? "dismissed" : reminder.status === "awaiting_acknowledgement" ? "awaiting dismissal" : reminder.status.replaceAll("_", " ");
     const values = reminder.activation_type === "trigger"
-      ? [displayStatus, triggerRepeatSummary(reminder), reminder.cooldown_seconds ? `At least ${this._duration(reminder.cooldown_seconds)} between reminders` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Keeps reminding after ${reminder.escalation.initial_delay_minutes} min until handled` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean)
-      : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Keeps reminding after ${reminder.escalation.initial_delay_minutes} min until handled` : null, deliverySummary(reminder), acknowledgementSummary(reminder)].filter(Boolean);
+      ? [displayStatus, triggerRepeatSummary(reminder), reminder.cooldown_seconds ? `At least ${this._duration(reminder.cooldown_seconds)} between reminders` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Keeps reminding after ${reminder.escalation.initial_delay_minutes} min until handled` : null, deliverySummary(reminder, reminder.user_id === this._hass?.user?.id ? this._preferences : null), acknowledgementSummary(reminder, reminder.user_id === this._hass?.user?.id ? this._preferences : null)].filter(Boolean)
+      : [recurrenceSummary(reminder, this._hass.locale?.language), reminder.deliver_when_summary ? `After the scheduled time, ${reminder.deliver_when_summary.toLowerCase()}` : null, reminder.complete_when_summary ? `Automatically completes ${reminder.complete_when_summary.toLowerCase()}` : null, reminder.escalation ? `Keeps reminding after ${reminder.escalation.initial_delay_minutes} min until handled` : null, deliverySummary(reminder, reminder.user_id === this._hass?.user?.id ? this._preferences : null), acknowledgementSummary(reminder, reminder.user_id === this._hass?.user?.id ? this._preferences : null)].filter(Boolean);
+    if (reminder.delivery_errors?.length) values.push(`Delivery issues: ${reminder.delivery_errors.join(", ")}`);
     if (reminder.owner_name) values.push(reminder.owner_name);
     if (reminder.managed_externally && reminder.source) values.push(`Managed by ${reminder.source}`);
     meta.textContent = values.join(" · ");
@@ -245,8 +261,19 @@ class RemindersManagementPanel extends HTMLElement {
     actions.className = "actions";
     const awaiting = awaitingOccurrences(reminder);
     const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
+    const upcomingTask = (reminder.occurrence_history || []).find(
+      (item) => item.id === reminder.current_occurrence_id && item.status === "scheduled"
+    );
+    if (upcomingTask && reminder.status === "pending" && !reminder.paused
+        && reminder.activation_type === "time" && reminder.allow_manual_completion) {
+      actions.append(this._action("Done now", () => this._complete(reminder, upcomingTask.id)));
+    }
     if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
     if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
+    if (reminder.status === "failed" && reminder.activation_type === "time"
+        && !reminder.recurring && !reminder.managed_externally && !reminder.paused) {
+      actions.append(this._action("Retry now", () => this._retryFailed(reminder)));
+    }
     if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder)));
     if (awaiting.length) actions.append(this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
     const overflow = document.createElement("details"); overflow.className = "overflow"; overflow.innerHTML = '<summary aria-label="More actions">⋮</summary><div class="overflow-menu"></div>';
@@ -284,11 +311,15 @@ class RemindersManagementPanel extends HTMLElement {
     if (occurrence.failed_channels.length) extras.push(`Failed: ${occurrence.failed_channels.join(", ")}`);
     if (occurrence.suppressed_channels.length) extras.push(`Quiet hours suppressed: ${occurrence.suppressed_channels.join(", ")}`);
     if (occurrence.snoozed) extras.push("Snoozed");
+    extras.push(...historyHighlights(occurrence, (value) => this._formatDate(value)));
     if (row.owner_name) extras.push(row.owner_name);
     details.textContent = extras.join(" · ");
     body.append(title, status, details);
     const actions = document.createElement("div");
     actions.className = "actions";
+    if (row.allow_manual_completion && ["delivered", "awaiting_acknowledgement"].includes(occurrence.status)) {
+      actions.append(this._action("Done", () => this._complete({ id: row.reminder_id }, occurrence.id)));
+    }
     if (occurrence.status === "awaiting_acknowledgement") actions.append(this._action("Dismiss", () => this._acknowledge({ id: row.reminder_id }, occurrence.id)));
     card.append(when, body, actions);
     return card;
@@ -841,6 +872,18 @@ class RemindersManagementPanel extends HTMLElement {
     catch (error) { this._showError(error); }
   }
 
+  async _retryFailed(reminder) {
+    // Reuse the existing durable rescheduling path and owner checks.
+    // It creates a new occurrence while retaining the failed attempt in history.
+    try {
+      await this._call("snooze", {
+        reminder_id: reminder.id,
+        due: new Date().toISOString(),
+      });
+      await this._load();
+    } catch (error) { this._showError(error); }
+  }
+
   async _acknowledge(reminder, occurrenceId) {
     try { await this._call("acknowledge", { reminder_id: reminder.id, occurrence_id: occurrenceId }); await this._load(); }
     catch (error) { this._showError(error); }
@@ -940,8 +983,6 @@ class RemindersManagementPanel extends HTMLElement {
       quiet_hours_enabled: dialog.querySelector("[name=quiet_enabled]").checked,
       quiet_hours_start: dialog.querySelector("[name=quiet_start]").value,
       quiet_hours_end: dialog.querySelector("[name=quiet_end]").value,
-      quiet_hours_channels: ["voice"],
-      quiet_hours_fallback_channels: ["persistent_notification"],
       history_retention_days: Number(dialog.querySelector("[name=retention_days]").value),
       history_max_occurrences: Number(dialog.querySelector("[name=retention_count]").value),
     };
@@ -952,7 +993,12 @@ class RemindersManagementPanel extends HTMLElement {
       const result = await this._call("set_preferences", this._preferencesPayload(dialog, target));
       if (target === this._hass.user.id) this._preferences = result.preferences;
       return true;
-    } catch (error) { this._showError(error); return false; }
+    } catch (error) {
+      const host = dialog.querySelector(".test-result");
+      if (host) { host.className = "test-result hint"; host.textContent = error.message || String(error); }
+      else this._showError(error);
+      return false;
+    }
   }
 
   async _testDelivery(dialog, target, channel) {
@@ -981,6 +1027,11 @@ class RemindersManagementPanel extends HTMLElement {
   _entitySelect(domain, selected = []) {
     const select = document.createElement("select"); select.multiple = true;
     for (const [id, state] of Object.entries(this._hass.states || {}).filter(([id]) => id.startsWith(`${domain}.`))) select.add(new Option(state.attributes.friendly_name || id, id, false, selected.includes(id)));
+    for (const id of selected) {
+      if (![...select.options].some((option) => option.value === id)) {
+        select.add(new Option(`${id} (currently unavailable)`, id, true, true));
+      }
+    }
     return select;
   }
 
