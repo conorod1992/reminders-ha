@@ -242,3 +242,28 @@ async def test_voice_cannot_add_recurrence_to_one_time_reminder(
         await _update(
             hass, {"reminder_id": item.id, "frequency": "daily"}, context("u1")
         )
+
+
+async def test_voice_updates_and_resets_reminder_delivery_channels(
+    runtime: tuple[Any, ReminderManager],
+) -> None:
+    hass, manager = runtime
+    reminder = (await manager.async_list(user_id="u1"))[0]
+    custom = await _update(
+        hass,
+        {
+            "reminder_id": reminder.id,
+            "delivery_mode": "custom",
+            "channels": ["persistent_notification"],
+        },
+        context("u1"),
+    )
+    assert custom["reminder"]["delivery_policy"]["channels"] == [
+        "persistent_notification"
+    ]
+    reset = await _update(
+        hass,
+        {"reminder_id": reminder.id, "delivery_mode": "default"},
+        context("u1"),
+    )
+    assert reset["reminder"]["delivery_policy"] is None
