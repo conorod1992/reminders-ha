@@ -45,6 +45,8 @@ test("creates quick choices in the configured timezone", () => {
 
 test("summarizes acknowledgement and finds actionable occurrences", () => {
   assert.equal(acknowledgementSummary({ acknowledgement_policy: "required" }), "Keep active until dismissed");
+  assert.equal(acknowledgementSummary({ acknowledgement_policy: "default" }, { require_acknowledgement: false }), "Dismissal not required");
+  assert.equal(acknowledgementSummary({ acknowledgement_policy: "default" }, { require_acknowledgement: true }), "Keep active until dismissed");
   assert.deepEqual(awaitingOccurrences({ occurrence_history: [{ id: "a", status: "awaiting_acknowledgement" }, { id: "b", status: "delivered" }] }).map((item) => item.id), ["a"]);
 });
 
