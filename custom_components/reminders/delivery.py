@@ -205,9 +205,6 @@ class NotifyProvider:
                     context=Context(user_id=reminder.user_id),
                 )
             except ServiceValidationError as action_err:
-                if not reminder.notification_actions:
-                    errors.append(f"{action_name}: {type(action_err).__name__}")
-                    continue
                 # A registered target may stop supporting action metadata. Keep
                 # the reminder deliverable by retrying once without buttons.
                 try:
