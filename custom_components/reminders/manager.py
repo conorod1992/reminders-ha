@@ -559,6 +559,7 @@ class ReminderManager:
                             "title": reminder.title,
                             "message": reminder.message,
                             "recurring": reminder.recurrence is not None,
+                            "allow_manual_completion": reminder.allow_manual_completion,
                             "activation_type": reminder.activation_type.value,
                             "trigger_summary": reminder.trigger_summary,
                             "occurrence": occurrence.to_dict(),
@@ -1520,16 +1521,25 @@ class ReminderManager:
             candidates = [
                 item
                 for item in reminder.occurrence_history
-                if item.status
-                in {
-                    OccurrenceStatus.DELIVERED,
-                    OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
-                }
+                if (
+                    item.status
+                    in {
+                        OccurrenceStatus.DELIVERED,
+                        OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+                    }
+                    or (
+                        item.status is OccurrenceStatus.SCHEDULED
+                        and reminder.activation_type is ActivationType.TIME
+                        and reminder.status is ReminderStatus.PENDING
+                        and not reminder.paused
+                        and item.id == reminder.current_occurrence_id
+                    )
+                )
                 and (occurrence_id is None or item.id == occurrence_id)
             ]
             if len(candidates) != 1:
                 raise ReminderValidationError(
-                    "Exactly one matching delivered occurrence is required"
+                    "Exactly one matching active occurrence is required"
                 )
             now = dt_util.utcnow()
             completed = candidates[0].updated(
@@ -1543,6 +1553,21 @@ class ReminderManager:
             history = _replace_occurrence(list(reminder.occurrence_history), completed)
             status = reminder.status
             current_occurrence_id = reminder.current_occurrence_id
+            completed_early = (
+                candidates[0].status is OccurrenceStatus.SCHEDULED
+                and completed.id == reminder.current_occurrence_id
+            )
+            if completed_early and reminder.recurrence is not None:
+                updated = _advance_recurring_series(
+                    reminder,
+                    history,
+                    resolved_due=candidates[0].scheduled_due,
+                    resolved_status=ReminderStatus.COMPLETED,
+                    now=now,
+                    after=max(now, candidates[0].scheduled_due),
+                )
+            else:
+                updated = None
             if (
                 completed.id == reminder.current_occurrence_id
                 and reminder.recurrence is None
@@ -1557,12 +1582,13 @@ class ReminderManager:
                     current_occurrence_id = None
                 else:
                     status = ReminderStatus.COMPLETED
-            updated = reminder.updated(
-                occurrence_history=tuple(history),
-                status=status,
-                current_occurrence_id=current_occurrence_id,
-                updated_at=now,
-            )
+            if updated is None:
+                updated = reminder.updated(
+                    occurrence_history=tuple(history),
+                    status=status,
+                    current_occurrence_id=current_occurrence_id,
+                    updated_at=now,
+                )
             candidate = dict(self._reminders)
             candidate[reminder.id] = updated
             await self._async_persist_state(candidate, self._users)

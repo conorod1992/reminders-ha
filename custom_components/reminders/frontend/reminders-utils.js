@@ -83,8 +83,8 @@ export function recurrenceSummary(reminder, locale = undefined) {
     : `${every} months on ${pattern} at ${time}`;
 }
 
-export function deliverySummary(reminder) {
-  const policy = reminder?.delivery_policy;
+export function deliverySummary(reminder, preferences = null) {
+  const policy = reminder?.delivery_policy || preferences?.default_delivery_policy;
   if (!policy) return "Use my defaults";
   const labels = { phone: "Phone", voice: "Voice", persistent_notification: "Home Assistant alert" };
   return policy.channels.map((channel) => labels[channel] || channel).join(" + ");
@@ -133,10 +133,15 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
   return { date: nextDate.toISOString().slice(0, 10), time: "09:00" };
 }
 
-export function acknowledgementSummary(reminder) {
+export function acknowledgementSummary(reminder, preferences = null) {
+  if ((reminder?.acknowledgement_policy || "default") === "default"
+      && preferences?.require_acknowledgement !== undefined) {
+    return preferences.require_acknowledgement
+      ? "Keep active until dismissed" : "Dismissal not required";
+  }
   return {
     default: "Use my default",
-    required: "Keep reminding until dismissed",
+    required: "Keep active until dismissed",
     not_required: "Dismissal not required",
   }[reminder?.acknowledgement_policy || "default"];
 }
@@ -185,4 +190,23 @@ export function relativeTime(value, locale = undefined, now = Date.now()) {
   if (Math.abs(seconds) < 3600) return formatter.format(Math.round(seconds / 60), "minute");
   if (Math.abs(seconds) < 86400) return formatter.format(Math.round(seconds / 3600), "hour");
   return formatter.format(Math.round(seconds / 86400), "day");
+}
+
+export function historyHighlights(occurrence, formatDate) {
+  const result = [];
+  const display = (value) => formatDate(value);
+  if (occurrence.scheduled_due && occurrence.due
+      && occurrence.scheduled_due !== occurrence.due) {
+    result.push(`Moved to ${display(occurrence.due)}`);
+  }
+  if (occurrence.delivered_at) result.push(`Sent ${display(occurrence.delivered_at)}`);
+  if (occurrence.acknowledged_at) result.push(`Dismissed ${display(occurrence.acknowledged_at)}`);
+  else if (occurrence.completed_at && occurrence.status === "completed") {
+    result.push(`Completed ${display(occurrence.completed_at)}`);
+  }
+  if (occurrence.next_escalation_at) result.push(`Next follow-up ${display(occurrence.next_escalation_at)}`);
+  if (occurrence.delivery_errors?.length) {
+    result.push(`Delivery errors: ${occurrence.delivery_errors.join(", ")}`);
+  }
+  return result;
 }

@@ -851,3 +851,58 @@ async def test_overdue_secondary_deadlines_remain_scheduled(
     runtime._reminders = {reminder.id: reminder}
     runtime._reschedule(force=True)
     assert scheduler.calls[-1] == earlier
+
+
+async def test_manual_completion_before_due_resolves_one_shot(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    due = datetime.now(UTC) + timedelta(days=1)
+    reminder = await runtime.async_create(
+        user_id="u1", title="Already done", due=due, allow_manual_completion=True
+    )
+    completed = await runtime.async_complete(
+        reminder.id, occurrence_id=reminder.current_occurrence_id
+    )
+    assert completed.status is OccurrenceStatus.COMPLETED
+    assert (await runtime.async_get(reminder.id)).status is ReminderStatus.COMPLETED
+
+
+async def test_early_done_advances_recurring_series_without_schedule_drift(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    anchor = datetime.now().replace(tzinfo=None) + timedelta(days=2)
+    reminder = await runtime.async_create_recurring(
+        user_id="u1",
+        title="Already watered",
+        recurrence=daily(anchor),
+        allow_manual_completion=True,
+    )
+    first_due = reminder.scheduled_due
+    completed = await runtime.async_complete(
+        reminder.id, occurrence_id=reminder.current_occurrence_id
+    )
+    assert completed.status is OccurrenceStatus.COMPLETED
+    updated = await runtime.async_get(reminder.id)
+    assert updated.status is ReminderStatus.PENDING
+    assert updated.due == first_due + timedelta(days=1)
+    assert updated.last_occurrence_status is ReminderStatus.COMPLETED
+    assert updated.occurrence_history[-2].id == completed.id
+
+
+async def test_history_exposes_manual_completion_eligibility(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await manager(fake_store, FakeDispatcher(), scheduler)
+    due = datetime.now(UTC) - timedelta(minutes=2)
+    await runtime.async_create(
+        user_id="u1", title="Can complete", due=due, allow_manual_completion=True
+    )
+    await runtime.async_create(
+        user_id="u1", title="Cannot complete", due=due, allow_manual_completion=False
+    )
+    records, _ = await runtime.async_history(user_id="u1")
+    flags = {row["title"]: row["allow_manual_completion"] for row in records}
+    assert flags["Can complete"] is True
+    assert flags["Cannot complete"] is False
