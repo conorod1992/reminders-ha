@@ -316,6 +316,9 @@ class RemindersManagementPanel extends HTMLElement {
     body.append(title, status, details);
     const actions = document.createElement("div");
     actions.className = "actions";
+    if (row.allow_manual_completion && ["delivered", "awaiting_acknowledgement"].includes(occurrence.status)) {
+      actions.append(this._action("Done", () => this._complete({ id: row.reminder_id }, occurrence.id)));
+    }
     if (occurrence.status === "awaiting_acknowledgement") actions.append(this._action("Dismiss", () => this._acknowledge({ id: row.reminder_id }, occurrence.id)));
     card.append(when, body, actions);
     return card;
