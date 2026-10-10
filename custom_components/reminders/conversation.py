@@ -698,7 +698,10 @@ async def _update(
             )
         changes["recurrence"] = _recurrence_from_data(hass, args, reminder.recurrence)
     delivery_fields = {
-        "channels", "notify_targets", "mobile_app_services", "voice_targets"
+        "channels",
+        "notify_targets",
+        "mobile_app_services",
+        "voice_targets",
     }
     if "delivery_mode" in args or delivery_fields.intersection(args):
         changes["delivery_policy"] = _policy_from_data(args)
