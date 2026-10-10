@@ -361,9 +361,7 @@ async def test_phone_channel_allows_each_target_its_own_timeout(
     assert result.failed_channels == ("phone",)
 
 
-async def test_tag_only_mobile_metadata_rejection_falls_back_to_plain_notification() -> (
-    None
-):
+async def test_mobile_tag_rejection_without_actions_falls_back() -> None:
     services = Services(reject_actions={"mobile_app_conor"})
     provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
     source = reminder().updated(notification_actions=())
