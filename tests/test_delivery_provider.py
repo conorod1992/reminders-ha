@@ -359,3 +359,21 @@ async def test_phone_channel_allows_each_target_its_own_timeout(
     )
     assert calls == ["mobile_app_hung", "mobile_app_healthy"]
     assert result.failed_channels == ("phone",)
+
+
+async def test_tag_only_mobile_metadata_rejection_falls_back_to_plain_notification() -> None:
+    services = Services(reject_actions={"mobile_app_conor"})
+    provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
+    source = reminder().updated(notification_actions=())
+    await provider.async_deliver(
+        source,
+        DeliveryPolicy(
+            channels=("phone",), mobile_app_services=("notify.mobile_app_conor",)
+        ),
+    )
+    assert len(services.calls) == 2
+    assert "data" in services.calls[0][2]
+    assert services.calls[1][2] == {
+        "title": source.title, "message": source.message
+    }
+
