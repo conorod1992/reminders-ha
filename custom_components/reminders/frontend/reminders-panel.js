@@ -247,6 +247,10 @@ class RemindersManagementPanel extends HTMLElement {
     const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
     if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
     if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
+    if (reminder.status === "failed" && reminder.activation_type === "time"
+        && !reminder.recurring && !reminder.managed_externally && !reminder.paused) {
+      actions.append(this._action("Retry now", () => this._retryFailed(reminder)));
+    }
     if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder)));
     if (awaiting.length) actions.append(this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
     const overflow = document.createElement("details"); overflow.className = "overflow"; overflow.innerHTML = '<summary aria-label="More actions">⋮</summary><div class="overflow-menu"></div>';
@@ -839,6 +843,18 @@ class RemindersManagementPanel extends HTMLElement {
   async _doSnooze(dialog, reminder, data) {
     try { await this._call("snooze", { reminder_id: reminder.id, ...data }); dialog.close(); await this._load(); }
     catch (error) { this._showError(error); }
+  }
+
+  async _retryFailed(reminder) {
+    // Reuse the existing durable rescheduling path and owner checks.
+    // It creates a new occurrence while retaining the failed attempt in history.
+    try {
+      await this._call("snooze", {
+        reminder_id: reminder.id,
+        due: new Date().toISOString(),
+      });
+      await this._load();
+    } catch (error) { this._showError(error); }
   }
 
   async _acknowledge(reminder, occurrenceId) {

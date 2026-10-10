@@ -35,7 +35,9 @@ class DeliveryProvider(Protocol):
 
     channel: str
 
-    async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
+    async def async_deliver(
+        self, reminder: Reminder, policy: DeliveryPolicy
+    ) -> PartialDeliveryOutcome | None:
         """Deliver a reminder."""
 
 
@@ -119,6 +121,32 @@ class PersistentNotificationProvider:
             raise
 
 
+def _mobile_actions(actions: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+    """Keep the three most useful actions on Companion App notifications.
+
+    Android limits notification action buttons to three. Preserve explicit
+    completion/dismissal first, then one snooze; any remaining actions are
+    available through the reminder panel rather than invisible notification
+    buttons.
+    """
+    priority = {"DONE": 0, "DISMISS": 2, "SNOOZE_10": 3, "SNOOZE_60": 4}
+
+    def rank(action: dict[str, Any]) -> int:
+        name = str(action.get("action", "")).rsplit(":", 1)[-1]
+        if name.startswith("EXTERNAL_"):
+            return 1
+        return priority.get(name, 5)
+
+    return sorted(actions, key=rank)[:3]
+
+
+@dataclass(frozen=True, slots=True)
+class PartialDeliveryOutcome:
+    """A channel reached at least one destination but not all of them."""
+
+    errors: tuple[str, ...]
+
+
 class NotifyProvider:
     """Deliver through generic entities and explicit Companion App services."""
 
@@ -127,7 +155,9 @@ class NotifyProvider:
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
 
-    async def async_deliver(self, reminder: Reminder, policy: DeliveryPolicy) -> None:
+    async def async_deliver(
+        self, reminder: Reminder, policy: DeliveryPolicy
+    ) -> PartialDeliveryOutcome | None:
         if not policy.notify_targets and not policy.mobile_app_services:
             raise ValueError("Phone delivery has no configured notify targets")
         ordinary_data: dict[str, Any] = {
@@ -136,29 +166,37 @@ class NotifyProvider:
         }
         succeeded = 0
         errors: list[str] = []
-        if policy.notify_targets:
+        for notify_target in policy.notify_targets:
             try:
-                # The generic NotifyEntity API supports message and title only.
+                # Dispatch individually so one unavailable entity does not
+                # block independent, healthy notification targets.
                 await _async_service_call(
                     self._hass,
                     "notify",
                     "send_message",
                     ordinary_data,
-                    target={"entity_id": list(policy.notify_targets)},
+                    target={"entity_id": [notify_target]},
                     blocking=True,
                     context=Context(user_id=reminder.user_id),
                 )
             except Exception as err:
-                errors.append(f"generic notify: {type(err).__name__}")
+                errors.append(f"{notify_target}: {type(err).__name__}")
             else:
-                succeeded += len(policy.notify_targets)
+                succeeded += 1
         for action_name in policy.mobile_app_services:
             _domain, service = action_name.split(".", 1)
             actionable_data = dict(ordinary_data)
+            # A stable occurrence tag replaces repeated announcements instead
+            # of accumulating independent notifications on the same device.
+            occurrence_id = _delivery_occurrence_id(reminder)
+            actionable_data["data"] = {
+                "tag": f"reminders_{reminder.id}_{occurrence_id or 'current'}",
+                "url": "/reminders",
+            }
             if reminder.notification_actions:
-                actionable_data["data"] = {
-                    "actions": list(reminder.notification_actions)
-                }
+                actionable_data["data"]["actions"] = _mobile_actions(
+                    reminder.notification_actions
+                )
             try:
                 await _async_service_call(
                     self._hass,
@@ -169,9 +207,6 @@ class NotifyProvider:
                     context=Context(user_id=reminder.user_id),
                 )
             except ServiceValidationError as action_err:
-                if not reminder.notification_actions:
-                    errors.append(f"{action_name}: {type(action_err).__name__}")
-                    continue
                 # A registered target may stop supporting action metadata. Keep
                 # the reminder deliverable by retrying once without buttons.
                 try:
@@ -194,15 +229,12 @@ class NotifyProvider:
                 continue
             succeeded += 1
         if errors:
-            # A phone channel represents the complete configured destination set.
-            # Treat partial delivery as a failure so the occurrence cannot be marked
-            # fully delivered when an intended endpoint did not receive it.
-            outcome = (
-                "Partial phone delivery failed"
-                if succeeded
-                else "Phone delivery failed"
-            )
-            raise RuntimeError(f"{outcome}: {'; '.join(errors)}")
+            if succeeded:
+                # Preserve actionable success for a phone which did receive the
+                # reminder while retaining failure details for other targets.
+                return PartialDeliveryOutcome(tuple(errors))
+            raise RuntimeError(f"Phone delivery failed: {'; '.join(errors)}")
+        return None
 
 
 class VoiceProvider:
@@ -222,7 +254,11 @@ class VoiceProvider:
             self._hass,
             "assist_satellite",
             "announce",
-            {"message": reminder.message or reminder.title},
+            {
+                "message": f"{reminder.title}. {reminder.message}"
+                if reminder.message and reminder.message != reminder.title
+                else reminder.title
+            },
             target={"entity_id": list(policy.voice_targets)},
             blocking=True,
             context=Context(user_id=reminder.user_id),
@@ -265,8 +301,20 @@ class DeliveryDispatcher:
                 failed.append(channel)
                 continue
             try:
-                async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
-                    await provider.async_deliver(reminder, policy)
+                # Each phone destination has its own bounded service deadline.
+                # The channel envelope must not cancel later targets merely
+                # because the first destination consumed its own timeout.
+                destination_count = (
+                    len(policy.notify_targets) + len(policy.mobile_app_services)
+                    if channel == CHANNEL_PHONE
+                    else 1
+                )
+                async with asyncio.timeout(
+                    min(180.0, DELIVERY_TIMEOUT_SECONDS * max(1, destination_count * 2))
+                    if channel == CHANNEL_PHONE
+                    else DELIVERY_TIMEOUT_SECONDS
+                ):
+                    outcome = await provider.async_deliver(reminder, policy)
             except Exception as err:
                 _LOGGER.warning(
                     "Reminder %s delivery through %s failed: %s",
@@ -278,4 +326,7 @@ class DeliveryDispatcher:
                 failed.append(channel)
             else:
                 succeeded.append(channel)
+                if isinstance(outcome, PartialDeliveryOutcome):
+                    failed.append(channel)
+                    errors.extend(f"{channel}: {error}" for error in outcome.errors)
         return DeliveryResult(tuple(succeeded), tuple(errors), tuple(failed))
