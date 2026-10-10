@@ -9,6 +9,8 @@ from enum import IntEnum, StrEnum
 from typing import Any, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+MAX_RECURRENCE_INTERVAL = 1000
+
 
 class RecurrenceError(ValueError):
     """Raised when a recurrence rule is invalid."""
@@ -77,8 +79,10 @@ class RecurrenceRule:
         """Validate and canonicalize the rule without changing legacy semantics."""
         if self.anchor_local.tzinfo is not None:
             raise RecurrenceError("Recurrence anchor must be a local naive datetime")
-        if self.interval < 1:
-            raise RecurrenceError("Recurrence interval must be at least 1")
+        if not 1 <= self.interval <= MAX_RECURRENCE_INTERVAL:
+            raise RecurrenceError(
+                f"Recurrence interval must be between 1 and {MAX_RECURRENCE_INTERVAL}"
+            )
         _get_timezone(self.timezone)
         if self.end_date is not None and self.end_date < self.anchor_local.date():
             raise RecurrenceError(
@@ -199,7 +203,7 @@ def first_due(rule: RecurrenceRule, now: datetime) -> datetime:
     candidate = (
         rule.anchor_utc if rule.anchor_utc >= now else _next_unbounded(rule, now)
     )
-    if not _is_allowed(rule, candidate):
+    if candidate is None or not _is_allowed(rule, candidate):
         raise RecurrenceError("The recurrence has no future occurrences")
     return candidate
 
@@ -219,7 +223,7 @@ def next_occurrence_after(rule: RecurrenceRule, after: datetime) -> datetime:
 def next_due_after(rule: RecurrenceRule, after: datetime) -> datetime | None:
     """Return the next occurrence, or None when the anchored series is complete."""
     candidate = _next_unbounded(rule, _as_utc(after))
-    return candidate if _is_allowed(rule, candidate) else None
+    return candidate if candidate is not None and _is_allowed(rule, candidate) else None
 
 
 def occurrence_number(rule: RecurrenceRule, occurrence: datetime) -> int:
@@ -311,7 +315,7 @@ def _is_allowed(rule: RecurrenceRule, candidate: datetime) -> bool:
     )
 
 
-def _next_unbounded(rule: RecurrenceRule, after: datetime) -> datetime:
+def _next_unbounded(rule: RecurrenceRule, after: datetime) -> datetime | None:
     if rule.frequency is RecurrenceFrequency.DAILY:
         return _next_daily(rule, after)
     if rule.frequency is RecurrenceFrequency.WEEKLY:
@@ -321,17 +325,28 @@ def _next_unbounded(rule: RecurrenceRule, after: datetime) -> datetime:
     return _next_yearly(rule, after)
 
 
-def _next_daily(rule: RecurrenceRule, after: datetime) -> datetime:
+def _next_daily(rule: RecurrenceRule, after: datetime) -> datetime | None:
     local_after = after.astimezone(_get_timezone(rule.timezone)).replace(tzinfo=None)
     day_delta = max(0, (local_after.date() - rule.anchor_local.date()).days)
     steps = day_delta // rule.interval
-    candidate = rule.anchor_local + timedelta(days=steps * rule.interval)
-    while (instant := resolve_local_datetime(candidate, rule.timezone)) <= after:
-        candidate += timedelta(days=rule.interval)
-    return instant
+    try:
+        candidate = rule.anchor_local + timedelta(days=steps * rule.interval)
+    except OverflowError:
+        return None
+    while True:
+        try:
+            instant = resolve_local_datetime(candidate, rule.timezone)
+        except OverflowError, ValueError:
+            return None
+        if instant > after:
+            return instant
+        try:
+            candidate += timedelta(days=rule.interval)
+        except OverflowError:
+            return None
 
 
-def _next_weekly(rule: RecurrenceRule, after: datetime) -> datetime:
+def _next_weekly(rule: RecurrenceRule, after: datetime) -> datetime | None:
     zone = _get_timezone(rule.timezone)
     local_after = after.astimezone(zone).replace(tzinfo=None)
     anchor_week = rule.anchor_local.date() - timedelta(days=rule.anchor_local.weekday())
@@ -339,20 +354,26 @@ def _next_weekly(rule: RecurrenceRule, after: datetime) -> datetime:
     active_week = weeks_since - (weeks_since % rule.interval)
     wall_time = rule.anchor_local.time()
     while True:
-        week_start = anchor_week + timedelta(weeks=active_week)
+        try:
+            week_start = anchor_week + timedelta(weeks=active_week)
+        except OverflowError:
+            return None
         for weekday in rule.weekdays:
-            candidate = datetime.combine(
-                week_start + timedelta(days=int(weekday)), wall_time
-            )
+            try:
+                candidate = datetime.combine(
+                    week_start + timedelta(days=int(weekday)), wall_time
+                )
+                instant = resolve_local_datetime(candidate, rule.timezone)
+            except OverflowError, ValueError:
+                return None
             if candidate < rule.anchor_local:
                 continue
-            instant = resolve_local_datetime(candidate, rule.timezone)
             if instant > after:
                 return instant
         active_week += rule.interval
 
 
-def _next_monthly(rule: RecurrenceRule, after: datetime) -> datetime:
+def _next_monthly(rule: RecurrenceRule, after: datetime) -> datetime | None:
     zone = _get_timezone(rule.timezone)
     local_after = after.astimezone(zone).replace(tzinfo=None)
     anchor_month = rule.anchor_local.year * 12 + rule.anchor_local.month - 1
@@ -361,6 +382,8 @@ def _next_monthly(rule: RecurrenceRule, after: datetime) -> datetime:
     month_index = anchor_month + (elapsed // rule.interval) * rule.interval
     while True:
         year, month0 = divmod(month_index, 12)
+        if not 1 <= year <= datetime.max.year:
+            return None
         candidate_date = _monthly_date(rule, year, month0 + 1)
         if candidate_date is not None:
             candidate = datetime.combine(candidate_date, rule.anchor_local.time())
@@ -371,11 +394,13 @@ def _next_monthly(rule: RecurrenceRule, after: datetime) -> datetime:
         month_index += rule.interval
 
 
-def _next_yearly(rule: RecurrenceRule, after: datetime) -> datetime:
+def _next_yearly(rule: RecurrenceRule, after: datetime) -> datetime | None:
     local_after = after.astimezone(_get_timezone(rule.timezone)).replace(tzinfo=None)
     elapsed = max(0, local_after.year - rule.anchor_local.year)
     year = rule.anchor_local.year + (elapsed // rule.interval) * rule.interval
     while True:
+        if not 1 <= year <= datetime.max.year:
+            return None
         try:
             candidate = rule.anchor_local.replace(year=year)
         except ValueError:  # 29 February: skip non-leap years.

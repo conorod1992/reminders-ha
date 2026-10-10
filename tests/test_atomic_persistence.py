@@ -290,6 +290,10 @@ async def test_recurring_result_save_failure_keeps_persisted_claim_recoverable(
     recovery_dispatcher = FakeDispatcher()
     recovered = await _manager(store, recovery_dispatcher, scheduler)
     advanced = await recovered.async_get(reminder.id)
+    # The first provider call succeeded but its result was not durable. Recovery
+    # must retry because the same stored DELIVERING claim is also produced when a
+    # crash happens before the provider runs; without provider idempotency, this
+    # possible duplicate is the unavoidable conservative ambiguity.
     assert len(recovery_dispatcher.calls) == 1
     assert advanced.status is ReminderStatus.PENDING
     assert advanced.due > now
