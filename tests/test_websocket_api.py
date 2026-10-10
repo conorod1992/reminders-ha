@@ -117,6 +117,43 @@ async def test_normal_list_and_get_are_owner_scoped(
             type="reminders/get",
             reminder_id=other.id,
         )
+
+
+async def test_source_filter_round_trips_without_expanding_user_access(
+    api: tuple[Any, ReminderManager],
+) -> None:
+    hass, manager = api
+    connection = Connection(user("u1"))
+    await invoke(
+        websocket_create,
+        hass,
+        connection,
+        type="reminders/create",
+        title="Mine",
+        due=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        source="expiry_tracker",
+        source_id="milk",
+        managed_externally=True,
+    )
+    mine = connection.results[-1][1]["reminder"]
+    await manager.async_create(
+        user_id="u2",
+        title="Private",
+        due=datetime.now(UTC) + timedelta(days=1),
+        source="expiry_tracker",
+        source_id="milk",
+    )
+    await invoke(
+        websocket_list,
+        hass,
+        connection,
+        type="reminders/list",
+        source="expiry_tracker",
+        source_id="milk",
+    )
+    reminders = connection.results[-1][1]["reminders"]
+    assert [item["id"] for item in reminders] == [mine["id"]]
+    assert reminders[0]["managed_externally"] is True
     with pytest.raises(HomeAssistantError):
         await invoke(
             websocket_list,

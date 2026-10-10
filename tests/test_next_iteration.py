@@ -8,7 +8,11 @@ from typing import Any
 
 import pytest
 
-from custom_components.reminders.manager import ReminderManager, quiet_hours_active
+from custom_components.reminders.manager import (
+    ReminderManager,
+    ReminderValidationError,
+    quiet_hours_active,
+)
 from custom_components.reminders.models import (
     AcknowledgementPolicy,
     DeliveryPolicy,
@@ -17,6 +21,7 @@ from custom_components.reminders.models import (
     QuietHoursPolicy,
     Reminder,
     ReminderStatus,
+    UserPreferences,
 )
 from custom_components.reminders.recurrence import (
     MonthlyMode,
@@ -200,6 +205,71 @@ async def test_quiet_hours_suppress_voice_and_add_fallback(
     assert delivered.occurrence_history[-1].suppressed_channels == ("voice",)
 
 
+def test_quiet_hours_phone_fallback_uses_default_targets() -> None:
+    hass = SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Dublin"))
+    manager = ReminderManager(hass, FakeStore(), FakeDispatcher())  # type: ignore[arg-type]
+    due = datetime(2027, 1, 2, 0, 30, tzinfo=UTC)
+    reminder = Reminder(
+        id="quiet-phone",
+        user_id="u1",
+        title="Quiet phone",
+        due=due,
+        created_at=due - timedelta(hours=1),
+        updated_at=due - timedelta(hours=1),
+    )
+    policy = DeliveryPolicy(("voice",), voice_targets=("assist_satellite.kitchen",))
+    preferences = UserPreferences(
+        default_delivery_policy=DeliveryPolicy(
+            ("phone",), mobile_app_services=("notify.mobile_app_phone",)
+        ),
+        quiet_hours_enabled=True,
+        quiet_hours_start=time(23),
+        quiet_hours_end=time(7),
+        quiet_hours_channels=("voice",),
+        quiet_hours_fallback_channels=("phone",),
+    )
+
+    delivery, suppressed = manager._delivery_plan(reminder, policy, preferences, due)
+
+    assert suppressed == ("voice",)
+    assert delivery.channels == ("phone",)
+    assert delivery.mobile_app_services == ("notify.mobile_app_phone",)
+    assert delivery.notify_targets == ()
+
+
+def test_quiet_hours_voice_fallback_uses_default_targets() -> None:
+    hass = SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Dublin"))
+    manager = ReminderManager(hass, FakeStore(), FakeDispatcher())  # type: ignore[arg-type]
+    due = datetime(2027, 1, 2, 0, 30, tzinfo=UTC)
+    reminder = Reminder(
+        id="quiet-voice",
+        user_id="u1",
+        title="Quiet voice",
+        due=due,
+        created_at=due - timedelta(hours=1),
+        updated_at=due - timedelta(hours=1),
+    )
+    policy = DeliveryPolicy(
+        ("phone",), mobile_app_services=("notify.mobile_app_phone",)
+    )
+    preferences = UserPreferences(
+        default_delivery_policy=DeliveryPolicy(
+            ("voice",), voice_targets=("assist_satellite.bedroom",)
+        ),
+        quiet_hours_enabled=True,
+        quiet_hours_start=time(23),
+        quiet_hours_end=time(7),
+        quiet_hours_channels=("phone",),
+        quiet_hours_fallback_channels=("voice",),
+    )
+
+    delivery, suppressed = manager._delivery_plan(reminder, policy, preferences, due)
+
+    assert suppressed == ("phone",)
+    assert delivery.channels == ("voice",)
+    assert delivery.voice_targets == ("assist_satellite.bedroom",)
+
+
 async def test_urgent_reminder_ignores_quiet_hours(
     fake_store: FakeStore, scheduler: Scheduler
 ) -> None:
@@ -327,3 +397,77 @@ async def test_storage_1_2_migration_adds_safe_defaults() -> None:
     migrated = await store._async_migrate_func(1, 2, raw)
     assert migrated["reminders"]["legacy"]["acknowledgement_policy"] == "default"
     assert migrated["reminders"]["legacy"]["occurrence_history"]
+
+
+@pytest.mark.parametrize(
+    ("fallback_channels", "policy", "message"),
+    [
+        (
+            ("phone",),
+            DeliveryPolicy(("persistent_notification",)),
+            "phone fallback needs at least one default notify target",
+        ),
+        (
+            ("voice",),
+            DeliveryPolicy(("persistent_notification",)),
+            "voice fallback needs at least one default Assist satellite",
+        ),
+    ],
+)
+async def test_quiet_hours_fallback_rejects_missing_default_targets(
+    fake_store: FakeStore,
+    scheduler: Scheduler,
+    fallback_channels: tuple[str, ...],
+    policy: DeliveryPolicy,
+    message: str,
+) -> None:
+    manager = await _manager(fake_store, FakeDispatcher(), scheduler)
+
+    with pytest.raises(ReminderValidationError, match=message):
+        await manager.async_set_user_preferences(
+            "u1",
+            policy,
+            quiet_hours_enabled=True,
+            quiet_hours_channels=("persistent_notification",),
+            quiet_hours_fallback_channels=fallback_channels,
+        )
+
+    assert (await manager.async_get_user_preferences("u1")).configured is False
+
+
+@pytest.mark.parametrize(
+    ("fallback_channels", "policy"),
+    [
+        (
+            ("phone",),
+            DeliveryPolicy(
+                ("persistent_notification",),
+                mobile_app_services=("notify.mobile_app_phone",),
+            ),
+        ),
+        (
+            ("voice",),
+            DeliveryPolicy(
+                ("persistent_notification",),
+                voice_targets=("assist_satellite.bedroom",),
+            ),
+        ),
+    ],
+)
+async def test_quiet_hours_fallback_accepts_configured_default_targets(
+    fake_store: FakeStore,
+    scheduler: Scheduler,
+    fallback_channels: tuple[str, ...],
+    policy: DeliveryPolicy,
+) -> None:
+    manager = await _manager(fake_store, FakeDispatcher(), scheduler)
+
+    preferences = await manager.async_set_user_preferences(
+        "u1",
+        policy,
+        quiet_hours_enabled=True,
+        quiet_hours_channels=("persistent_notification",),
+        quiet_hours_fallback_channels=fallback_channels,
+    )
+
+    assert preferences.quiet_hours_fallback_channels == fallback_channels

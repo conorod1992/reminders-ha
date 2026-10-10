@@ -23,35 +23,82 @@ from .authorization import (
     async_resolve_list_user,
     async_resolve_target_user,
 )
-from .const import DOMAIN, SUPPORTED_CHANNELS
+from .const import DOMAIN, MAX_MESSAGE_LENGTH, MAX_TITLE_LENGTH, SUPPORTED_CHANNELS
 from .manager import ReminderManager, ReminderNotFoundError, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
+    ActivationType,
     DeliveryPolicy,
+    MissedOccurrencePolicy,
     OccurrenceStatus,
     QuietHoursPolicy,
     ReminderStatus,
+    TriggerRepeatPolicy,
+    WhileAwaitingAcknowledgement,
 )
 from .recurrence import (
+    MAX_RECURRENCE_INTERVAL,
     MonthlyMode,
     RecurrenceError,
     RecurrenceFrequency,
     Weekday,
     preview_occurrences,
 )
-from .services import _parse_datetime, _policy_from_data, _recurrence_from_data
+from .services import (
+    _parse_datetime,
+    _policy_from_data,
+    _recurrence_from_data,
+    _source_from_data,
+)
+from .triggers.models import TriggerDefinition, TriggerValidationError
 
 COMMAND_PREFIX = f"{DOMAIN}/"
 POLICY_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+}
+ADVANCED_SCHEMA: dict[Any, Any] = {
+    vol.Optional("deliver_when"): dict,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
+    vol.Optional("expires_after_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=60, max=31_536_000)
+    ),
+}
+EXTERNAL_ACTION_SCHEMA = vol.All(
+    cv.ensure_list,
+    vol.Length(max=5),
+    [
+        {
+            vol.Required("id"): vol.All(cv.string, vol.Match(r"^[A-Za-z0-9_-]{1,64}$")),
+            vol.Required("label"): vol.All(cv.string, vol.Length(min=1, max=64)),
+        }
+    ],
+)
+SOURCE_SCHEMA: dict[Any, Any] = {
+    vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
+    vol.Optional("source_event"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions", default=[]): EXTERNAL_ACTION_SCHEMA,
+}
+SOURCE_UPDATE_SCHEMA: dict[Any, Any] = {
+    vol.Optional("source"): vol.Any(None, cv.string),
+    vol.Optional("source_id"): vol.Any(None, cv.string),
+    vol.Optional("source_event"): vol.Any(None, cv.string),
+    vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions"): EXTERNAL_ACTION_SCHEMA,
 }
 RECURRENCE_SCHEMA: dict[Any, Any] = {
     vol.Required("first_reminder"): cv.string,
     vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
-    vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("interval", default=1): vol.All(
+        vol.Coerce(int), vol.Range(min=1, max=MAX_RECURRENCE_INTERVAL)
+    ),
     vol.Optional("weekdays"): vol.All(
         cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
     ),
@@ -81,7 +128,11 @@ def _api_errors(handler: Any) -> Any:
             return await handler(*args, **kwargs)
         except ReminderNotFoundError as err:
             raise HomeAssistantError(f"Unknown reminder ID: {err.args[0]}") from err
-        except (ReminderValidationError, RecurrenceError) as err:
+        except (
+            ReminderValidationError,
+            RecurrenceError,
+            TriggerValidationError,
+        ) as err:
             raise HomeAssistantError(str(err)) from err
 
     return wrapped
@@ -108,11 +159,21 @@ async def _user_names(hass: HomeAssistant) -> dict[str, str]:
         vol.Optional("scope", default="mine"): vol.In(("mine", "all", "user")),
         vol.Optional("user_id"): cv.string,
         vol.Optional("view", default="upcoming"): vol.In(
-            ("upcoming", "recurring", "failed", "all")
+            (
+                "upcoming",
+                "recurring",
+                "triggered",
+                "waiting_for_trigger",
+                "expired",
+                "failed",
+                "all",
+            )
         ),
         vol.Optional("due_after"): cv.string,
         vol.Optional("due_before"): cv.string,
         vol.Optional("query"): cv.string,
+        vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+        vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
         vol.Optional("limit", default=500): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=1000)
         ),
@@ -143,13 +204,18 @@ async def websocket_list(
             _parse_datetime(hass, msg["due_before"]) if "due_before" in msg else None
         ),
         query=msg.get("query"),
+        source=msg.get("source"),
+        source_id=msg.get("source_id"),
         limit=msg["limit"],
         offset=msg["offset"],
     )
     view = msg["view"]
     if view == "upcoming":
         reminders = [
-            item for item in reminders if item.status is ReminderStatus.PENDING
+            item
+            for item in reminders
+            if item.activation_type is ActivationType.TIME
+            and item.status is ReminderStatus.PENDING
         ]
     elif view == "recurring":
         reminders = [item for item in reminders if item.recurrence is not None]
@@ -159,6 +225,20 @@ async def websocket_list(
             for item in reminders
             if item.status is ReminderStatus.FAILED
             or item.last_occurrence_status is ReminderStatus.FAILED
+        ]
+    elif view == "triggered":
+        reminders = [
+            item for item in reminders if item.activation_type is ActivationType.TRIGGER
+        ]
+    elif view == "waiting_for_trigger":
+        reminders = [
+            item
+            for item in reminders
+            if item.status is ReminderStatus.WAITING_FOR_TRIGGER
+        ]
+    elif view == "expired":
+        reminders = [
+            item for item in reminders if item.status is ReminderStatus.EXPIRED
         ]
     names = (
         await _user_names(hass) if connection.user.is_admin and scope != "mine" else {}
@@ -188,8 +268,10 @@ async def websocket_get(
 
 CREATE_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}create",
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Required("due"): cv.string,
     vol.Optional("user_id"): cv.string,
     vol.Optional("acknowledgement_policy", default="default"): vol.In(
@@ -199,6 +281,8 @@ CREATE_SCHEMA: dict[Any, Any] = {
         tuple(QuietHoursPolicy)
     ),
     **POLICY_SCHEMA,
+    **ADVANCED_SCHEMA,
+    **SOURCE_SCHEMA,
 }
 
 
@@ -217,14 +301,22 @@ async def websocket_create(
         delivery_policy=_policy_from_data(msg),
         acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        deliver_when=msg.get("deliver_when"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
+        expires_after_seconds=msg.get("expires_after_seconds"),
+        **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
 
 CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}create_recurring",
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Optional("user_id"): cv.string,
     vol.Optional("acknowledgement_policy", default="default"): vol.In(
         tuple(AcknowledgementPolicy)
@@ -234,6 +326,11 @@ CREATE_RECURRING_SCHEMA: dict[Any, Any] = {
     ),
     **RECURRENCE_SCHEMA,
     **POLICY_SCHEMA,
+    **ADVANCED_SCHEMA,
+    vol.Optional("missed_occurrence_policy", default="remind_on_startup"): vol.In(
+        tuple(MissedOccurrencePolicy)
+    ),
+    **SOURCE_SCHEMA,
 }
 
 
@@ -252,15 +349,116 @@ async def websocket_create_recurring(
         delivery_policy=_policy_from_data(msg),
         acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        deliver_when=msg.get("deliver_when"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
+        missed_occurrence_policy=MissedOccurrencePolicy(
+            msg["missed_occurrence_policy"]
+        ),
+        expires_after_seconds=msg.get("expires_after_seconds"),
+        **_source_from_data(msg),
     )
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
+
+
+CREATE_TRIGGERED_SCHEMA: dict[Any, Any] = {
+    vol.Required("type"): f"{COMMAND_PREFIX}create_triggered",
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
+    vol.Required("trigger"): dict,
+    vol.Optional("user_id"): cv.string,
+    vol.Optional("acknowledgement_policy", default="default"): vol.In(
+        tuple(AcknowledgementPolicy)
+    ),
+    vol.Optional("quiet_hours_policy", default="respect"): vol.In(
+        tuple(QuietHoursPolicy)
+    ),
+    vol.Optional("repeat_policy", default="once"): vol.In(tuple(TriggerRepeatPolicy)),
+    vol.Optional("fire_if_already_matching", default=False): cv.boolean,
+    vol.Optional("while_awaiting_acknowledgement", default="skip"): vol.In(
+        tuple(WhileAwaitingAcknowledgement)
+    ),
+    vol.Optional("cooldown_seconds", default=0): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+    ),
+    vol.Optional("available_from"): cv.string,
+    vol.Optional("expires_at"): cv.string,
+    vol.Optional("trigger_description"): cv.string,
+    **POLICY_SCHEMA,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
+    **SOURCE_SCHEMA,
+}
+
+
+@websocket_command(CREATE_TRIGGERED_SCHEMA)
+@async_response
+@_api_errors
+async def websocket_create_triggered(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    user_id = await async_resolve_target_user(hass, connection.user, msg.get("user_id"))
+    reminder = await _manager(hass).async_create_triggered(
+        user_id=user_id,
+        title=msg["title"],
+        message=msg.get("message"),
+        trigger=TriggerDefinition.from_dict(msg["trigger"]),
+        delivery_policy=_policy_from_data(msg),
+        acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
+        quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        repeat_policy=TriggerRepeatPolicy(msg["repeat_policy"]),
+        fire_if_already_matching=msg["fire_if_already_matching"],
+        while_awaiting_acknowledgement=WhileAwaitingAcknowledgement(
+            msg["while_awaiting_acknowledgement"]
+        ),
+        cooldown_seconds=msg["cooldown_seconds"],
+        available_from=(
+            _parse_datetime(hass, msg["available_from"])
+            if "available_from" in msg
+            else None
+        ),
+        expires_at=(
+            _parse_datetime(hass, msg["expires_at"]) if "expires_at" in msg else None
+        ),
+        trigger_description=msg.get("trigger_description"),
+        complete_when=msg.get("complete_when"),
+        escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
+        **_source_from_data(msg),
+    )
+    connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{COMMAND_PREFIX}fire_trigger",
+        vol.Required("trigger_id"): cv.string,
+        vol.Optional("user_id"): cv.string,
+    }
+)
+@async_response
+@_api_errors
+async def websocket_fire_trigger(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    user_id = await async_resolve_target_user(hass, connection.user, msg.get("user_id"))
+    result = await _manager(hass).async_fire_named_trigger(
+        msg["trigger_id"], user_id=user_id
+    )
+    connection.send_result(msg["id"], result)
 
 
 UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Required("type"): f"{COMMAND_PREFIX}update",
     vol.Required("reminder_id"): cv.string,
     vol.Optional("title"): cv.string,
-    vol.Optional("message"): vol.Any(None, cv.string),
+    vol.Optional("message"): vol.Any(
+        None, vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH))
+    ),
     vol.Optional("due"): cv.string,
     vol.Optional("user_id"): cv.string,
     vol.Optional("first_reminder"): cv.string,
@@ -283,7 +481,30 @@ UPDATE_SCHEMA: dict[Any, Any] = {
     vol.Optional("delivery_mode"): vol.In(("default", "custom")),
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
+    vol.Optional("trigger"): dict,
+    vol.Optional("trigger_description"): vol.Any(None, cv.string),
+    vol.Optional("repeat_policy"): vol.In(tuple(TriggerRepeatPolicy)),
+    vol.Optional("fire_if_already_matching"): cv.boolean,
+    vol.Optional("while_awaiting_acknowledgement"): vol.In(
+        tuple(WhileAwaitingAcknowledgement)
+    ),
+    vol.Optional("cooldown_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+    ),
+    vol.Optional("available_from"): vol.Any(None, cv.string),
+    vol.Optional("expires_at"): vol.Any(None, cv.string),
+    vol.Optional("deliver_when"): vol.Any(None, dict),
+    vol.Optional("complete_when"): vol.Any(None, dict),
+    vol.Optional("escalation"): vol.Any(None, dict),
+    vol.Optional("allow_manual_completion"): cv.boolean,
+    vol.Optional("missed_occurrence_policy"): vol.In(tuple(MissedOccurrencePolicy)),
+    vol.Optional("expires_after_seconds"): vol.Any(
+        None, vol.All(vol.Coerce(int), vol.Range(min=60, max=31_536_000))
+    ),
+    **SOURCE_UPDATE_SCHEMA,
 }
 
 
@@ -310,7 +531,46 @@ async def websocket_update(
         )
     if "quiet_hours_policy" in msg:
         changes["quiet_hours_policy"] = QuietHoursPolicy(msg["quiet_hours_policy"])
-    policy_keys = {"delivery_mode", "channels", "notify_targets", "voice_targets"}
+    if "activation_type" in msg:
+        changes["activation_type"] = ActivationType(msg["activation_type"])
+    if "trigger" in msg:
+        changes["trigger"] = TriggerDefinition.from_dict(msg["trigger"])
+    for key in (
+        "trigger_description",
+        "fire_if_already_matching",
+        "cooldown_seconds",
+        "deliver_when",
+        "complete_when",
+        "escalation",
+        "source",
+        "source_id",
+        "source_event",
+        "managed_externally",
+        "allow_manual_completion",
+        "external_actions",
+        "missed_occurrence_policy",
+        "expires_after_seconds",
+    ):
+        if key in msg:
+            changes[key] = msg[key]
+    if "repeat_policy" in msg:
+        changes["repeat_policy"] = TriggerRepeatPolicy(msg["repeat_policy"])
+    if "while_awaiting_acknowledgement" in msg:
+        changes["while_awaiting_acknowledgement"] = WhileAwaitingAcknowledgement(
+            msg["while_awaiting_acknowledgement"]
+        )
+    for key in ("available_from", "expires_at"):
+        if key in msg:
+            changes[key] = (
+                _parse_datetime(hass, msg[key]) if msg[key] is not None else None
+            )
+    policy_keys = {
+        "delivery_mode",
+        "channels",
+        "notify_targets",
+        "mobile_app_services",
+        "voice_targets",
+    }
     if policy_keys.intersection(msg):
         changes["delivery_policy"] = _policy_from_data(msg)
     recurrence_keys = {
@@ -330,7 +590,9 @@ async def websocket_update(
         if reminder.recurrence is None:
             raise HomeAssistantError("Recurrence fields require a recurring reminder")
         changes["recurrence"] = _recurrence_from_data(hass, msg, reminder.recurrence)
-    updated = await manager.async_update(reminder.id, **changes)
+    updated = await manager.async_update(
+        reminder.id, expected_user_id=reminder.user_id, **changes
+    )
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -347,8 +609,53 @@ async def websocket_delete(
 ) -> None:
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    await manager.async_delete(reminder.id)
+    await manager.async_delete(reminder.id, expected_user_id=reminder.user_id)
     connection.send_result(msg["id"])
+
+
+def _series_action_schema(action: str) -> dict[Any, Any]:
+    return {
+        vol.Required("type"): f"{COMMAND_PREFIX}{action}",
+        vol.Required("reminder_id"): cv.string,
+    }
+
+
+@websocket_command(_series_action_schema("pause"))
+@async_response
+@_api_errors
+async def websocket_pause(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    updated = await manager.async_pause(reminder.id, expected_user_id=reminder.user_id)
+    connection.send_result(msg["id"], {"reminder": updated.to_dict()})
+
+
+@websocket_command(_series_action_schema("resume"))
+@async_response
+@_api_errors
+async def websocket_resume(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    updated = await manager.async_resume(reminder.id, expected_user_id=reminder.user_id)
+    connection.send_result(msg["id"], {"reminder": updated.to_dict()})
+
+
+@websocket_command(_series_action_schema("skip_next"))
+@async_response
+@_api_errors
+async def websocket_skip_next(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    updated = await manager.async_skip_next(
+        reminder.id, expected_user_id=reminder.user_id
+    )
+    connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
 @websocket_command(
@@ -359,6 +666,7 @@ async def websocket_delete(
         vol.Exclusive("duration_seconds", "when"): vol.All(
             vol.Coerce(int), vol.Range(min=1)
         ),
+        vol.Exclusive("wait_for_next_trigger", "when"): cv.boolean,
     }
 )
 @async_response
@@ -366,19 +674,31 @@ async def websocket_delete(
 async def websocket_snooze(
     hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    if "due" not in msg and "duration_seconds" not in msg:
-        raise HomeAssistantError("Provide due or duration_seconds")
+    if (
+        "due" not in msg
+        and "duration_seconds" not in msg
+        and not msg.get("wait_for_next_trigger")
+    ):
+        raise HomeAssistantError(
+            "Provide due, duration_seconds, or wait_for_next_trigger"
+        )
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    updated = await manager.async_snooze(
-        reminder.id,
-        due=_parse_datetime(hass, msg["due"]) if "due" in msg else None,
-        duration=(
-            timedelta(seconds=msg["duration_seconds"])
-            if "duration_seconds" in msg
-            else None
-        ),
-    )
+    if msg.get("wait_for_next_trigger"):
+        updated = await manager.async_wait_for_next_trigger(
+            reminder.id, expected_user_id=reminder.user_id
+        )
+    else:
+        updated = await manager.async_snooze(
+            reminder.id,
+            expected_user_id=reminder.user_id,
+            due=_parse_datetime(hass, msg["due"]) if "due" in msg else None,
+            duration=(
+                timedelta(seconds=msg["duration_seconds"])
+                if "duration_seconds" in msg
+                else None
+            ),
+        )
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
@@ -398,8 +718,57 @@ async def websocket_acknowledge(
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
     occurrence = await manager.async_acknowledge(
         reminder.id,
+        expected_user_id=reminder.user_id,
         occurrence_id=msg.get("occurrence_id"),
         acknowledged_by=connection.user.id,
+    )
+    connection.send_result(msg["id"], {"occurrence": occurrence.to_dict()})
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{COMMAND_PREFIX}complete",
+        vol.Required("reminder_id"): cv.string,
+        vol.Optional("occurrence_id"): cv.string,
+    }
+)
+@async_response
+@_api_errors
+async def websocket_complete(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    occurrence = await manager.async_complete(
+        reminder.id,
+        expected_user_id=reminder.user_id,
+        occurrence_id=msg.get("occurrence_id"),
+        completed_by=connection.user.id,
+    )
+    connection.send_result(msg["id"], {"occurrence": occurrence.to_dict()})
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{COMMAND_PREFIX}external_action",
+        vol.Required("reminder_id"): cv.string,
+        vol.Required("occurrence_id"): cv.string,
+        vol.Required("external_action_id"): cv.string,
+    }
+)
+@async_response
+@_api_errors
+async def websocket_external_action(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _manager(hass)
+    reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
+    occurrence = await manager.async_select_external_action(
+        reminder.id,
+        msg["external_action_id"],
+        expected_user_id=reminder.user_id,
+        occurrence_id=msg["occurrence_id"],
+        selected_by=connection.user.id,
     )
     connection.send_result(msg["id"], {"occurrence": occurrence.to_dict()})
 
@@ -507,6 +876,9 @@ async def websocket_get_preferences(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -538,9 +910,10 @@ async def websocket_set_preferences(
     preferences = await _manager(hass).async_set_user_preferences(
         user_id,
         DeliveryPolicy(
-            tuple(msg["channels"]),
-            tuple(msg["notify_targets"]),
-            tuple(msg["voice_targets"]),
+            channels=tuple(msg["channels"]),
+            notify_targets=tuple(msg["notify_targets"]),
+            mobile_app_services=tuple(msg["mobile_app_services"]),
+            voice_targets=tuple(msg["voice_targets"]),
         ),
         **{
             key: msg[key]
@@ -571,6 +944,9 @@ async def websocket_set_preferences(
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
         ),
@@ -585,9 +961,10 @@ async def websocket_test_delivery(
     result = await _manager(hass).async_test_delivery(
         user_id=user_id,
         policy=DeliveryPolicy(
-            tuple(msg["channels"]),
-            tuple(msg["notify_targets"]),
-            tuple(msg["voice_targets"]),
+            channels=tuple(msg["channels"]),
+            notify_targets=tuple(msg["notify_targets"]),
+            mobile_app_services=tuple(msg["mobile_app_services"]),
+            voice_targets=tuple(msg["voice_targets"]),
         ),
     )
     connection.send_result(
@@ -640,10 +1017,17 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_get,
         websocket_create,
         websocket_create_recurring,
+        websocket_create_triggered,
+        websocket_fire_trigger,
         websocket_update,
         websocket_delete,
+        websocket_pause,
+        websocket_resume,
+        websocket_skip_next,
         websocket_snooze,
         websocket_acknowledge,
+        websocket_complete,
+        websocket_external_action,
         websocket_history,
         websocket_preview_recurrence,
         websocket_get_preferences,

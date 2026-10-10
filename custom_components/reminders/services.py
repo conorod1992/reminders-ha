@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import voluptuous as vol
@@ -29,10 +29,16 @@ from .authorization import (
 )
 from .const import (
     DOMAIN,
+    MAX_MESSAGE_LENGTH,
+    MAX_TITLE_LENGTH,
     SERVICE_ACKNOWLEDGE,
+    SERVICE_COMPLETE,
     SERVICE_CREATE,
     SERVICE_CREATE_RECURRING,
+    SERVICE_CREATE_TRIGGERED,
     SERVICE_DELETE,
+    SERVICE_EXTERNAL_ACTION,
+    SERVICE_FIRE_TRIGGER,
     SERVICE_GET,
     SERVICE_LIST,
     SERVICE_SET_USER_PREFERENCES,
@@ -44,27 +50,67 @@ from .const import (
 from .manager import ReminderManager, ReminderNotFoundError, ReminderValidationError
 from .models import (
     AcknowledgementPolicy,
+    ActivationType,
     DeliveryPolicy,
+    MissedOccurrencePolicy,
     QuietHoursPolicy,
     Reminder,
+    TriggerRepeatPolicy,
+    WhileAwaitingAcknowledgement,
 )
 from .recurrence import (
+    MAX_RECURRENCE_INTERVAL,
     MonthlyMode,
     RecurrenceError,
     RecurrenceFrequency,
     RecurrenceRule,
     Weekday,
 )
+from .triggers.models import TriggerDefinition, TriggerValidationError
 
 POLICY_FIELDS: dict[Any, Any] = {
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services"): vol.All(cv.ensure_list, [cv.string]),
     vol.Optional("voice_targets"): vol.All(cv.ensure_list, [cv.entity_id]),
+}
+ADVANCED_FIELDS: dict[Any, Any] = {
+    vol.Optional("deliver_when"): dict,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
+    vol.Optional("expires_after_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=60, max=31_536_000)
+    ),
+}
+EXTERNAL_ACTION_SCHEMA = vol.All(
+    cv.ensure_list,
+    vol.Length(max=5),
+    [
+        {
+            vol.Required("id"): vol.All(cv.string, vol.Match(r"^[A-Za-z0-9_-]{1,64}$")),
+            vol.Required("label"): vol.All(cv.string, vol.Length(min=1, max=64)),
+        }
+    ],
+)
+SOURCE_FIELDS: dict[Any, Any] = {
+    vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
+    vol.Optional("source_event"): vol.All(cv.string, vol.Length(min=1, max=128)),
+    vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions"): EXTERNAL_ACTION_SCHEMA,
+}
+SOURCE_UPDATE_FIELDS: dict[Any, Any] = {
+    vol.Optional("source"): vol.Any(None, cv.string),
+    vol.Optional("source_id"): vol.Any(None, cv.string),
+    vol.Optional("source_event"): vol.Any(None, cv.string),
+    vol.Optional("managed_externally"): cv.boolean,
+    vol.Optional("external_actions"): EXTERNAL_ACTION_SCHEMA,
 }
 
 CREATE_FIELDS: dict[Any, Any] = {
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): cv.string,
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
     vol.Required("due"): vol.Any(datetime, cv.string),
     vol.Optional("user_id"): cv.string,
     vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
@@ -76,13 +122,17 @@ CREATE_FIELDS: dict[Any, Any] = {
     ),
 }
 CREATE_FIELDS.update(POLICY_FIELDS)
+CREATE_FIELDS.update(ADVANCED_FIELDS)
+CREATE_FIELDS.update(SOURCE_FIELDS)
 CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
 CREATE_RECURRING_FIELDS: dict[Any, Any] = {
-    vol.Required("title"): cv.string,
-    vol.Optional("message"): cv.string,
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
     vol.Required("first_reminder"): vol.Any(datetime, cv.string),
     vol.Required("frequency"): vol.In(tuple(RecurrenceFrequency)),
-    vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("interval", default=1): vol.All(
+        vol.Coerce(int), vol.Range(min=1, max=MAX_RECURRENCE_INTERVAL)
+    ),
     vol.Optional("weekdays"): vol.All(
         cv.ensure_list, [vol.In(tuple(day.label for day in Weekday))]
     ),
@@ -101,9 +151,50 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
     vol.Optional("quiet_hours_policy", default="respect"): vol.In(
         tuple(QuietHoursPolicy)
     ),
+    vol.Optional("missed_occurrence_policy", default="remind_on_startup"): vol.In(
+        tuple(MissedOccurrencePolicy)
+    ),
 }
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
+CREATE_RECURRING_FIELDS.update(ADVANCED_FIELDS)
+CREATE_RECURRING_FIELDS.update(SOURCE_FIELDS)
 CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
+CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
+    vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
+    vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
+    vol.Required("trigger"): dict,
+    vol.Optional("user_id"): cv.string,
+    vol.Optional("delivery_mode", default="default"): vol.In(("default", "custom")),
+    vol.Optional("acknowledgement_policy", default="default"): vol.In(
+        tuple(AcknowledgementPolicy)
+    ),
+    vol.Optional("quiet_hours_policy", default="respect"): vol.In(
+        tuple(QuietHoursPolicy)
+    ),
+    vol.Optional("repeat_policy", default="once"): vol.In(tuple(TriggerRepeatPolicy)),
+    vol.Optional("fire_if_already_matching", default=False): cv.boolean,
+    vol.Optional("while_awaiting_acknowledgement", default="skip"): vol.In(
+        tuple(WhileAwaitingAcknowledgement)
+    ),
+    vol.Optional("cooldown_seconds", default=0): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+    ),
+    vol.Optional("available_from"): vol.Any(datetime, cv.string),
+    vol.Optional("expires_at"): vol.Any(datetime, cv.string),
+    vol.Optional("trigger_description"): cv.string,
+    vol.Optional("complete_when"): dict,
+    vol.Optional("escalation"): dict,
+    vol.Optional("allow_manual_completion", default=False): cv.boolean,
+}
+CREATE_TRIGGERED_FIELDS.update(POLICY_FIELDS)
+CREATE_TRIGGERED_FIELDS.update(SOURCE_FIELDS)
+CREATE_TRIGGERED_SCHEMA = vol.Schema(CREATE_TRIGGERED_FIELDS)
+FIRE_TRIGGER_SCHEMA = vol.Schema(
+    {
+        vol.Required("trigger_id"): cv.string,
+        vol.Optional("user_id"): cv.string,
+    }
+)
 ID_SCHEMA = vol.Schema({vol.Required("reminder_id"): cv.string})
 UPDATE_FIELDS: dict[Any, Any] = {
     vol.Required("reminder_id"): cv.string,
@@ -129,7 +220,29 @@ UPDATE_FIELDS: dict[Any, Any] = {
     ),
     vol.Optional("acknowledgement_policy"): vol.In(tuple(AcknowledgementPolicy)),
     vol.Optional("quiet_hours_policy"): vol.In(tuple(QuietHoursPolicy)),
+    vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
+    vol.Optional("trigger"): dict,
+    vol.Optional("trigger_description"): vol.Any(None, cv.string),
+    vol.Optional("repeat_policy"): vol.In(tuple(TriggerRepeatPolicy)),
+    vol.Optional("fire_if_already_matching"): cv.boolean,
+    vol.Optional("while_awaiting_acknowledgement"): vol.In(
+        tuple(WhileAwaitingAcknowledgement)
+    ),
+    vol.Optional("cooldown_seconds"): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=31_536_000)
+    ),
+    vol.Optional("available_from"): vol.Any(None, datetime, cv.string),
+    vol.Optional("expires_at"): vol.Any(None, datetime, cv.string),
+    vol.Optional("deliver_when"): vol.Any(None, dict),
+    vol.Optional("complete_when"): vol.Any(None, dict),
+    vol.Optional("escalation"): vol.Any(None, dict),
+    vol.Optional("allow_manual_completion"): cv.boolean,
+    vol.Optional("missed_occurrence_policy"): vol.In(tuple(MissedOccurrencePolicy)),
+    vol.Optional("expires_after_seconds"): vol.Any(
+        None, vol.All(vol.Coerce(int), vol.Range(min=60, max=31_536_000))
+    ),
 }
+UPDATE_FIELDS.update(SOURCE_UPDATE_FIELDS)
 UPDATE_FIELDS.update(POLICY_FIELDS)
 UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
 LIST_SCHEMA = vol.Schema(
@@ -139,6 +252,13 @@ LIST_SCHEMA = vol.Schema(
         vol.Optional("due_after"): vol.Any(datetime, cv.string),
         vol.Optional("due_before"): vol.Any(datetime, cv.string),
         vol.Optional("query"): cv.string,
+        vol.Optional("activation_type"): vol.In(tuple(ActivationType)),
+        vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
+        vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
+        vol.Optional("limit", default=500): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1000)
+        ),
+        vol.Optional("offset", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
     }
 )
 SNOOZE_SCHEMA = vol.All(
@@ -147,9 +267,10 @@ SNOOZE_SCHEMA = vol.All(
             vol.Required("reminder_id"): cv.string,
             vol.Optional("due"): vol.Any(datetime, cv.string),
             vol.Optional("duration"): cv.time_period,
+            vol.Optional("wait_for_next_trigger"): cv.boolean,
         }
     ),
-    cv.has_at_least_one_key("due", "duration"),
+    cv.has_at_least_one_key("due", "duration", "wait_for_next_trigger"),
 )
 PREFERENCES_SCHEMA = vol.Schema(
     {
@@ -157,6 +278,9 @@ PREFERENCES_SCHEMA = vol.Schema(
         vol.Required("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
         vol.Optional("notify_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
+        ),
+        vol.Optional("mobile_app_services", default=[]): vol.All(
+            cv.ensure_list, [cv.string]
         ),
         vol.Optional("voice_targets", default=[]): vol.All(
             cv.ensure_list, [cv.entity_id]
@@ -185,10 +309,21 @@ ACKNOWLEDGE_SCHEMA = vol.Schema(
         vol.Optional("occurrence_id"): cv.string,
     }
 )
+COMPLETE_SCHEMA = ACKNOWLEDGE_SCHEMA
+EXTERNAL_ACTION_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Required("reminder_id"): cv.string,
+        vol.Required("occurrence_id"): cv.string,
+        vol.Required("external_action_id"): cv.string,
+    }
+)
 TEST_DELIVERY_FIELDS: dict[Any, Any] = {
     vol.Optional("user_id"): cv.string,
     vol.Required("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     vol.Optional("notify_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("mobile_app_services", default=[]): vol.All(
+        cv.ensure_list, [cv.string]
+    ),
     vol.Optional("voice_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
 }
 TEST_DELIVERY_SCHEMA = vol.Schema(TEST_DELIVERY_FIELDS)
@@ -213,6 +348,12 @@ def async_register_services(hass: HomeAssistant) -> None:
                 call.data["acknowledgement_policy"]
             ),
             quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
+            deliver_when=call.data.get("deliver_when"),
+            complete_when=call.data.get("complete_when"),
+            escalation=call.data.get("escalation"),
+            allow_manual_completion=call.data["allow_manual_completion"],
+            expires_after_seconds=call.data.get("expires_after_seconds"),
+            **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
 
@@ -236,14 +377,69 @@ def async_register_services(hass: HomeAssistant) -> None:
                 call.data["acknowledgement_policy"]
             ),
             quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
+            deliver_when=call.data.get("deliver_when"),
+            complete_when=call.data.get("complete_when"),
+            escalation=call.data.get("escalation"),
+            allow_manual_completion=call.data["allow_manual_completion"],
+            missed_occurrence_policy=MissedOccurrencePolicy(
+                call.data["missed_occurrence_policy"]
+            ),
+            expires_after_seconds=call.data.get("expires_after_seconds"),
+            **_source_from_data(call.data),
         )
         return {"reminder": reminder.to_dict()} if call.return_response else None
+
+    async def create_triggered(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        user_id = await _resolve_user(hass, call, call.data.get("user_id"))
+        reminder = await manager.async_create_triggered(
+            user_id=user_id,
+            title=call.data["title"],
+            message=call.data.get("message"),
+            trigger=TriggerDefinition.from_dict(call.data["trigger"]),
+            delivery_policy=_policy_from_data(call.data),
+            acknowledgement_policy=AcknowledgementPolicy(
+                call.data["acknowledgement_policy"]
+            ),
+            quiet_hours_policy=QuietHoursPolicy(call.data["quiet_hours_policy"]),
+            repeat_policy=TriggerRepeatPolicy(call.data["repeat_policy"]),
+            fire_if_already_matching=call.data["fire_if_already_matching"],
+            while_awaiting_acknowledgement=WhileAwaitingAcknowledgement(
+                call.data["while_awaiting_acknowledgement"]
+            ),
+            cooldown_seconds=call.data["cooldown_seconds"],
+            available_from=(
+                _parse_datetime(hass, call.data["available_from"])
+                if "available_from" in call.data
+                else None
+            ),
+            expires_at=(
+                _parse_datetime(hass, call.data["expires_at"])
+                if "expires_at" in call.data
+                else None
+            ),
+            trigger_description=call.data.get("trigger_description"),
+            complete_when=call.data.get("complete_when"),
+            escalation=call.data.get("escalation"),
+            allow_manual_completion=call.data["allow_manual_completion"],
+            **_source_from_data(call.data),
+        )
+        return {"reminder": reminder.to_dict()} if call.return_response else None
+
+    async def fire_trigger(call: ServiceCall) -> ServiceResponse:
+        user_id = await _resolve_user(hass, call, call.data.get("user_id"))
+        return cast(
+            ServiceResponse,
+            await _manager(hass).async_fire_named_trigger(
+                call.data["trigger_id"], user_id=user_id
+            ),
+        )
 
     async def list_reminders(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         requested = call.data.get("user_id")
         user_id = await _resolve_list_user(hass, call, requested)
-        reminders = await manager.async_list(
+        reminders, total = await manager.async_list_page(
             user_id=user_id,
             pending_only=call.data["pending_only"],
             due_after=(
@@ -257,8 +453,22 @@ def async_register_services(hass: HomeAssistant) -> None:
                 else None
             ),
             query=call.data.get("query"),
+            activation_type=(
+                ActivationType(call.data["activation_type"])
+                if "activation_type" in call.data
+                else None
+            ),
+            source=call.data.get("source"),
+            source_id=call.data.get("source_id"),
+            limit=call.data["limit"],
+            offset=call.data["offset"],
         )
-        return {"reminders": [item.to_dict() for item in reminders]}
+        return {
+            "reminders": [item.to_dict() for item in reminders],
+            "total": total,
+            "limit": call.data["limit"],
+            "offset": call.data["offset"],
+        }
 
     async def update(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
@@ -278,6 +488,41 @@ def async_register_services(hass: HomeAssistant) -> None:
             changes["quiet_hours_policy"] = QuietHoursPolicy(
                 call.data["quiet_hours_policy"]
             )
+        if "activation_type" in call.data:
+            changes["activation_type"] = ActivationType(call.data["activation_type"])
+        if "trigger" in call.data:
+            changes["trigger"] = TriggerDefinition.from_dict(call.data["trigger"])
+        for key in (
+            "trigger_description",
+            "fire_if_already_matching",
+            "cooldown_seconds",
+            "deliver_when",
+            "complete_when",
+            "escalation",
+            "source",
+            "source_id",
+            "source_event",
+            "managed_externally",
+            "allow_manual_completion",
+            "external_actions",
+            "missed_occurrence_policy",
+            "expires_after_seconds",
+        ):
+            if key in call.data:
+                changes[key] = call.data[key]
+        if "repeat_policy" in call.data:
+            changes["repeat_policy"] = TriggerRepeatPolicy(call.data["repeat_policy"])
+        if "while_awaiting_acknowledgement" in call.data:
+            changes["while_awaiting_acknowledgement"] = WhileAwaitingAcknowledgement(
+                call.data["while_awaiting_acknowledgement"]
+            )
+        for key in ("available_from", "expires_at"):
+            if key in call.data:
+                changes[key] = (
+                    _parse_datetime(hass, call.data[key])
+                    if call.data[key] is not None
+                    else None
+                )
         if "delivery_mode" in call.data or any(
             key in call.data for key in POLICY_FIELDS
         ):
@@ -303,21 +548,33 @@ def async_register_services(hass: HomeAssistant) -> None:
             changes["recurrence"] = _recurrence_from_data(
                 hass, call.data, reminder.recurrence
             )
-        updated = await manager.async_update(reminder.id, **changes)
+        updated = await manager.async_update(
+            reminder.id, expected_user_id=reminder.user_id, **changes
+        )
         return {"reminder": updated.to_dict()} if call.return_response else None
 
     async def delete(call: ServiceCall) -> None:
         manager = _manager(hass)
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
-        await manager.async_delete(reminder.id)
+        await manager.async_delete(reminder.id, expected_user_id=reminder.user_id)
 
     async def snooze(call: ServiceCall) -> ServiceResponse:
         manager = _manager(hass)
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
         if "due" in call.data and "duration" in call.data:
             raise ServiceValidationError("Provide due or duration, not both")
+        if call.data.get("wait_for_next_trigger"):
+            if "due" in call.data or "duration" in call.data:
+                raise ServiceValidationError(
+                    "Wait for next trigger cannot be combined with due or duration"
+                )
+            updated = await manager.async_wait_for_next_trigger(
+                reminder.id, expected_user_id=reminder.user_id
+            )
+            return {"reminder": updated.to_dict()} if call.return_response else None
         updated = await manager.async_snooze(
             reminder.id,
+            expected_user_id=reminder.user_id,
             due=(
                 _parse_datetime(hass, call.data["due"]) if "due" in call.data else None
             ),
@@ -331,6 +588,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         policy = DeliveryPolicy(
             channels=tuple(call.data["channels"]),
             notify_targets=tuple(call.data["notify_targets"]),
+            mobile_app_services=tuple(call.data["mobile_app_services"]),
             voice_targets=tuple(call.data["voice_targets"]),
         )
         preferences = await manager.async_set_user_preferences(
@@ -360,8 +618,32 @@ def async_register_services(hass: HomeAssistant) -> None:
         reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
         occurrence = await manager.async_acknowledge(
             reminder.id,
+            expected_user_id=reminder.user_id,
             occurrence_id=call.data.get("occurrence_id"),
             acknowledged_by=call.context.user_id,
+        )
+        return {"occurrence": occurrence.to_dict()} if call.return_response else None
+
+    async def complete(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
+        occurrence = await manager.async_complete(
+            reminder.id,
+            expected_user_id=reminder.user_id,
+            occurrence_id=call.data.get("occurrence_id"),
+            completed_by=call.context.user_id,
+        )
+        return {"occurrence": occurrence.to_dict()} if call.return_response else None
+
+    async def external_action(call: ServiceCall) -> ServiceResponse:
+        manager = _manager(hass)
+        reminder = await _get_authorized(hass, manager, call, call.data["reminder_id"])
+        occurrence = await manager.async_select_external_action(
+            reminder.id,
+            call.data["external_action_id"],
+            expected_user_id=reminder.user_id,
+            occurrence_id=call.data["occurrence_id"],
+            selected_by=call.context.user_id,
         )
         return {"occurrence": occurrence.to_dict()} if call.return_response else None
 
@@ -369,9 +651,10 @@ def async_register_services(hass: HomeAssistant) -> None:
         manager = _manager(hass)
         user_id = await _resolve_user(hass, call, call.data.get("user_id"))
         policy = DeliveryPolicy(
-            tuple(call.data["channels"]),
-            tuple(call.data.get("notify_targets", ())),
-            tuple(call.data.get("voice_targets", ())),
+            channels=tuple(call.data["channels"]),
+            notify_targets=tuple(call.data.get("notify_targets", ())),
+            mobile_app_services=tuple(call.data.get("mobile_app_services", ())),
+            voice_targets=tuple(call.data.get("voice_targets", ())),
         )
         result = await manager.async_test_delivery(user_id=user_id, policy=policy)
         return {
@@ -382,6 +665,18 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     handlers = (
         (SERVICE_CREATE, create, CREATE_SCHEMA, SupportsResponse.OPTIONAL),
+        (
+            SERVICE_CREATE_TRIGGERED,
+            create_triggered,
+            CREATE_TRIGGERED_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
+        (
+            SERVICE_FIRE_TRIGGER,
+            fire_trigger,
+            FIRE_TRIGGER_SCHEMA,
+            SupportsResponse.ONLY,
+        ),
         (
             SERVICE_CREATE_RECURRING,
             create_recurring,
@@ -397,6 +692,13 @@ def async_register_services(hass: HomeAssistant) -> None:
             SERVICE_ACKNOWLEDGE,
             acknowledge,
             ACKNOWLEDGE_SCHEMA,
+            SupportsResponse.OPTIONAL,
+        ),
+        (SERVICE_COMPLETE, complete, COMPLETE_SCHEMA, SupportsResponse.OPTIONAL),
+        (
+            SERVICE_EXTERNAL_ACTION,
+            external_action,
+            EXTERNAL_ACTION_SERVICE_SCHEMA,
             SupportsResponse.OPTIONAL,
         ),
         (
@@ -436,6 +738,8 @@ def _translate_errors(handler: Any) -> Any:
             raise ServiceValidationError(str(err)) from err
         except RecurrenceError as err:
             raise ServiceValidationError(str(err)) from err
+        except TriggerValidationError as err:
+            raise ServiceValidationError(str(err)) from err
 
     return wrapped
 
@@ -471,6 +775,21 @@ async def _resolve_list_user(
     )
 
 
+def _source_from_data(data: Any) -> dict[str, Any]:
+    """Extract optional external-source metadata from a public request."""
+    return {
+        key: data[key]
+        for key in (
+            "source",
+            "source_id",
+            "source_event",
+            "managed_externally",
+            "external_actions",
+        )
+        if key in data
+    }
+
+
 def _policy_from_data(data: Any) -> DeliveryPolicy | None:
     mode = data.get("delivery_mode", "default")
     policy_present = any(key in data for key in POLICY_FIELDS)
@@ -486,6 +805,7 @@ def _policy_from_data(data: Any) -> DeliveryPolicy | None:
     return DeliveryPolicy(
         channels=channels,
         notify_targets=tuple(data.get("notify_targets", ())),
+        mobile_app_services=tuple(data.get("mobile_app_services", ())),
         voice_targets=tuple(data.get("voice_targets", ())),
     )
 
