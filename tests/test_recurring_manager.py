@@ -896,7 +896,7 @@ async def test_history_exposes_manual_completion_eligibility(
 ) -> None:
     runtime = await manager(fake_store, FakeDispatcher(), scheduler)
     due = datetime.now(UTC) - timedelta(minutes=2)
-    enabled = await runtime.async_create(
+    await runtime.async_create(
         user_id="u1", title="Can complete", due=due, allow_manual_completion=True
     )
     await runtime.async_create(
