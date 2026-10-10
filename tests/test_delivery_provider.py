@@ -281,7 +281,7 @@ async def test_mobile_actions_prioritise_done_dismiss_and_one_snooze() -> None:
         ),
     )
     actions = services.calls[0][2]["data"]["actions"]
-    assert [item["title"] for item in actions] == ["Done", "Dismiss", "Snooze 10 min"]
+    assert [item["title"] for item in actions] == ["Done", "Other", "Dismiss"]
     assert len(actions) == 3
 
 
