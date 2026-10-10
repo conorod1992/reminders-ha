@@ -17,9 +17,12 @@ if not isinstance(version, str) or re.fullmatch(r"\d+\.\d+\.\d+", version) is No
     raise SystemExit(f"Invalid manifest version: {version!r}; expected X.Y.Z")
 
 event = os.environ.get("EVENT_NAME", "")
-tag = (
-    os.environ.get("RELEASE_TAG", "")
-    if event == "release"
+tag = ""
+if event == "release":
+    tag = os.environ.get("RELEASE_TAG", "")
+elif os.environ.get("REF_TYPE") == "tag":
+    tag = os.environ.get("REF_NAME", "")
+if event == "release"
     else os.environ.get("REF_NAME", "")
     if os.environ.get("REF_TYPE") == "tag"
     else ""
