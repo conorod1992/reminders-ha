@@ -559,6 +559,7 @@ class ReminderManager:
                             "title": reminder.title,
                             "message": reminder.message,
                             "recurring": reminder.recurrence is not None,
+                            "allow_manual_completion": reminder.allow_manual_completion,
                             "activation_type": reminder.activation_type.value,
                             "trigger_summary": reminder.trigger_summary,
                             "occurrence": occurrence.to_dict(),
