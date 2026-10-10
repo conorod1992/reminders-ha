@@ -129,11 +129,13 @@ def _mobile_actions(actions: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]
     available through the reminder panel rather than invisible notification
     buttons.
     """
-    priority = {"DONE": 0, "DISMISS": 1, "SNOOZE_10": 2, "SNOOZE_60": 3}
+    priority = {"DONE": 0, "DISMISS": 2, "SNOOZE_10": 3, "SNOOZE_60": 4}
 
     def rank(action: dict[str, Any]) -> int:
         name = str(action.get("action", "")).rsplit(":", 1)[-1]
-        return priority.get(name, 4)
+        if name.startswith("EXTERNAL_"):
+            return 1
+        return priority.get(name, 5)
 
     return sorted(actions, key=rank)[:3]
 
