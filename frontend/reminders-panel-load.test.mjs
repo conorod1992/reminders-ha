@@ -223,6 +223,7 @@ test("history outcome selector survives the generic view filter cleanup", () => 
     }
   }
   const panel = makePanel();
+  delete panel._renderFilters;
   panel._hass = { user: { is_admin: false } };
   panel._view = "history";
   const tabs = new Element();
