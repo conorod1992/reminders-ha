@@ -133,7 +133,12 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
   return { date: nextDate.toISOString().slice(0, 10), time: "09:00" };
 }
 
-export function acknowledgementSummary(reminder) {
+export function acknowledgementSummary(reminder, preferences = null) {
+  if ((reminder?.acknowledgement_policy || "default") === "default"
+      && preferences?.require_acknowledgement !== undefined) {
+    return preferences.require_acknowledgement
+      ? "Keep active until dismissed" : "Dismissal not required";
+  }
   return {
     default: "Use my default",
     required: "Keep active until dismissed",
