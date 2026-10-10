@@ -199,3 +199,47 @@ test("history outcome filter is forwarded and changes invalidate page depth", as
   assert.equal(seen.limit, 50);
   assert.equal(panel._history.length, 1);
 });
+
+
+test("history outcome selector survives the generic view filter cleanup", () => {
+  class Element {
+    constructor(tag = "div") {
+      this.tag = tag;
+      this.children = [];
+      this.classList = { add() {} };
+      this.dataset = {};
+      this.value = "";
+    }
+    append(...items) { this.children.push(...items); }
+    prepend(...items) { this.children.unshift(...items); }
+    replaceChildren(...items) { this.children = items; }
+    remove() { this.removed = true; }
+    add(option) { this.children.push(option); }
+    querySelector(selector) {
+      if (selector === ".view-filter-wrap" || selector === ".history-outcome-wrap") {
+        return this.children.find((item) => item.className?.includes(selector.slice(1)) && !item.removed) || null;
+      }
+      return null;
+    }
+  }
+  const panel = makePanel();
+  panel._hass = { user: { is_admin: false } };
+  panel._view = "history";
+  const tabs = new Element();
+  const toolbar = new Element();
+  const filters = new Element();
+  filters.append = () => {};
+  const root = {
+    querySelector(selector) {
+      return { "#filters": filters, ".tabs": tabs, ".toolbar": toolbar }[selector] || null;
+    },
+    append() {},
+  };
+  panel.shadowRoot = root;
+  globalThis.document = { createElement: (tag) => new Element(tag) };
+  globalThis.Option = class { constructor(label, value) { this.label = label; this.value = value; } };
+  // Base rendering requires a minimal filters host; the wrapper must keep the
+  // outcome selector after both filter-removal paths run.
+  panel._renderFilters();
+  assert.ok(toolbar.querySelector(".history-outcome-wrap"));
+});
