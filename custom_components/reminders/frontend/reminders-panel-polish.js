@@ -139,7 +139,7 @@ if (proto && !proto.__frontendPolishInstalled) {
       tabs.append(button);
     }
 
-    toolbar.querySelector(".history-outcome-wrap")?.remove();
+    toolbar.querySelector(".view-filter-wrap")?.remove();
     if (this._view === "history") {
       const wrap = document.createElement("label");
       wrap.className = "view-filter-wrap history-outcome-wrap";
@@ -162,7 +162,6 @@ if (proto && !proto.__frontendPolishInstalled) {
       wrap.append(select);
       toolbar.prepend(wrap);
     }
-    toolbar.querySelector(".view-filter-wrap")?.remove();
     if (SECONDARY_VIEWS.has(this._view)) {
       const wrap = document.createElement("label");
       wrap.className = "view-filter-wrap";
