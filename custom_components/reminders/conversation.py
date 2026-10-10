@@ -462,9 +462,14 @@ async def _list(
     user_id = await async_resolve_list_user(hass, actor, args.get("user_id"))
     statuses = None
     if "activation_type" not in args:
+        # A reminder waiting for a trigger, availability window, or delivery
+        # condition is active even though it is not yet scheduled for delivery.
         statuses = {
             ReminderStatus.PENDING,
             ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+            ReminderStatus.WAITING_FOR_CONTEXT,
+            ReminderStatus.WAITING_FOR_TRIGGER,
+            ReminderStatus.INACTIVE_BEFORE_AVAILABLE_FROM,
         }
     reminders = await _manager(hass).async_list(
         user_id=user_id,
