@@ -2772,9 +2772,6 @@ class ReminderManager:
                 waiting: list[Reminder] = []
                 expired: list[tuple[Reminder, Occurrence]] = []
                 for reminder in eligible:
-                    if reminder.id in forbidden_context_ids:
-                        # Keep the occurrence undelivered until permission returns.
-                        continue
                     trigger = reminder.deliver_when
                     if trigger is None or (
                         trigger.type not in {TriggerType.EVENT, TriggerType.NAMED}
