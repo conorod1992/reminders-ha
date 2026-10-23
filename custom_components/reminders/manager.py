@@ -640,6 +640,14 @@ class ReminderManager:
                 changes.pop("activation_type", current.activation_type)
             )
             time_rearmed = False
+            # Including the unchanged due value (as the panel does) must not
+            # resurrect an already resolved occurrence.
+            if "due" in changes and current.recurrence is None:
+                normalized_due = _normalize_due(changes["due"])
+                if normalized_due == current.scheduled_due:
+                    changes.pop("due")
+                else:
+                    changes["due"] = normalized_due
             if "available_from" in changes:
                 changes["available_from"] = _normalize_optional_time(
                     changes["available_from"]
@@ -700,6 +708,10 @@ class ReminderManager:
                 or bool(trigger_fields.intersection(changes))
             )
             if target_type is ActivationType.TRIGGER:
+                # Converting from HA-native activation to a classic trigger must
+                # remove the former listener; never leave two activation paths.
+                if "trigger" in changes and current.activation_triggers:
+                    changes["activation_triggers"] = ()
                 if "due" in changes or "recurrence" in changes:
                     raise ReminderValidationError(
                         "Triggered reminders cannot have due or recurrence fields"
