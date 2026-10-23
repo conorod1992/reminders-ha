@@ -191,7 +191,7 @@ async def test_metadata_edit_does_not_redeliver_awaiting_acknowledgement(
     )
     manager, dispatcher = await _manager(reminder)
 
-    updated = await manager.async_update(reminder.id, title="Edited")
+    updated = await manager.async_update(reminder.id, title="Edited", due=due)
 
     assert updated.status is ReminderStatus.AWAITING_ACKNOWLEDGEMENT
     assert updated.occurrence_history == reminder.occurrence_history
