@@ -302,9 +302,7 @@ async def test_native_create_installs_rules_before_due_delivery(
         user_id="u1",
         title="Only when home",
         due=datetime.now(UTC) - timedelta(seconds=1),
-        delivery_triggers=(
-            {"trigger": "event", "event_type": "person_arrived"},
-        ),
+        delivery_triggers=({"trigger": "event", "event_type": "person_arrived"},),
     )
     assert created.status is ReminderStatus.WAITING_FOR_CONTEXT
     assert dispatcher.calls == []
@@ -326,9 +324,7 @@ async def test_invalid_native_create_does_not_persist_or_deliver(
             user_id="u1",
             title="Invalid",
             due=datetime.now(UTC) - timedelta(seconds=1),
-            delivery_triggers=(
-                {"trigger": "event", "event_type": "invalid"},
-            ),
+            delivery_triggers=({"trigger": "event", "event_type": "invalid"},),
         )
     assert manager._reminders == before
     assert manager._dispatcher.calls == []
