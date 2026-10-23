@@ -457,9 +457,7 @@ async def test_outstanding_trigger_occurrence_can_complete_after_rearming(
             )
         ),
         completion_triggers=(
-            ({"trigger": "event", "event_type": "door_closed"},)
-            if native
-            else ()
+            ({"trigger": "event", "event_type": "door_closed"},) if native else ()
         ),
     )
     manager, dispatcher = (
