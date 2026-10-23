@@ -418,3 +418,64 @@ def test_completion_listeners_survive_every_trigger_awaiting_state() -> None:
     )
     assert any(key.endswith("::complete_when") for key, _ in _subscriptions(reminder))
     assert _native_completion_armed(reminder)
+
+
+@pytest.mark.parametrize("native", [False, True])
+async def test_outstanding_trigger_occurrence_can_complete_after_rearming(
+    runtime_stubs: None,
+    native_runtime_stub: None,
+    native: bool,
+) -> None:
+    """Actually resolve the outstanding occurrence, not just arm the listener."""
+    from custom_components.reminders.models import TriggerRepeatPolicy
+
+    now = datetime.now(UTC)
+    occurrence = Occurrence(
+        id="unresolved",
+        scheduled_due=now,
+        due=now,
+        status=OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+        next_escalation_at=now + timedelta(minutes=5),
+    )
+    reminder = Reminder(
+        id="repeat-complete",
+        user_id="u1",
+        title="Close the door",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        activation_type=ActivationType.TRIGGER,
+        repeat_policy=TriggerRepeatPolicy.EVERY_TRIGGER,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        complete_when=(
+            None
+            if native
+            else TriggerDefinition.from_dict(
+                {"type": "named", "trigger_id": "door_closed"}
+            )
+        ),
+        completion_triggers=(
+            ({"trigger": "event", "event_type": "door_closed"},)
+            if native
+            else ()
+        ),
+    )
+    manager, dispatcher = (
+        await _native_manager(reminder) if native else await _manager(reminder)
+    )
+    if native:
+        outcome = await manager.async_complete_native(
+            reminder.id, cause="door_closed", context={}
+        )
+    else:
+        outcome = await manager.async_complete_automatically(
+            reminder.id, cause="door_closed", context={}
+        )
+    updated = await manager.async_get(reminder.id)
+    assert outcome == "completed"
+    assert updated.occurrence_history[0].status is OccurrenceStatus.COMPLETED
+    assert updated.occurrence_history[0].next_escalation_at is None
+    assert updated.status is ReminderStatus.WAITING_FOR_TRIGGER
+    assert dispatcher.calls == []
