@@ -2642,17 +2642,17 @@ class ReminderManager:
         # Recheck observation permissions when due, not only at creation.
         # This must happen outside the manager lock because user lookup is async.
         forbidden_context_ids: set[str] = set()
-        for candidate in tuple(self._reminders.values()):
+        for permission_reminder in tuple(self._reminders.values()):
             if (
-                candidate.status is ReminderStatus.PENDING
-                and candidate.due is not None
-                and candidate.due <= effective_now
-                and candidate.deliver_when is not None
+                permission_reminder.status is ReminderStatus.PENDING
+                and permission_reminder.due is not None
+                and permission_reminder.due <= effective_now
+                and permission_reminder.deliver_when is not None
                 and not await async_trigger_permitted(
-                    self._hass, candidate.user_id, candidate.deliver_when
+                    self._hass, permission_reminder.user_id, permission_reminder.deliver_when
                 )
             ):
-                forbidden_context_ids.add(candidate.id)
+                forbidden_context_ids.add(permission_reminder.id)
         try:
             async with self._lock:
                 if self._unloaded:
