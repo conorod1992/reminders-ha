@@ -286,4 +286,7 @@ async def test_due_delivery_condition_rechecks_revoked_read_access(
     await manager._async_process_due(due)
     assert dispatcher.calls == []
     assert manager._reminders[reminder.id].status is ReminderStatus.SKIPPED
-    assert manager._reminders[reminder.id].occurrence_history[-1].completion_reason == "permission_denied"
+    assert (
+        manager._reminders[reminder.id].occurrence_history[-1].completion_reason
+        == "permission_denied"
+    )
