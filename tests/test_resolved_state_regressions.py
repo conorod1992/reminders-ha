@@ -11,6 +11,7 @@ import pytest
 
 from custom_components.reminders.manager import ReminderManager
 from custom_components.reminders.models import (
+    ActivationType,
     Occurrence,
     OccurrenceStatus,
     Reminder,
@@ -317,3 +318,97 @@ async def test_native_scheduled_metadata_edit_preserves_resolved_state(
     assert updated.delivered_at == original.delivered_at
     assert updated.delivery_errors == original.delivery_errors
     assert dispatcher.calls == []
+
+
+@pytest.mark.parametrize(
+    ("status", "occurrence_status"),
+    [
+        (ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED),
+        (ReminderStatus.ACKNOWLEDGED, OccurrenceStatus.ACKNOWLEDGED),
+        (ReminderStatus.FAILED, OccurrenceStatus.FAILED),
+    ],
+)
+async def test_unchanged_due_from_editor_does_not_rearm_resolved_reminder(
+    runtime_stubs: None,
+    status: ReminderStatus,
+    occurrence_status: OccurrenceStatus,
+) -> None:
+    """The form resubmits due even when only title/message changes."""
+    original = _resolved_reminder(status, occurrence_status)
+    manager, dispatcher = await _manager(original)
+    due = original.occurrence_history[0].scheduled_due
+
+    updated = await manager.async_update(
+        original.id, title="Updated", due=due
+    )
+
+    assert updated.status is status
+    assert updated.current_occurrence_id == original.current_occurrence_id
+    assert updated.occurrence_history == original.occurrence_history
+    assert dispatcher.calls == []
+
+
+async def test_native_unchanged_due_does_not_rearm_resolved_reminder(
+    runtime_stubs: None,
+    native_runtime_stub: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "custom_components.reminders.native_scheduled_crud.async_validate_native_triggers",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_scheduled_crud.async_validate_native_conditions",
+        AsyncMock(return_value=[]),
+    )
+    original = _resolved_reminder(
+        ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED
+    )
+    manager, dispatcher = await _native_manager(original)
+    due = original.occurrence_history[0].scheduled_due
+    updated = await async_update_native_scheduled(
+        manager,
+        original.id,
+        delivery_triggers=[],
+        delivery_conditions=[],
+        completion_triggers=[],
+        due=due,
+        title="Updated",
+    )
+    assert updated.status is ReminderStatus.COMPLETED
+    assert updated.current_occurrence_id == original.current_occurrence_id
+    assert dispatcher.calls == []
+
+
+def test_completion_listeners_survive_every_trigger_awaiting_state() -> None:
+    from custom_components.reminders.native_automation import _native_completion_armed
+    from custom_components.reminders.triggers.registry import _subscriptions
+
+    now = datetime.now(UTC)
+    trigger = TriggerDefinition.from_dict(
+        {"type": "named", "trigger_id": "closed"}
+    )
+    occurrence = Occurrence(
+        id="open",
+        scheduled_due=now,
+        due=now,
+        status=OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT,
+    )
+    reminder = Reminder(
+        id="recurring-trigger",
+        user_id="u1",
+        title="Close the door",
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        activation_type=ActivationType.TRIGGER,
+        complete_when=trigger,
+        completion_triggers=(
+            {"trigger": "event", "event_type": "door_closed"},
+        ),
+        occurrence_history=(occurrence,),
+    )
+    assert any(key.endswith("::complete_when") for key, _ in _subscriptions(reminder))
+    assert _native_completion_armed(reminder)
