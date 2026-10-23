@@ -176,6 +176,9 @@ class ReminderManager:
         allow_manual_completion: bool = False,
         external_actions: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
         expires_after_seconds: int | None = None,
+        delivery_triggers: tuple[dict[str, Any], ...] = (),
+        delivery_conditions: tuple[dict[str, Any], ...] = (),
+        completion_triggers: tuple[dict[str, Any], ...] = (),
     ) -> Reminder:
         """Create and schedule a one-shot reminder."""
         due = _normalize_due(due)
@@ -223,6 +226,9 @@ class ReminderManager:
             allow_manual_completion=allow_manual_completion,
             external_actions=source_actions,
             expires_after_seconds=expiry_window,
+            delivery_triggers=delivery_triggers,
+            delivery_conditions=delivery_conditions,
+            completion_triggers=completion_triggers,
         )
         await self._async_add(reminder)
         if due <= now:
@@ -253,6 +259,9 @@ class ReminderManager:
             MissedOccurrencePolicy.REMIND_ON_STARTUP
         ),
         expires_after_seconds: int | None = None,
+        delivery_triggers: tuple[dict[str, Any], ...] = (),
+        delivery_conditions: tuple[dict[str, Any], ...] = (),
+        completion_triggers: tuple[dict[str, Any], ...] = (),
     ) -> Reminder:
         """Create and durably persist an anchored recurring reminder."""
         _validate_policy(delivery_policy)
@@ -304,6 +313,9 @@ class ReminderManager:
             external_actions=source_actions,
             missed_occurrence_policy=MissedOccurrencePolicy(missed_occurrence_policy),
             expires_after_seconds=expiry_window,
+            delivery_triggers=delivery_triggers,
+            delivery_conditions=delivery_conditions,
+            completion_triggers=completion_triggers,
         )
         await self._async_add(reminder)
         self._notify_changed({user_id})
@@ -401,6 +413,23 @@ class ReminderManager:
         return await self.async_get(reminder.id)
 
     async def _async_add(self, reminder: Reminder) -> None:
+        if any((reminder.delivery_triggers, reminder.delivery_conditions, reminder.completion_triggers)):
+            # Validate the complete native configuration before the first store
+            # commit or due-time delivery, avoiding create-then-attach races.
+            from .native_automation import (
+                async_validate_native_conditions,
+                async_validate_native_triggers,
+            )
+            from .native_manager import _validate_native_rule_resources
+
+            _validate_native_rule_resources(
+                delivery_triggers=reminder.delivery_triggers,
+                delivery_conditions=reminder.delivery_conditions,
+                completion_triggers=reminder.completion_triggers,
+            )
+            await async_validate_native_triggers(self._hass, list(reminder.delivery_triggers))
+            await async_validate_native_conditions(self._hass, list(reminder.delivery_conditions))
+            await async_validate_native_triggers(self._hass, list(reminder.completion_triggers))
         await self._async_validate_security(reminder)
         async with self._lock:
             candidate = dict(self._reminders)
