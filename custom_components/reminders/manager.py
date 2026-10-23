@@ -2649,7 +2649,9 @@ class ReminderManager:
                 and permission_reminder.due <= effective_now
                 and permission_reminder.deliver_when is not None
                 and not await async_trigger_permitted(
-                    self._hass, permission_reminder.user_id, permission_reminder.deliver_when
+                    self._hass,
+                    permission_reminder.user_id,
+                    permission_reminder.deliver_when,
                 )
             ):
                 forbidden_context_ids.add(permission_reminder.id)
