@@ -281,3 +281,54 @@ async def test_native_scheduled_owner_transfer_rotates_mobile_action_token(
     assert updated.occurrence_history[0].notification_action_token != (
         "previous-owner-token"
     )
+
+
+async def test_native_create_installs_rules_before_due_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A due-now reminder must not slip through before the delivery gate exists."""
+    store = FailingStore()
+    manager = _manager(monkeypatch, store, _reminder())
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.async_validate_native_triggers",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.async_validate_native_conditions",
+        AsyncMock(return_value=[]),
+    )
+    dispatcher = manager._dispatcher
+    created = await manager.async_create(
+        user_id="u1",
+        title="Only when home",
+        due=datetime.now(UTC) - timedelta(seconds=1),
+        delivery_triggers=(
+            {"trigger": "event", "event_type": "person_arrived"},
+        ),
+    )
+    assert created.status is ReminderStatus.WAITING_FOR_CONTEXT
+    assert dispatcher.calls == []
+    assert manager._reminders[created.id].delivery_triggers
+
+
+async def test_invalid_native_create_does_not_persist_or_deliver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FailingStore()
+    manager = _manager(monkeypatch, store, _reminder())
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.async_validate_native_triggers",
+        AsyncMock(side_effect=ValueError("invalid native trigger")),
+    )
+    before = dict(manager._reminders)
+    with pytest.raises(ValueError, match="invalid native trigger"):
+        await manager.async_create(
+            user_id="u1",
+            title="Invalid",
+            due=datetime.now(UTC) - timedelta(seconds=1),
+            delivery_triggers=(
+                {"trigger": "event", "event_type": "invalid"},
+            ),
+        )
+    assert manager._reminders == before
+    assert manager._dispatcher.calls == []
