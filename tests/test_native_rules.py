@@ -391,6 +391,7 @@ async def test_converting_native_activation_to_classic_clears_old_rules(
     reminder = Reminder(
         id="conversion",
         user_id="user",
+        due=None,
         title="Converted",
         created_at=now,
         updated_at=now,
