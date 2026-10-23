@@ -2595,6 +2595,20 @@ class ReminderManager:
         await self._async_process_escalations(effective_now)
         await self._async_process_snoozed_retries(effective_now)
         due: list[Reminder] = []
+        # Recheck observation permissions when due, not only at creation.
+        # This must happen outside the manager lock because user lookup is async.
+        forbidden_context_ids: set[str] = set()
+        for candidate in tuple(self._reminders.values()):
+            if (
+                candidate.status is ReminderStatus.PENDING
+                and candidate.due is not None
+                and candidate.due <= effective_now
+                and candidate.deliver_when is not None
+                and not await async_trigger_permitted(
+                    self._hass, candidate.user_id, candidate.deliver_when
+                )
+            ):
+                forbidden_context_ids.add(candidate.id)
         try:
             async with self._lock:
                 if self._unloaded:
@@ -2667,6 +2681,9 @@ class ReminderManager:
                 waiting: list[Reminder] = []
                 expired: list[tuple[Reminder, Occurrence]] = []
                 for reminder in eligible:
+                    if reminder.id in forbidden_context_ids:
+                        # Keep the occurrence undelivered until permission returns.
+                        continue
                     trigger = reminder.deliver_when
                     if trigger is None or (
                         trigger.type not in {TriggerType.EVENT, TriggerType.NAMED}
