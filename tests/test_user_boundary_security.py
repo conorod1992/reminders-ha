@@ -238,3 +238,52 @@ async def test_secondary_delivery_rechecks_revoked_owner_access(
     assert result.succeeded == ()
     assert result.failed_channels == ("phone",)
     assert dispatcher.calls == []
+
+
+async def test_due_delivery_condition_rechecks_revoked_read_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed state condition cannot reveal an entity after permission loss."""
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "custom_components.reminders.manager.async_track_point_in_utc_time",
+        lambda _hass, _callback, _when: lambda: None,
+    )
+    owner = user("u1", read=set())
+    hass = SimpleNamespace(
+        auth=FakeAuth({"u1": owner}),
+        bus=SimpleNamespace(),
+        states=SimpleNamespace(get=lambda _entity_id: None),
+        config=SimpleNamespace(time_zone="UTC"),
+    )
+    dispatcher = FakeDispatcher()
+    manager = ReminderManager(
+        hass,  # type: ignore[arg-type]
+        FakeStore(),
+        dispatcher,  # type: ignore[arg-type]
+    )
+    manager._loaded = True
+    manager._trigger_registry.async_sync = AsyncMock()  # type: ignore[method-assign]
+    due = datetime.now(UTC)
+    condition = TriggerDefinition.from_dict(
+        {"type": "state", "entity_id": "sensor.private", "to": "on"}
+    )
+    occurrence = Occurrence("due-private", due, due)
+    reminder = Reminder(
+        id="due-private",
+        user_id="u1",
+        title="Private condition",
+        due=due,
+        created_at=due,
+        updated_at=due,
+        status=ReminderStatus.PENDING,
+        current_occurrence_id=occurrence.id,
+        occurrence_history=(occurrence,),
+        deliver_when=condition,
+    )
+    manager._reminders = {reminder.id: reminder}
+    await manager._async_process_due(due)
+    assert dispatcher.calls == []
+    assert manager._reminders[reminder.id].status is ReminderStatus.SKIPPED
+    assert manager._reminders[reminder.id].occurrence_history[-1].completion_reason == "permission_denied"
