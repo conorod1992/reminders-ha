@@ -338,9 +338,7 @@ async def test_unchanged_due_from_editor_does_not_rearm_resolved_reminder(
     manager, dispatcher = await _manager(original)
     due = original.occurrence_history[0].scheduled_due
 
-    updated = await manager.async_update(
-        original.id, title="Updated", due=due
-    )
+    updated = await manager.async_update(original.id, title="Updated", due=due)
 
     assert updated.status is status
     assert updated.current_occurrence_id == original.current_occurrence_id
@@ -363,9 +361,7 @@ async def test_native_unchanged_due_does_not_rearm_resolved_reminder(
         "custom_components.reminders.native_scheduled_crud.async_validate_native_conditions",
         AsyncMock(return_value=[]),
     )
-    original = _resolved_reminder(
-        ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED
-    )
+    original = _resolved_reminder(ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED)
     manager, dispatcher = await _native_manager(original)
     due = original.occurrence_history[0].scheduled_due
     updated = await async_update_native_scheduled(
@@ -387,9 +383,7 @@ def test_completion_listeners_survive_every_trigger_awaiting_state() -> None:
     from custom_components.reminders.triggers.registry import _subscriptions
 
     now = datetime.now(UTC)
-    trigger = TriggerDefinition.from_dict(
-        {"type": "named", "trigger_id": "closed"}
-    )
+    trigger = TriggerDefinition.from_dict({"type": "named", "trigger_id": "closed"})
     occurrence = Occurrence(
         id="open",
         scheduled_due=now,
@@ -405,9 +399,7 @@ def test_completion_listeners_survive_every_trigger_awaiting_state() -> None:
         status=ReminderStatus.WAITING_FOR_TRIGGER,
         activation_type=ActivationType.TRIGGER,
         complete_when=trigger,
-        completion_triggers=(
-            {"trigger": "event", "event_type": "door_closed"},
-        ),
+        completion_triggers=({"trigger": "event", "event_type": "door_closed"},),
         occurrence_history=(occurrence,),
     )
     assert any(key.endswith("::complete_when") for key, _ in _subscriptions(reminder))
