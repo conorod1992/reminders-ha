@@ -80,7 +80,10 @@ def test_native_create_is_atomic_and_needs_no_frontend_rollback() -> None:
 
     assert '"create_native_scheduled"' in source
     assert '"create_native_recurring"' in source
-    assert 'await originalCall.call(this, "delete", { reminder_id: reminderId })' not in source
+    assert (
+        'await originalCall.call(this, "delete", { reminder_id: reminderId })'
+        not in source
+    )
 
 
 async def test_native_condition_runtime_fails_open_when_checker_raises() -> None:
