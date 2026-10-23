@@ -391,12 +391,15 @@ async def websocket_update_native_scheduled(
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
-
 # Scheduled native creation must be one operation: the old panel sequence
 # created a potentially due reminder before its delivery gates were attached.
 def _native_create_schema(base: dict[Any, Any], command: str) -> dict[Any, Any]:
     return {
-        **{key: value for key, value in base.items() if str(key.schema if hasattr(key, "schema") else key) != "type"},
+        **{
+            key: value
+            for key, value in base.items()
+            if str(key.schema if hasattr(key, "schema") else key) != "type"
+        },
         vol.Required("type"): f"{COMMAND_PREFIX}{command}",
         vol.Required("delivery_triggers"): NATIVE_LIST,
         vol.Required("delivery_conditions"): NATIVE_LIST,
@@ -431,7 +434,9 @@ async def websocket_create_native_scheduled(
     connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
 
 
-@websocket_command(_native_create_schema(CREATE_RECURRING_SCHEMA, "create_native_recurring"))
+@websocket_command(
+    _native_create_schema(CREATE_RECURRING_SCHEMA, "create_native_recurring")
+)
 @async_response
 @_api_errors
 async def websocket_create_native_recurring(
@@ -449,7 +454,9 @@ async def websocket_create_native_recurring(
         quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
         escalation=msg.get("escalation"),
         allow_manual_completion=msg["allow_manual_completion"],
-        missed_occurrence_policy=MissedOccurrencePolicy(msg["missed_occurrence_policy"]),
+        missed_occurrence_policy=MissedOccurrencePolicy(
+            msg["missed_occurrence_policy"]
+        ),
         expires_after_seconds=msg.get("expires_after_seconds"),
         delivery_triggers=tuple(msg["delivery_triggers"]),
         delivery_conditions=tuple(msg["delivery_conditions"]),
