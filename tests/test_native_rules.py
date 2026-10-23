@@ -396,9 +396,7 @@ async def test_converting_native_activation_to_classic_clears_old_rules(
         updated_at=now,
         status=ReminderStatus.WAITING_FOR_TRIGGER,
         activation_type=ActivationType.TRIGGER,
-        activation_triggers=(
-            {"trigger": "event", "event_type": "old_event"},
-        ),
+        activation_triggers=({"trigger": "event", "event_type": "old_event"},),
     )
     manager._reminders[reminder.id] = reminder
     manager._trigger_registry.async_sync = AsyncMock()
