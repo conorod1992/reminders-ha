@@ -406,6 +406,7 @@ def test_completion_listeners_survive_every_trigger_awaiting_state() -> None:
     reminder = Reminder(
         id="recurring-trigger",
         user_id="u1",
+        due=None,
         title="Close the door",
         created_at=now,
         updated_at=now,
