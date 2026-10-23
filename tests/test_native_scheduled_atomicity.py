@@ -328,3 +328,76 @@ async def test_invalid_native_create_does_not_persist_or_deliver(
         )
     assert manager._reminders == before
     assert manager._dispatcher.calls == []
+
+
+@pytest.mark.parametrize(
+    "command,fields",
+    [
+        (
+            "create_native_scheduled",
+            {"due": "2027-01-01 12:00:00"},
+        ),
+        (
+            "create_native_recurring",
+            {
+                "first_reminder": "2027-01-01 12:00:00",
+                "frequency": "daily",
+            },
+        ),
+    ],
+)
+def test_native_create_websocket_schemas_require_rule_snapshot(
+    command: str, fields: dict[str, object]
+) -> None:
+    """The real registered schemas accept a full create, not a later patch."""
+    from custom_components.reminders.native_websocket import (
+        websocket_create_native_recurring,
+        websocket_create_native_scheduled,
+    )
+
+    handler = (
+        websocket_create_native_scheduled
+        if command == "create_native_scheduled"
+        else websocket_create_native_recurring
+    )
+    schema = handler._ws_schema
+    payload = {
+        "id": 21,
+        "type": f"reminders/{command}",
+        "title": "Atomic",
+        **fields,
+        "delivery_triggers": [],
+        "delivery_conditions": [],
+        "completion_triggers": [],
+    }
+    checked = schema(payload)
+    assert checked["delivery_triggers"] == []
+    for field in (
+        "delivery_triggers",
+        "delivery_conditions",
+        "completion_triggers",
+    ):
+        with pytest.raises(vol.Invalid):
+            schema({key: value for key, value in payload.items() if key != field})
+
+
+async def test_native_create_storage_failure_never_exposes_reminder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No partial reminder or provider effect survives a failed store commit."""
+    store = FailingStore(fail_on_calls={1})
+    manager = _manager(monkeypatch, store, _reminder())
+    monkeypatch.setattr(
+        "custom_components.reminders.native_automation.async_validate_native_triggers",
+        AsyncMock(return_value=[]),
+    )
+    before = dict(manager._reminders)
+    with pytest.raises(SaveError):
+        await manager.async_create(
+            user_id="u1",
+            title="Atomic failed write",
+            due=datetime.now(UTC) - timedelta(seconds=5),
+            delivery_triggers=({"trigger": "event", "event_type": "ready"},),
+        )
+    assert manager._reminders == before
+    assert manager._dispatcher.calls == []
