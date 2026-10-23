@@ -340,7 +340,8 @@ def _subscriptions(reminder: Reminder) -> list[tuple[str, TriggerDefinition]]:
     ):
         result.append((f"{reminder.id}::deliver_when", reminder.deliver_when))
     if reminder.complete_when is not None and (
-        reminder.status in {
+        reminder.status
+        in {
             ReminderStatus.PENDING,
             ReminderStatus.WAITING_FOR_CONTEXT,
             ReminderStatus.DELIVERING,
