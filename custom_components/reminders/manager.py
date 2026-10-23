@@ -2678,6 +2678,49 @@ class ReminderManager:
                         )
                         missed.append((reminder, skipped))
                     eligible = retained
+                # A revoked read permission must not disclose the condition's
+                # present state. Resolve the due occurrence without delivery.
+                permitted_eligible: list[Reminder] = []
+                for reminder in eligible:
+                    if reminder.id not in forbidden_context_ids:
+                        permitted_eligible.append(reminder)
+                        continue
+                    occurrence = _find_occurrence(reminder, reminder.current_occurrence_id)
+                    if occurrence is None:
+                        assert reminder.due is not None
+                        occurrence = _new_occurrence(
+                            reminder.due,
+                            scheduled_due=reminder.scheduled_due or reminder.due,
+                        )
+                    skipped = occurrence.updated(
+                        status=OccurrenceStatus.SKIPPED,
+                        completed_at=effective_now,
+                        completion_reason="permission_denied",
+                    )
+                    history = _replace_occurrence(
+                        list(reminder.occurrence_history), skipped
+                    )
+                    if not any(item.id == skipped.id for item in history):
+                        history.append(skipped)
+                    candidate[reminder.id] = (
+                        _advance_recurring_series(
+                            reminder,
+                            history,
+                            resolved_due=occurrence.scheduled_due,
+                            resolved_status=ReminderStatus.SKIPPED,
+                            now=effective_now,
+                            after=effective_now,
+                        )
+                        if reminder.recurrence is not None
+                        else reminder.updated(
+                            status=ReminderStatus.SKIPPED,
+                            due=None,
+                            occurrence_history=tuple(history),
+                            updated_at=effective_now,
+                        )
+                    )
+                    missed.append((reminder, skipped))
+                eligible = permitted_eligible
                 waiting: list[Reminder] = []
                 expired: list[tuple[Reminder, Occurrence]] = []
                 for reminder in eligible:
