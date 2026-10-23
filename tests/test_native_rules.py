@@ -378,3 +378,36 @@ async def test_native_skip_on_recovery_precedes_wait_trigger(
     assert updated.due is not None and updated.due > now
     assert any(item.status.value == "skipped" for item in updated.occurrence_history)
     assert dispatcher.calls == []
+
+
+async def test_converting_native_activation_to_classic_clears_old_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The previous native listener must not fire after classic conversion."""
+    from custom_components.reminders.triggers.models import TriggerDefinition
+
+    manager, _dispatcher = _manager(monkeypatch)
+    now = datetime.now(UTC)
+    reminder = Reminder(
+        id="conversion",
+        user_id="user",
+        title="Converted",
+        created_at=now,
+        updated_at=now,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        activation_type=ActivationType.TRIGGER,
+        activation_triggers=(
+            {"trigger": "event", "event_type": "old_event"},
+        ),
+    )
+    manager._reminders[reminder.id] = reminder
+    manager._trigger_registry.async_sync = AsyncMock()
+    updated = await manager.async_update(
+        reminder.id,
+        trigger=TriggerDefinition.from_dict(
+            {"type": "named", "trigger_id": "new_event"}
+        ),
+    )
+    assert updated.activation_triggers == ()
+    assert updated.trigger is not None
+    assert updated.trigger.trigger_id == "new_event"
