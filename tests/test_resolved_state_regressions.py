@@ -325,6 +325,7 @@ async def test_native_scheduled_metadata_edit_preserves_resolved_state(
     [
         (ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED),
         (ReminderStatus.ACKNOWLEDGED, OccurrenceStatus.ACKNOWLEDGED),
+        (ReminderStatus.DELIVERED, OccurrenceStatus.DELIVERED),
         (ReminderStatus.FAILED, OccurrenceStatus.FAILED),
     ],
 )
@@ -346,10 +347,21 @@ async def test_unchanged_due_from_editor_does_not_rearm_resolved_reminder(
     assert dispatcher.calls == []
 
 
+@pytest.mark.parametrize(
+    ("status", "occurrence_status"),
+    [
+        (ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED),
+        (ReminderStatus.ACKNOWLEDGED, OccurrenceStatus.ACKNOWLEDGED),
+        (ReminderStatus.DELIVERED, OccurrenceStatus.DELIVERED),
+        (ReminderStatus.FAILED, OccurrenceStatus.FAILED),
+    ],
+)
 async def test_native_unchanged_due_does_not_rearm_resolved_reminder(
     runtime_stubs: None,
     native_runtime_stub: None,
     monkeypatch: pytest.MonkeyPatch,
+    status: ReminderStatus,
+    occurrence_status: OccurrenceStatus,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -361,7 +373,7 @@ async def test_native_unchanged_due_does_not_rearm_resolved_reminder(
         "custom_components.reminders.native_scheduled_crud.async_validate_native_conditions",
         AsyncMock(return_value=[]),
     )
-    original = _resolved_reminder(ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED)
+    original = _resolved_reminder(status, occurrence_status)
     manager, dispatcher = await _native_manager(original)
     due = original.occurrence_history[0].scheduled_due
     updated = await async_update_native_scheduled(
@@ -373,8 +385,9 @@ async def test_native_unchanged_due_does_not_rearm_resolved_reminder(
         due=due,
         title="Updated",
     )
-    assert updated.status is ReminderStatus.COMPLETED
+    assert updated.status is status
     assert updated.current_occurrence_id == original.current_occurrence_id
+    assert updated.occurrence_history == original.occurrence_history
     assert dispatcher.calls == []
 
 
