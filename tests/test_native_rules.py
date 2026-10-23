@@ -416,8 +416,8 @@ async def test_native_to_classic_conversion_survives_storage_reload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Native rules cannot reappear from a durable store after conversion."""
-    from custom_components.reminders.triggers.models import TriggerDefinition
     from custom_components.reminders.storage import deserialize_storage
+    from custom_components.reminders.triggers.models import TriggerDefinition
 
     manager, _ = _manager(monkeypatch)
     now = datetime.now(UTC)
