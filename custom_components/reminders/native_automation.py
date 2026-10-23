@@ -17,9 +17,9 @@ from homeassistant.helpers.typing import ConfigType
 
 from .models import (
     ActivationType,
+    OccurrenceStatus,
     Reminder,
     ReminderStatus,
-    OccurrenceStatus,
     TriggerRepeatPolicy,
 )
 
