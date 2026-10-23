@@ -413,7 +413,13 @@ class ReminderManager:
         return await self.async_get(reminder.id)
 
     async def _async_add(self, reminder: Reminder) -> None:
-        if any((reminder.delivery_triggers, reminder.delivery_conditions, reminder.completion_triggers)):
+        if any(
+            (
+                reminder.delivery_triggers,
+                reminder.delivery_conditions,
+                reminder.completion_triggers,
+            )
+        ):
             # Validate the complete native configuration before the first store
             # commit or due-time delivery, avoiding create-then-attach races.
             from .native_automation import (
@@ -427,9 +433,15 @@ class ReminderManager:
                 delivery_conditions=reminder.delivery_conditions,
                 completion_triggers=reminder.completion_triggers,
             )
-            await async_validate_native_triggers(self._hass, list(reminder.delivery_triggers))
-            await async_validate_native_conditions(self._hass, list(reminder.delivery_conditions))
-            await async_validate_native_triggers(self._hass, list(reminder.completion_triggers))
+            await async_validate_native_triggers(
+                self._hass, list(reminder.delivery_triggers)
+            )
+            await async_validate_native_conditions(
+                self._hass, list(reminder.delivery_conditions)
+            )
+            await async_validate_native_triggers(
+                self._hass, list(reminder.completion_triggers)
+            )
         await self._async_validate_security(reminder)
         async with self._lock:
             candidate = dict(self._reminders)
@@ -673,7 +685,10 @@ class ReminderManager:
             # resurrect an already resolved occurrence.
             if "due" in changes and current.recurrence is None:
                 normalized_due = _normalize_due(changes["due"])
-                if normalized_due == (current.scheduled_due or (active.scheduled_due if active is not None else None)):
+                if normalized_due == (
+                    current.scheduled_due
+                    or (active.scheduled_due if active is not None else None)
+                ):
                     changes.pop("due")
                 else:
                     changes["due"] = normalized_due
@@ -2714,7 +2729,9 @@ class ReminderManager:
                     if reminder.id not in forbidden_context_ids:
                         permitted_eligible.append(reminder)
                         continue
-                    occurrence = _find_occurrence(reminder, reminder.current_occurrence_id)
+                    occurrence = _find_occurrence(
+                        reminder, reminder.current_occurrence_id
+                    )
                     if occurrence is None:
                         assert reminder.due is not None
                         occurrence = _new_occurrence(
