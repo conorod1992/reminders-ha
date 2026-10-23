@@ -39,8 +39,8 @@ from .services import (
 )
 from .websocket_api import (
     COMMAND_PREFIX,
-    CREATE_SCHEMA,
     CREATE_RECURRING_SCHEMA,
+    CREATE_SCHEMA,
     POLICY_SCHEMA,
     SOURCE_SCHEMA,
     _api_errors,
