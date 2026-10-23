@@ -17,6 +17,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .models import (
     ActivationType,
+    OccurrenceStatus,
     Reminder,
     ReminderStatus,
     TriggerRepeatPolicy,
@@ -395,7 +396,10 @@ def _native_completion_armed(reminder: Reminder) -> bool:
         ReminderStatus.WAITING_FOR_CONTEXT,
         ReminderStatus.DELIVERING,
         ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
-    }
+    } or any(
+        item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+        for item in reminder.occurrence_history
+    )
 
 
 def _config_key(configs: Iterable[dict[str, Any]]) -> tuple[str, ...]:

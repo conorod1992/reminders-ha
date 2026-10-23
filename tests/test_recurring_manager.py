@@ -525,7 +525,11 @@ async def test_skip_next_records_one_occurrence_and_survives_restart(
     skipped = await runtime.async_skip_next(reminder.id)
     assert skipped.occurrence_history[-2].status is OccurrenceStatus.SKIPPED
     assert skipped.occurrence_history[-2].scheduled_due == skipped_due
-    assert skipped.due == skipped_due + timedelta(days=1)  # type: ignore[operator]
+    assert skipped.due is not None and skipped_due is not None
+    assert skipped.due.astimezone(ZoneInfo("Europe/Dublin")).replace(tzinfo=None) == (
+        skipped_due.astimezone(ZoneInfo("Europe/Dublin")).replace(tzinfo=None)
+        + timedelta(days=1)
+    )
 
     restarted = await manager(fake_store, FakeDispatcher(), scheduler)
     restored = await restarted.async_get(reminder.id)
@@ -886,7 +890,11 @@ async def test_early_done_advances_recurring_series_without_schedule_drift(
     assert completed.status is OccurrenceStatus.COMPLETED
     updated = await runtime.async_get(reminder.id)
     assert updated.status is ReminderStatus.PENDING
-    assert updated.due == first_due + timedelta(days=1)
+    assert updated.due is not None and first_due is not None
+    assert updated.due.astimezone(ZoneInfo("Europe/Dublin")).replace(tzinfo=None) == (
+        first_due.astimezone(ZoneInfo("Europe/Dublin")).replace(tzinfo=None)
+        + timedelta(days=1)
+    )
     assert updated.last_occurrence_status is ReminderStatus.COMPLETED
     assert updated.occurrence_history[-2].id == completed.id
 

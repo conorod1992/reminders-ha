@@ -176,6 +176,9 @@ class ReminderManager:
         allow_manual_completion: bool = False,
         external_actions: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
         expires_after_seconds: int | None = None,
+        delivery_triggers: tuple[dict[str, Any], ...] = (),
+        delivery_conditions: tuple[dict[str, Any], ...] = (),
+        completion_triggers: tuple[dict[str, Any], ...] = (),
     ) -> Reminder:
         """Create and schedule a one-shot reminder."""
         due = _normalize_due(due)
@@ -223,6 +226,9 @@ class ReminderManager:
             allow_manual_completion=allow_manual_completion,
             external_actions=source_actions,
             expires_after_seconds=expiry_window,
+            delivery_triggers=delivery_triggers,
+            delivery_conditions=delivery_conditions,
+            completion_triggers=completion_triggers,
         )
         await self._async_add(reminder)
         if due <= now:
@@ -253,6 +259,9 @@ class ReminderManager:
             MissedOccurrencePolicy.REMIND_ON_STARTUP
         ),
         expires_after_seconds: int | None = None,
+        delivery_triggers: tuple[dict[str, Any], ...] = (),
+        delivery_conditions: tuple[dict[str, Any], ...] = (),
+        completion_triggers: tuple[dict[str, Any], ...] = (),
     ) -> Reminder:
         """Create and durably persist an anchored recurring reminder."""
         _validate_policy(delivery_policy)
@@ -304,6 +313,9 @@ class ReminderManager:
             external_actions=source_actions,
             missed_occurrence_policy=MissedOccurrencePolicy(missed_occurrence_policy),
             expires_after_seconds=expiry_window,
+            delivery_triggers=delivery_triggers,
+            delivery_conditions=delivery_conditions,
+            completion_triggers=completion_triggers,
         )
         await self._async_add(reminder)
         self._notify_changed({user_id})
@@ -401,6 +413,35 @@ class ReminderManager:
         return await self.async_get(reminder.id)
 
     async def _async_add(self, reminder: Reminder) -> None:
+        if any(
+            (
+                reminder.delivery_triggers,
+                reminder.delivery_conditions,
+                reminder.completion_triggers,
+            )
+        ):
+            # Validate the complete native configuration before the first store
+            # commit or due-time delivery, avoiding create-then-attach races.
+            from .native_automation import (
+                async_validate_native_conditions,
+                async_validate_native_triggers,
+            )
+            from .native_manager import _validate_native_rule_resources
+
+            _validate_native_rule_resources(
+                delivery_triggers=reminder.delivery_triggers,
+                delivery_conditions=reminder.delivery_conditions,
+                completion_triggers=reminder.completion_triggers,
+            )
+            await async_validate_native_triggers(
+                self._hass, list(reminder.delivery_triggers)
+            )
+            await async_validate_native_conditions(
+                self._hass, list(reminder.delivery_conditions)
+            )
+            await async_validate_native_triggers(
+                self._hass, list(reminder.completion_triggers)
+            )
         await self._async_validate_security(reminder)
         async with self._lock:
             candidate = dict(self._reminders)
@@ -640,6 +681,17 @@ class ReminderManager:
                 changes.pop("activation_type", current.activation_type)
             )
             time_rearmed = False
+            # Including the unchanged due value (as the panel does) must not
+            # resurrect an already resolved occurrence.
+            if "due" in changes and current.recurrence is None:
+                normalized_due = _normalize_due(changes["due"])
+                if normalized_due == (
+                    current.scheduled_due
+                    or (active.scheduled_due if active is not None else None)
+                ):
+                    changes.pop("due")
+                else:
+                    changes["due"] = normalized_due
             if "available_from" in changes:
                 changes["available_from"] = _normalize_optional_time(
                     changes["available_from"]
@@ -700,6 +752,10 @@ class ReminderManager:
                 or bool(trigger_fields.intersection(changes))
             )
             if target_type is ActivationType.TRIGGER:
+                # Converting from HA-native activation to a classic trigger must
+                # remove the former listener; never leave two activation paths.
+                if "trigger" in changes and current.activation_triggers:
+                    changes["activation_triggers"] = ()
                 if "due" in changes or "recurrence" in changes:
                     raise ReminderValidationError(
                         "Triggered reminders cannot have due or recurrence fields"
@@ -2583,6 +2639,22 @@ class ReminderManager:
         await self._async_process_escalations(effective_now)
         await self._async_process_snoozed_retries(effective_now)
         due: list[Reminder] = []
+        # Recheck observation permissions when due, not only at creation.
+        # This must happen outside the manager lock because user lookup is async.
+        forbidden_context_ids: set[str] = set()
+        for permission_reminder in tuple(self._reminders.values()):
+            if (
+                permission_reminder.status is ReminderStatus.PENDING
+                and permission_reminder.due is not None
+                and permission_reminder.due <= effective_now
+                and permission_reminder.deliver_when is not None
+                and not await async_trigger_permitted(
+                    self._hass,
+                    permission_reminder.user_id,
+                    permission_reminder.deliver_when,
+                )
+            ):
+                forbidden_context_ids.add(permission_reminder.id)
         try:
             async with self._lock:
                 if self._unloaded:
@@ -2652,6 +2724,51 @@ class ReminderManager:
                         )
                         missed.append((reminder, skipped))
                     eligible = retained
+                # A revoked read permission must not disclose the condition's
+                # present state. Resolve the due occurrence without delivery.
+                permitted_eligible: list[Reminder] = []
+                for reminder in eligible:
+                    if reminder.id not in forbidden_context_ids:
+                        permitted_eligible.append(reminder)
+                        continue
+                    occurrence = _find_occurrence(
+                        reminder, reminder.current_occurrence_id
+                    )
+                    if occurrence is None:
+                        assert reminder.due is not None
+                        occurrence = _new_occurrence(
+                            reminder.due,
+                            scheduled_due=reminder.scheduled_due or reminder.due,
+                        )
+                    skipped = occurrence.updated(
+                        status=OccurrenceStatus.SKIPPED,
+                        completed_at=effective_now,
+                        completion_reason="permission_denied",
+                    )
+                    history = _replace_occurrence(
+                        list(reminder.occurrence_history), skipped
+                    )
+                    if not any(item.id == skipped.id for item in history):
+                        history.append(skipped)
+                    candidate[reminder.id] = (
+                        _advance_recurring_series(
+                            reminder,
+                            history,
+                            resolved_due=occurrence.scheduled_due,
+                            resolved_status=ReminderStatus.SKIPPED,
+                            now=effective_now,
+                            after=effective_now,
+                        )
+                        if reminder.recurrence is not None
+                        else reminder.updated(
+                            status=ReminderStatus.SKIPPED,
+                            due=None,
+                            occurrence_history=tuple(history),
+                            updated_at=effective_now,
+                        )
+                    )
+                    missed.append((reminder, skipped))
+                eligible = permitted_eligible
                 waiting: list[Reminder] = []
                 expired: list[tuple[Reminder, Occurrence]] = []
                 for reminder in eligible:

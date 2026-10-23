@@ -39,6 +39,8 @@ from .services import (
 )
 from .websocket_api import (
     COMMAND_PREFIX,
+    CREATE_RECURRING_SCHEMA,
+    CREATE_SCHEMA,
     POLICY_SCHEMA,
     SOURCE_SCHEMA,
     _api_errors,
@@ -389,7 +391,84 @@ async def websocket_update_native_scheduled(
     connection.send_result(msg["id"], {"reminder": updated.to_dict()})
 
 
+# Scheduled native creation must be one operation: the old panel sequence
+# created a potentially due reminder before its delivery gates were attached.
+def _native_create_schema(base: dict[Any, Any], command: str) -> dict[Any, Any]:
+    return {
+        **{
+            key: value
+            for key, value in base.items()
+            if str(key.schema if hasattr(key, "schema") else key) != "type"
+        },
+        vol.Required("type"): f"{COMMAND_PREFIX}{command}",
+        vol.Required("delivery_triggers"): NATIVE_LIST,
+        vol.Required("delivery_conditions"): NATIVE_LIST,
+        vol.Required("completion_triggers"): NATIVE_LIST,
+    }
+
+
+@websocket_command(_native_create_schema(CREATE_SCHEMA, "create_native_scheduled"))
+@async_response
+@_api_errors
+async def websocket_create_native_scheduled(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _native_manager(hass)
+    user_id = await async_resolve_target_user(hass, connection.user, msg.get("user_id"))
+    reminder = await manager.async_create(
+        user_id=user_id,
+        title=msg["title"],
+        message=msg.get("message"),
+        due=_parse_datetime(hass, msg["due"]),
+        delivery_policy=_policy_from_data(msg),
+        acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
+        quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
+        expires_after_seconds=msg.get("expires_after_seconds"),
+        delivery_triggers=tuple(msg["delivery_triggers"]),
+        delivery_conditions=tuple(msg["delivery_conditions"]),
+        completion_triggers=tuple(msg["completion_triggers"]),
+        **_source_from_data(msg),
+    )
+    connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
+
+
+@websocket_command(
+    _native_create_schema(CREATE_RECURRING_SCHEMA, "create_native_recurring")
+)
+@async_response
+@_api_errors
+async def websocket_create_native_recurring(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = _native_manager(hass)
+    user_id = await async_resolve_target_user(hass, connection.user, msg.get("user_id"))
+    reminder = await manager.async_create_recurring(
+        user_id=user_id,
+        title=msg["title"],
+        message=msg.get("message"),
+        recurrence=_recurrence_from_data(hass, msg),
+        delivery_policy=_policy_from_data(msg),
+        acknowledgement_policy=AcknowledgementPolicy(msg["acknowledgement_policy"]),
+        quiet_hours_policy=QuietHoursPolicy(msg["quiet_hours_policy"]),
+        escalation=msg.get("escalation"),
+        allow_manual_completion=msg["allow_manual_completion"],
+        missed_occurrence_policy=MissedOccurrencePolicy(
+            msg["missed_occurrence_policy"]
+        ),
+        expires_after_seconds=msg.get("expires_after_seconds"),
+        delivery_triggers=tuple(msg["delivery_triggers"]),
+        delivery_conditions=tuple(msg["delivery_conditions"]),
+        completion_triggers=tuple(msg["completion_triggers"]),
+        **_source_from_data(msg),
+    )
+    connection.send_result(msg["id"], {"reminder": reminder.to_dict()})
+
+
 NATIVE_WEBSOCKET_HANDLERS = (
+    websocket_create_native_scheduled,
+    websocket_create_native_recurring,
     websocket_set_native_rules,
     websocket_create_native_triggered,
     websocket_update_native_triggered,

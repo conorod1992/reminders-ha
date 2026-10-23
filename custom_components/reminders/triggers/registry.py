@@ -339,12 +339,19 @@ def _subscriptions(reminder: Reminder) -> list[tuple[str, TriggerDefinition]]:
         and reminder.status is ReminderStatus.WAITING_FOR_CONTEXT
     ):
         result.append((f"{reminder.id}::deliver_when", reminder.deliver_when))
-    if reminder.complete_when is not None and reminder.status in {
-        ReminderStatus.PENDING,
-        ReminderStatus.WAITING_FOR_CONTEXT,
-        ReminderStatus.DELIVERING,
-        ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
-    }:
+    if reminder.complete_when is not None and (
+        reminder.status
+        in {
+            ReminderStatus.PENDING,
+            ReminderStatus.WAITING_FOR_CONTEXT,
+            ReminderStatus.DELIVERING,
+            ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
+        }
+        or any(
+            item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
+            for item in reminder.occurrence_history
+        )
+    ):
         result.append((f"{reminder.id}::complete_when", reminder.complete_when))
     return result
 
