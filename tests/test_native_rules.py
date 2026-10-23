@@ -410,3 +410,35 @@ async def test_converting_native_activation_to_classic_clears_old_rules(
     assert updated.activation_triggers == ()
     assert updated.trigger is not None
     assert updated.trigger.trigger_id == "new_event"
+
+
+async def test_native_to_classic_conversion_survives_storage_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native rules cannot reappear from a durable store after conversion."""
+    from custom_components.reminders.triggers.models import TriggerDefinition
+    from custom_components.reminders.storage import deserialize_storage
+
+    manager, _ = _manager(monkeypatch)
+    now = datetime.now(UTC)
+    original = Reminder(
+        id="convert-durable",
+        user_id="user",
+        title="Before",
+        due=None,
+        created_at=now,
+        updated_at=now,
+        activation_type=ActivationType.TRIGGER,
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+        activation_triggers=({"trigger": "event", "event_type": "old"},),
+    )
+    manager._reminders[original.id] = original
+    manager._trigger_registry.async_sync = AsyncMock()
+    replacement = TriggerDefinition.from_dict(
+        {"type": "named", "trigger_id": "replacement"}
+    )
+    await manager.async_update(original.id, trigger=replacement)
+    restored, _ = deserialize_storage(manager._store.data)
+    assert restored[original.id].activation_triggers == ()
+    assert restored[original.id].trigger is not None
+    assert restored[original.id].trigger.trigger_id == "replacement"
