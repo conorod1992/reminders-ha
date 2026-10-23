@@ -441,6 +441,9 @@ async def test_outstanding_trigger_occurrence_can_complete_after_rearming(
         id="repeat-complete",
         user_id="u1",
         title="Close the door",
+        trigger=TriggerDefinition.from_dict(
+            {"type": "named", "trigger_id": "door_opened"}
+        ),
         due=None,
         created_at=now,
         updated_at=now,
