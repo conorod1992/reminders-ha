@@ -134,7 +134,7 @@ async def async_update_native_scheduled(
         time_rearmed = False
         if "due" in changes and current.recurrence is None:
             normalized_due = _normalize_due(changes["due"])
-            if normalized_due == current.scheduled_due:
+            if normalized_due == (current.scheduled_due or (active.scheduled_due if active is not None else None)):
                 changes.pop("due")
             else:
                 changes["due"] = normalized_due
