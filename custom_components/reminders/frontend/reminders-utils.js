@@ -123,8 +123,11 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
   const today = zonedInputParts(instant, timeZone);
   if (choice === "later") {
     const currentHour = Number(today.time.slice(0, 2));
-    const hour = Math.min(23, Math.max(18, currentHour + 2));
-    return { date: today.date, time: `${String(hour).padStart(2, "0")}:${hour === 23 ? "59" : "00"}` };
+    // Do not silently offer 23:59 when it is already too late to choose
+    // a meaningful "later today" time. The panel disables this shortcut.
+    if (currentHour >= 23) return null;
+    const hour = Math.max(18, currentHour + 2);
+    return { date: today.date, time: `${String(hour).padStart(2, "0")}:00` };
   }
   const [year, month, day] = today.date.split("-").map(Number);
   // Advance the calendar date, not the instant: +36h can skip tomorrow
@@ -174,6 +177,7 @@ export function canSnooze(reminder) {
 }
 
 export function upcomingBucket(value, timeZone, now = Date.now()) {
+  if (new Date(value).getTime() < now) return "Overdue";
   const local = zonedInputParts(value, timeZone).date;
   const today = zonedInputParts(now, timeZone).date;
   const dayNumber = (text) => Date.parse(`${text}T12:00:00Z`) / 86400000;
@@ -209,4 +213,35 @@ export function historyHighlights(occurrence, formatDate) {
     result.push(`Delivery errors: ${occurrence.delivery_errors.join(", ")}`);
   }
   return result;
+}
+
+/** Explain the next user-visible step without changing reminder lifecycle state. */
+export function reminderNextStep(reminder, formatDate = (value) => value) {
+  if (!reminder) return "";
+  if (reminder.status === "waiting_for_context") {
+    const active = (reminder.occurrence_history || []).find(
+      (item) => item.id === reminder.current_occurrence_id
+    );
+    const condition = reminder.deliver_when_summary
+      || (reminder.delivery_triggers?.length ? "a Home Assistant trigger"
+        : reminder.delivery_conditions?.length ? "the selected Home Assistant conditions"
+          : "its delivery condition");
+    const expiry = active?.expires_at
+      ? ` If it is still waiting, it expires ${formatDate(active.expires_at)}.`
+      : "";
+    return `Due, but waiting for ${condition}.${expiry}`;
+  }
+  if (reminder.status === "awaiting_acknowledgement") {
+    return "Delivered — waiting for you to dismiss this occurrence.";
+  }
+  if (reminder.status === "failed") {
+    return "Delivery failed — review the delivery error or retry the reminder.";
+  }
+  if (reminder.status === "paused") {
+    return "This series is paused and will not deliver until resumed.";
+  }
+  if (reminder.status === "delivered" && reminder.allow_manual_completion) {
+    return "Delivered — mark Done when you complete the task.";
+  }
+  return "";
 }
