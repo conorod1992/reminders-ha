@@ -84,6 +84,14 @@ def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, A
             item.status is OccurrenceStatus.DELIVERED
             and (reminder.allow_manual_completion or reminder.external_actions)
         )
+        or (
+            item.status is OccurrenceStatus.SCHEDULED
+            and item.id == reminder.current_occurrence_id
+            and reminder.allow_manual_completion
+            and reminder.activation_type is ActivationType.TIME
+            and reminder.status is ReminderStatus.PENDING
+            and not reminder.paused
+        )
     ]
     attention_reason = _attention_reason(reminder)
     if attention_reason is not None:
@@ -218,6 +226,7 @@ async def _upcoming_page(
         activation_type=ActivationType.TIME,
         statuses={
             ReminderStatus.PENDING,
+            ReminderStatus.WAITING_FOR_CONTEXT,
             ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
             ReminderStatus.DELIVERED,
         },
