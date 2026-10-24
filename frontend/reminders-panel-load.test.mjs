@@ -259,6 +259,7 @@ test("Upcoming renders waiting and overdue reminders in distinct groups", () => 
     globalThis.document = { createElement };
     const host = createElement("section");
     const panel = makePanel();
+    delete panel._renderList;
     panel._view = "upcoming";
     panel._hass = { config: { time_zone: "UTC" } };
     panel._listTotal = 2;
