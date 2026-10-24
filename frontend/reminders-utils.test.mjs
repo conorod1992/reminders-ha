@@ -4,6 +4,7 @@ import {
   acknowledgementSummary,
   awaitingOccurrences,
   canSnooze,
+  currentCompletableOccurrence,
   deliverySummary,
   historyHighlights,
   localDateTime,
@@ -141,9 +142,39 @@ test("explains context waits, deadlines and reminder resolution without losing p
   };
   assert.equal(
     reminderNextStep(waiting, (value) => value.slice(11, 16)),
-    "Due, but waiting for when the house is occupied. If it is still waiting, it expires 21:00.",
+    "Waiting for delivery conditions: when the house is occupied. If it is still waiting, it expires 21:00.",
   );
   assert.equal(reminderNextStep({ status: "failed" }), "Delivery failed — review the delivery error or retry the reminder.");
   assert.equal(reminderNextStep({ status: "awaiting_acknowledgement" }), "Delivered — waiting for you to dismiss this occurrence.");
   assert.equal(reminderNextStep({ status: "pending" }), "");
+});
+
+test("pre-delivery Done now requires the active, scheduled, eligible occurrence", () => {
+  const reminder = {
+    status: "pending",
+    activation_type: "time",
+    allow_manual_completion: true,
+    paused: false,
+    current_occurrence_id: "active",
+    occurrence_history: [
+      { id: "older", status: "scheduled" },
+      { id: "active", status: "scheduled" },
+    ],
+  };
+  assert.equal(currentCompletableOccurrence(reminder)?.id, "active");
+  assert.equal(currentCompletableOccurrence({ ...reminder, paused: true }), null);
+  assert.equal(currentCompletableOccurrence({ ...reminder, allow_manual_completion: false }), null);
+  assert.equal(currentCompletableOccurrence({ ...reminder, status: "completed" }), null);
+  assert.equal(currentCompletableOccurrence({ ...reminder, activation_type: "trigger" }), null);
+  assert.equal(currentCompletableOccurrence({
+    ...reminder, occurrence_history: [{ id: "active", status: "completed" }],
+  }), null);
+});
+
+test("an advanced recurring series explains a prior unresolved occurrence", () => {
+  const text = reminderNextStep({
+    status: "pending",
+    occurrence_history: [{ id: "older", status: "awaiting_acknowledgement" }],
+  });
+  assert.match(text, /earlier occurrence still needs dismissal/);
 });
