@@ -2,6 +2,7 @@ import {
   WEEKDAYS,
   acknowledgementSummary,
   awaitingOccurrences,
+  currentCompletableOccurrence,
   deliverySummary,
   historyHighlights,
   localDateTime,
@@ -273,11 +274,8 @@ class RemindersManagementPanel extends HTMLElement {
     actions.className = "actions";
     const awaiting = awaitingOccurrences(reminder);
     const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
-    const upcomingTask = (reminder.occurrence_history || []).find(
-      (item) => item.id === reminder.current_occurrence_id && item.status === "scheduled"
-    );
-    if (upcomingTask && reminder.status === "pending" && !reminder.paused
-        && reminder.activation_type === "time" && reminder.allow_manual_completion) {
+    const upcomingTask = currentCompletableOccurrence(reminder);
+    if (upcomingTask) {
       actions.append(this._action("Done now", () => this._complete(reminder, upcomingTask.id)));
     }
     if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
