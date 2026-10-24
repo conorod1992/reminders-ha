@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from custom_components.reminders import websocket_registration as registration
 from custom_components.reminders.models import (
     ActivationType,
     Occurrence,
@@ -15,7 +16,6 @@ from custom_components.reminders.models import (
     Reminder,
     ReminderStatus,
 )
-from custom_components.reminders import websocket_registration as registration
 
 
 def _timed_reminder(
