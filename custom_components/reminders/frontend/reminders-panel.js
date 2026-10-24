@@ -11,6 +11,7 @@ import {
   triggerRepeatSummary,
   upcomingBucket,
   relativeTime,
+  reminderNextStep,
   zonedInputParts,
 } from "./reminders-utils.js";
 
@@ -110,7 +111,7 @@ class RemindersManagementPanel extends HTMLElement {
         button{border:0;border-radius:8px;padding:10px 15px;background:var(--primary-color);color:var(--text-primary-color,#fff);font:inherit;cursor:pointer}button.secondary,.actions button,.quick button{background:transparent;color:var(--primary-color);border:1px solid var(--divider-color)}button.danger{color:var(--error-color);background:transparent;border:1px solid var(--error-color)}button:disabled{opacity:.55;cursor:wait}
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
         select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}.picker-host,.picker-host ha-entity-picker,.picker-host select{display:block;width:100%}
-        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}
+        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}.next-step{margin-top:9px;font-size:13px;line-height:1.4;color:var(--primary-text-color);border-left:3px solid var(--warning-color);padding-left:10px}
         .overflow{position:relative}.overflow>summary{list-style:none;margin:0;padding:7px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-color);font-size:20px;line-height:1;cursor:pointer}.overflow>summary::-webkit-details-marker{display:none}.overflow-menu{position:absolute;right:0;z-index:2;min-width:170px;display:grid;padding:6px;background:var(--card-background-color);border-radius:9px;box-shadow:0 5px 20px rgba(0,0,0,.3)}.overflow-menu button{border:0;text-align:left;color:var(--primary-text-color);background:transparent}.overflow-menu button.danger{color:var(--error-color)}.behavior-summary{padding:14px;border-radius:9px;background:var(--secondary-background-color)}.behavior-summary strong{display:block;margin-bottom:6px}.behavior-summary ul{margin:0;padding-left:20px}.expiry-custom.hidden{display:none}
         .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
         dialog{width:min(680px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;border:0;border-radius:12px;padding:0;background:var(--card-background-color);color:var(--primary-text-color);box-shadow:0 8px 28px rgba(0,0,0,.35)}dialog::backdrop{background:rgba(0,0,0,.45)}.dialog{padding:22px}.dialog h2{margin:0 0 8px}.form{display:grid;gap:16px}.dialog-actions{justify-content:flex-end;margin-top:20px}.hidden{display:none!important}details{border-top:1px solid var(--divider-color);padding-top:12px}summary{cursor:pointer;color:var(--primary-color);margin-bottom:14px}.advanced{display:grid;gap:16px}.quick button.selected{background:var(--primary-color);color:#fff}.preview{padding:10px;border-radius:8px;background:var(--secondary-background-color)}
@@ -207,10 +208,11 @@ class RemindersManagementPanel extends HTMLElement {
       return;
     }
     if (this._view === "upcoming") {
-      const groups = new Map([["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []]]);
+      const groups = new Map([["Waiting for conditions", []], ["Overdue", []], ["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []]]);
       const ungrouped = [];
       for (const item of values) {
-        if (item.activation_type === "time" && item.due) groups.get(upcomingBucket(item.due, this._hass.config.time_zone)).push(item);
+        if (item.status === "waiting_for_context") groups.get("Waiting for conditions").push(item);
+        else if (item.activation_type === "time" && item.due) groups.get(upcomingBucket(item.due, this._hass.config.time_zone)).push(item);
         else ungrouped.push(item);
       }
       for (const [label, items] of groups) {
@@ -231,8 +233,11 @@ class RemindersManagementPanel extends HTMLElement {
     when.className = "when";
     when.textContent = reminder.activation_type === "trigger"
       ? (reminder.trigger_summary || "Waiting for trigger")
-      : reminder.paused ? "Series paused" : this._formatDate(reminder.due);
-    if (reminder.activation_type === "time" && reminder.due && !reminder.paused) {
+      : reminder.paused ? "Series paused"
+        : reminder.status === "waiting_for_context"
+          ? `Due ${this._formatDate(reminder.scheduled_due || reminder.due)}`
+          : this._formatDate(reminder.due);
+    if (reminder.activation_type === "time" && reminder.due && !reminder.paused && reminder.status !== "waiting_for_context") {
       const relative = document.createElement("span"); relative.className = "relative"; relative.textContent = relativeTime(reminder.due, this._hass.locale?.language); when.append(relative);
     }
     const body = document.createElement("div");
@@ -257,6 +262,13 @@ class RemindersManagementPanel extends HTMLElement {
     if (reminder.managed_externally && reminder.source) values.push(`Managed by ${reminder.source}`);
     meta.textContent = values.join(" · ");
     body.append(meta);
+    const nextStep = reminderNextStep(reminder, (value) => this._formatDate(value));
+    if (nextStep) {
+      const explanation = document.createElement("div");
+      explanation.className = "next-step";
+      explanation.textContent = nextStep;
+      body.append(explanation);
+    }
     const actions = document.createElement("div");
     actions.className = "actions";
     const awaiting = awaitingOccurrences(reminder);
@@ -521,11 +533,22 @@ class RemindersManagementPanel extends HTMLElement {
     const voice = this._entitySelect("assist_satellite", policy?.voice_targets || []);
     voice.name = "voice_targets";
     dialog.querySelector(".voice-label").append(voice);
-    for (const button of dialog.querySelectorAll("[data-quick]")) button.onclick = () => {
-      const parts = quickTimeParts(button.dataset.quick, this._hass.config.time_zone);
-      form.elements.date.value = parts.date; form.elements.time.value = parts.time;
-      for (const other of dialog.querySelectorAll("[data-quick]")) other.classList.toggle("selected", other === button);
-    };
+    for (const button of dialog.querySelectorAll("[data-quick]")) {
+      if (button.dataset.quick === "later" && !quickTimeParts("later", this._hass.config.time_zone)) {
+        button.disabled = true;
+        button.title = "No later-today time is available; choose a date or tomorrow morning.";
+      }
+      button.onclick = () => {
+        const parts = quickTimeParts(button.dataset.quick, this._hass.config.time_zone);
+        if (!parts) {
+          button.disabled = true;
+          button.title = "No later-today time is available; choose a date or tomorrow morning.";
+          return;
+        }
+        form.elements.date.value = parts.date; form.elements.time.value = parts.time;
+        for (const other of dialog.querySelectorAll("[data-quick]")) other.classList.toggle("selected", other === button);
+      };
+    }
     for (const button of dialog.querySelectorAll("[data-days]")) button.onclick = () => {
       const selected = button.dataset.days === "weekday" ? WEEKDAYS.slice(0, 5) : WEEKDAYS.slice(5);
       for (const input of form.querySelectorAll("[name=weekday]")) input.checked = selected.includes(input.value);
