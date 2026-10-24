@@ -132,6 +132,15 @@ async def async_update_native_scheduled(
         history = list(current.occurrence_history)
         active = _find_occurrence(current, current.current_occurrence_id)
         time_rearmed = False
+        if "due" in changes and current.recurrence is None:
+            normalized_due = _normalize_due(changes["due"])
+            if normalized_due == (
+                current.scheduled_due
+                or (active.scheduled_due if active is not None else None)
+            ):
+                changes.pop("due")
+            else:
+                changes["due"] = normalized_due
 
         # An edit to the complete delivery-rule snapshot rearms a context wait.
         # Normalizing the active occurrence to scheduled lets the new rule set be

@@ -69,7 +69,7 @@ def test_panel_startup_wrapper_allows_retry_after_transient_failure() -> None:
     assert 'import "./reminders-panel-attention.js"' in atomic_source
 
 
-def test_native_create_rolls_back_if_rule_save_fails() -> None:
+def test_native_create_is_atomic_and_needs_no_frontend_rollback() -> None:
     source = (
         ROOT
         / "custom_components"
@@ -78,10 +78,12 @@ def test_native_create_rolls_back_if_rule_save_fails() -> None:
         / "reminders-panel-native.js"
     ).read_text(encoding="utf-8")
 
+    assert '"create_native_scheduled"' in source
+    assert '"create_native_recurring"' in source
     assert (
-        'await originalCall.call(this, "delete", { reminder_id: reminderId })' in source
+        'await originalCall.call(this, "delete", { reminder_id: reminderId })'
+        not in source
     )
-    assert "The incomplete reminder could not be removed automatically" in source
 
 
 async def test_native_condition_runtime_fails_open_when_checker_raises() -> None:

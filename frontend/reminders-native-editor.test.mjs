@@ -86,3 +86,40 @@ test("native rules remain disabled when no such rules were supplied", () => {
   assert.equal(currentForm.elements.deliver_when_enabled.checked, false);
   assert.equal(currentForm.elements.complete_when_enabled.checked, false);
 });
+
+
+test("native scheduled creation sends one request containing rules before delivery", async () => {
+  const panel = new Panel();
+  panel.calls = [];
+  panel._nativeSaveState = {
+    triggered: false,
+    reminder: null,
+    rules: {
+      activation: [],
+      deliveryTriggers: [{ trigger: "event", event_type: "arrived" }],
+      deliveryConditions: [{ condition: "state", entity_id: "input_boolean.ready", state: "on" }],
+      completion: [{ trigger: "event", event_type: "done" }],
+    },
+  };
+  await panel._call("create", { title: "Ready", due: "2027-01-01 12:00:00", deliver_when: { type: "state" } });
+  assert.equal(panel.calls.length, 1);
+  assert.equal(panel.calls[0].action, "create_native_scheduled");
+  assert.equal(panel.calls[0].data.deliver_when, undefined);
+  assert.deepEqual(panel.calls[0].data.delivery_triggers, panel._nativeSaveState.rules.deliveryTriggers);
+  assert.deepEqual(panel.calls[0].data.delivery_conditions, panel._nativeSaveState.rules.deliveryConditions);
+  assert.deepEqual(panel.calls[0].data.completion_triggers, panel._nativeSaveState.rules.completion);
+});
+
+test("native recurring creation also sends a single atomic request", async () => {
+  const panel = new Panel();
+  panel.calls = [];
+  panel._nativeSaveState = {
+    triggered: false,
+    reminder: null,
+    rules: { activation: [], deliveryTriggers: [], deliveryConditions: [], completion: [] },
+  };
+  await panel._call("create_recurring", { title: "Daily", frequency: "daily", first_reminder: "2027-01-01 12:00:00" });
+  assert.equal(panel.calls.length, 1);
+  assert.equal(panel.calls[0].action, "create_native_recurring");
+  assert.deepEqual(panel.calls[0].data.delivery_conditions, []);
+});
