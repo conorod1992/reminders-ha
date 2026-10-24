@@ -9,6 +9,7 @@ import {
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
+  reminderNextStep,
   suggestedStates,
   triggerRepeatSummary,
   upcomingBucket,
@@ -73,6 +74,8 @@ test("groups upcoming reminders using the Home Assistant timezone", () => {
   assert.equal(upcomingBucket("2026-08-31T08:00:00Z", "Europe/Dublin", now), "This week");
   assert.equal(upcomingBucket("2026-09-20T08:00:00Z", "Europe/Dublin", now), "Later");
   assert.equal(relativeTime("2026-08-26T23:12:00Z", "en", now), "in 42 minutes");
+  assert.equal(upcomingBucket("2026-08-26T21:45:00Z", "Europe/Dublin", now), "Overdue");
+  assert.equal(upcomingBucket("2026-08-25T09:00:00Z", "Europe/Dublin", now), "Overdue");
 });
 
 
@@ -111,4 +114,36 @@ test("history highlights distinguish planned, actual and resolved times", () => 
 
 test("history highlights tolerate sparse older occurrence records", () => {
   assert.deepEqual(historyHighlights({}, (time) => time), []);
+});
+
+test("later-today shortcut never chooses an elapsed or invalid time", () => {
+  assert.deepEqual(quickTimeParts("later", "UTC", Date.parse("2026-08-04T09:00:00Z")), {
+    date: "2026-08-04", time: "18:00",
+  });
+  assert.deepEqual(quickTimeParts("later", "UTC", Date.parse("2026-08-04T22:30:00Z")), {
+    date: "2026-08-04", time: "23:00",
+  });
+  assert.equal(quickTimeParts("later", "UTC", Date.parse("2026-08-04T23:00:00Z")), null);
+  assert.equal(quickTimeParts("later", "UTC", Date.parse("2026-08-04T23:59:59Z")), null);
+  // 22:30 UTC is 23:30 in Dublin during summer time.
+  assert.equal(quickTimeParts("later", "Europe/Dublin", Date.parse("2026-08-04T22:30:00Z")), null);
+});
+
+test("explains context waits, deadlines and reminder resolution without losing privacy", () => {
+  const waiting = {
+    status: "waiting_for_context",
+    current_occurrence_id: "due-1",
+    deliver_when_summary: "when the house is occupied",
+    occurrence_history: [
+      { id: "other", expires_at: "2026-08-04T15:00:00Z" },
+      { id: "due-1", status: "waiting_for_context", expires_at: "2026-08-04T21:00:00Z" },
+    ],
+  };
+  assert.equal(
+    reminderNextStep(waiting, (value) => value.slice(11, 16)),
+    "Due, but waiting for when the house is occupied. If it is still waiting, it expires 21:00.",
+  );
+  assert.equal(reminderNextStep({ status: "failed" }), "Delivery failed — review the delivery error or retry the reminder.");
+  assert.equal(reminderNextStep({ status: "awaiting_acknowledgement" }), "Delivered — waiting for you to dismiss this occurrence.");
+  assert.equal(reminderNextStep({ status: "pending" }), "");
 });
