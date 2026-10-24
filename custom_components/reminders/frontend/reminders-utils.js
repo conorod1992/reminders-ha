@@ -229,7 +229,11 @@ export function reminderNextStep(reminder, formatDate = (value) => value) {
     const expiry = active?.expires_at
       ? ` If it is still waiting, it expires ${formatDate(active.expires_at)}.`
       : "";
-    return `Due, but waiting for ${condition}.${expiry}`;
+    return `Waiting for delivery conditions: ${condition}.${expiry}`;
+  }
+  if (reminder.status === "pending"
+      && (reminder.occurrence_history || []).some((item) => item.status === "awaiting_acknowledgement")) {
+    return "An earlier occurrence still needs dismissal; the next one remains scheduled.";
   }
   if (reminder.status === "awaiting_acknowledgement") {
     return "Delivered — waiting for you to dismiss this occurrence.";
@@ -244,4 +248,13 @@ export function reminderNextStep(reminder, formatDate = (value) => value) {
     return "Delivered — mark Done when you complete the task.";
   }
   return "";
+}
+
+/** Return the one occurrence that the panel can mark Done before delivery. */
+export function currentCompletableOccurrence(reminder) {
+  if (!reminder || !reminder.allow_manual_completion || reminder.paused
+      || reminder.activation_type !== "time" || reminder.status !== "pending") return null;
+  return (reminder.occurrence_history || []).find(
+    (item) => item.id === reminder.current_occurrence_id && item.status === "scheduled"
+  ) || null;
 }
