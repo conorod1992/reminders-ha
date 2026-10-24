@@ -53,6 +53,13 @@ def _timed_reminder(
     [
         (ReminderStatus.PENDING, OccurrenceStatus.SCHEDULED, True, False, True),
         (ReminderStatus.PENDING, OccurrenceStatus.SCHEDULED, False, False, False),
+        (
+            ReminderStatus.WAITING_FOR_CONTEXT,
+            OccurrenceStatus.WAITING_FOR_CONTEXT,
+            False,
+            False,
+            True,
+        ),
         (ReminderStatus.PAUSED, OccurrenceStatus.SCHEDULED, True, True, False),
         (ReminderStatus.COMPLETED, OccurrenceStatus.COMPLETED, True, False, False),
         (
@@ -101,9 +108,7 @@ async def test_upcoming_includes_reminders_waiting_for_context(
             matching = [waiting] if waiting.status in observed_statuses else []
             return matching, len(matching)
 
-    monkeypatch.setattr(
-        registration, "_manager", lambda _hass: StubManager()
-    )
+    monkeypatch.setattr(registration, "_manager", lambda _hass: StubManager())
     page, total = await registration._upcoming_page(
         SimpleNamespace(),
         user_id="owner-1",
