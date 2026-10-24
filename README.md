@@ -155,7 +155,7 @@ These include:
 - automatic completion
 - repeated reminders/escalation
 
-Quick time choices simply fill in the normal date/time fields. You can still edit either before saving.
+Quick time choices simply fill in the normal date/time fields. You can still edit either before saving. **Later today** becomes unavailable late at night when no suitable time remains today, rather than selecting a time in the past.
 
 ### Reminder actions
 
@@ -226,7 +226,7 @@ Search looks through reminder titles and messages.
 The panel has four primary views:
 
 - **Needs attention** — reminders that currently require action or have a problem
-- **Upcoming** — reminders waiting for their next scheduled delivery
+- **Upcoming** — scheduled reminders, including those already due but still waiting for delivery conditions; waiting reminders have their own section and any genuinely overdue items are identified separately
 - **All reminders** — the complete current reminder list
 - **History** — resolved/delivered occurrence history
 
