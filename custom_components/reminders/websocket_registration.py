@@ -81,6 +81,11 @@ def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, A
         for item in reminder.occurrence_history
         if item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
         or (
+            item.status is OccurrenceStatus.WAITING_FOR_CONTEXT
+            and item.id == reminder.current_occurrence_id
+            and reminder.status is ReminderStatus.WAITING_FOR_CONTEXT
+        )
+        or (
             item.status is OccurrenceStatus.DELIVERED
             and (reminder.allow_manual_completion or reminder.external_actions)
         )
