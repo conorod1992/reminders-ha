@@ -126,7 +126,7 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
     // Do not silently offer 23:59 when it is already too late to choose
     // a meaningful "later today" time. The panel disables this shortcut.
     if (currentHour >= 23) return null;
-    const hour = Math.max(18, currentHour + 2);
+    const hour = Math.min(23, Math.max(18, currentHour + 2));
     return { date: today.date, time: `${String(hour).padStart(2, "0")}:00` };
   }
   const [year, month, day] = today.date.split("-").map(Number);
