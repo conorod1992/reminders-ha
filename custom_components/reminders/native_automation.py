@@ -87,6 +87,14 @@ class NativeAutomationRuntime:
             for role in ("activation", "delivery", "completion")
         }
 
+    def failed_roles_for_reminder(self, reminder_id: str) -> tuple[str, ...]:
+        """Expose failure roles without leaking trigger configuration or credentials."""
+        return tuple(
+            role
+            for role in ("activation", "delivery", "completion")
+            if (reminder_id, role) in self._trigger_failures
+        )
+
     async def async_sync(self, reminders: Iterable[Reminder]) -> None:
         """Reconcile native trigger listeners and compiled condition checkers."""
         if self._unloaded:
