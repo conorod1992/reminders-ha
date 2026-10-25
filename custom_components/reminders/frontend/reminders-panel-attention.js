@@ -49,6 +49,7 @@ if (proto && !proto.__needsAttentionInstalled) {
 }
 
 function _attentionText(reason) {
+  if (reason === "automation_unavailable") return "Home Assistant rule problem — see the details below.";
   if (reason === "delivery_failed") return "Delivery failed — check this reminder or its delivery settings.";
   if (reason === "recent_delivery_failed") return "The most recent occurrence failed to deliver.";
   if (reason === "awaiting_acknowledgement") return "Waiting for you to dismiss this reminder.";
