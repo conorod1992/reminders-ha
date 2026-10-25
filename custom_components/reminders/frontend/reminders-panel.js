@@ -941,15 +941,33 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   async _seriesAction(reminder, action) {
-    try { await this._call(action, { reminder_id: reminder.id }); await this._load(); }
+    try {
+      await this._call(action, { reminder_id: reminder.id });
+    } catch (error) {
+      this._showError(error);
+      return false;
+    }
+    // The action is committed. A subsequent refresh failure must not invite
+    // another click that could skip an additional occurrence.
+    try { await this._load(); }
     catch (error) { this._showError(error); }
+    return true;
   }
 
   _confirmSkip(reminder) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     dialog.innerHTML = `<div class="dialog"><h2>Skip next occurrence?</h2><p>Skip <strong>${this._formatDate(reminder.scheduled_due || reminder.due)}</strong>?</p><p class="hint">The series will continue normally from the following scheduled occurrence.</p><div class="dialog-actions"><button class="secondary cancel">Cancel</button><button class="confirm">Skip next</button></div></div>`;
     dialog.querySelector(".cancel").onclick = () => dialog.close();
-    dialog.querySelector(".confirm").onclick = async () => { await this._seriesAction(reminder, "skip_next"); dialog.close(); };
+    const confirm = dialog.querySelector(".confirm");
+    confirm.onclick = async () => {
+      if (confirm.disabled) return;
+      confirm.disabled = true;
+      try {
+        if (await this._seriesAction(reminder, "skip_next")) dialog.close();
+      } finally {
+        confirm.disabled = false;
+      }
+    };
     dialog.showModal();
   }
 
