@@ -13,6 +13,7 @@ import {
   upcomingSection,
   relativeTime,
   reminderNextStep,
+  scheduledLocalSummary,
   zonedInputParts,
 } from "./reminders-utils.js";
 
@@ -783,7 +784,10 @@ class RemindersManagementPanel extends HTMLElement {
     const recurring = !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true");
     const lines = [];
     if (triggered) lines.push(`activate when the selected ${form.elements.trigger_type.value.replaceAll("_", " ")} condition happens`);
-    else if (form.elements.date.value && form.elements.time.value) lines.push(`remind you ${this._formatDate(localDateTime(form.elements.date.value, form.elements.time.value))}`);
+    else if (form.elements.date.value && form.elements.time.value) {
+      const timezone = recurring ? (form.elements.timezone.value || this._hass.config.time_zone) : this._hass.config.time_zone;
+      lines.push(`remind you ${scheduledLocalSummary(form.elements.date.value, form.elements.time.value, timezone, this._hass.locale?.language)}`);
+    }
     if (recurring) {
       const frequency = form.elements.frequency.value;
       const interval = Number(form.elements.interval.value || 1);
