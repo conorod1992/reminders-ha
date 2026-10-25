@@ -143,22 +143,43 @@ async def async_filter_delivery_policy_permissions(
     if user is not None and user.is_admin:
         return policy, ()
     allowed_notify = (
-        tuple(target for target in policy.notify_targets if _can(user, target, POLICY_CONTROL))
-        if user is not None else ()
+        tuple(
+            target
+            for target in policy.notify_targets
+            if _can(user, target, POLICY_CONTROL)
+        )
+        if user is not None
+        else ()
     )
     allowed_voice = (
-        tuple(target for target in policy.voice_targets if _can(user, target, POLICY_CONTROL))
-        if user is not None else ()
+        tuple(
+            target
+            for target in policy.voice_targets
+            if _can(user, target, POLICY_CONTROL)
+        )
+        if user is not None
+        else ()
     )
-    allowed_mobile = policy.mobile_app_services if user is not None and user.is_admin else ()
+    allowed_mobile = (
+        policy.mobile_app_services if user is not None and user.is_admin else ()
+    )
     denied: list[str] = []
     if "phone" in relevant:
-        denied.extend("phone" for target in policy.notify_targets if target not in allowed_notify)
-        denied.extend("phone" for target in policy.mobile_app_services if target not in allowed_mobile)
+        denied.extend(
+            "phone" for target in policy.notify_targets if target not in allowed_notify
+        )
+        denied.extend(
+            "phone"
+            for target in policy.mobile_app_services
+            if target not in allowed_mobile
+        )
     if "voice" in relevant:
-        denied.extend("voice" for target in policy.voice_targets if target not in allowed_voice)
+        denied.extend(
+            "voice" for target in policy.voice_targets if target not in allowed_voice
+        )
     channels = tuple(
-        channel for channel in policy.channels
+        channel
+        for channel in policy.channels
         if channel not in {"phone", "voice"}
         or (channel == "phone" and (allowed_notify or allowed_mobile))
         or (channel == "voice" and allowed_voice)
