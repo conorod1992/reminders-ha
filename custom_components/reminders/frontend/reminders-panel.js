@@ -664,8 +664,16 @@ class RemindersManagementPanel extends HTMLElement {
       dialog.removeEventListener("cancel", onCancel);
     }, { once: true });
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
-    dialog.showModal();
+    this._showDialog(dialog);
     form.elements.title.focus();
+  }
+
+  _showDialog(dialog) {
+    const opener = this.shadowRoot?.activeElement;
+    const label = dialog.querySelector?.("h2")?.textContent;
+    if (label) dialog.setAttribute?.("aria-label", label);
+    dialog.addEventListener?.("close", () => opener?.focus?.(), { once: true });
+    dialog.showModal();
   }
 
   _formSnapshot(form) {
@@ -996,7 +1004,7 @@ class RemindersManagementPanel extends HTMLElement {
       dialog.querySelector(".tomorrow").onclick = () => { const tomorrow = quickTimeParts("tomorrow", this._hass.config.time_zone); this._doSnooze(dialog, reminder, { due: localDateTime(tomorrow.date, tomorrow.time) }); };
       dialog.querySelector(".custom").onclick = () => this._doSnooze(dialog, reminder, { due: localDateTime(inputs[0].value, inputs[1].value) });
     }
-    dialog.showModal();
+    this._showDialog(dialog);
   }
 
   async _doSnooze(dialog, reminder, data) {
@@ -1039,7 +1047,7 @@ class RemindersManagementPanel extends HTMLElement {
       try { await this._call("delete", { reminder_id: reminder.id }); dialog.close(); await this._load(); }
       catch (error) { this._showError(error); }
     };
-    dialog.showModal();
+    this._showDialog(dialog);
   }
 
   async _seriesAction(reminder, action) {
@@ -1070,7 +1078,7 @@ class RemindersManagementPanel extends HTMLElement {
         confirm.disabled = false;
       }
     };
-    dialog.showModal();
+    this._showDialog(dialog);
   }
 
   async _openPreferences(firstRun) {
@@ -1098,7 +1106,7 @@ class RemindersManagementPanel extends HTMLElement {
     };
     for (const button of dialog.querySelectorAll("[data-test]")) button.onclick = () => this._testDelivery(dialog, target, button.dataset.test);
     if (!this._hass.user?.is_admin) dialog.querySelector(".mobile-app-label")?.classList.add("hidden");
-    dialog.showModal();
+    this._showDialog(dialog);
     await load(target);
   }
 
