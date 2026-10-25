@@ -238,6 +238,7 @@ class RemindersManagementPanel extends HTMLElement {
       ]);
       const ungrouped = [];
       for (const item of values) {
+        if (this._linkedReminder?.id === item.id) continue;
         const section = upcomingSection(item, this._hass.config.time_zone);
         if (section && groups.has(section)) groups.get(section).push(item);
         else ungrouped.push(item);
@@ -250,7 +251,10 @@ class RemindersManagementPanel extends HTMLElement {
       for (const item of ungrouped) host.append(this._reminderCard(item));
       return;
     }
-    for (const item of values) host.append(this._view === "history" ? this._historyCard(item) : this._reminderCard(item));
+    for (const item of values) {
+      if (this._view !== "history" && item.id === this._linkedReminder?.id) continue;
+      host.append(this._view === "history" ? this._historyCard(item) : this._reminderCard(item));
+    }
   }
 
   _reminderCard(reminder) {
