@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from custom_components.reminders import websocket_registration as registration
-
 from custom_components.reminders.models import (
     Occurrence,
     OccurrenceStatus,
