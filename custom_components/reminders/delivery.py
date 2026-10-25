@@ -291,19 +291,15 @@ class DeliveryDispatcher:
         self, reminder: Reminder, policy: DeliveryPolicy
     ) -> DeliveryResult:
         """Deliver through every configured channel."""
-        succeeded: list[str] = []
-        errors: list[str] = []
-        failed: list[str] = []
-        for channel in dict.fromkeys(policy.channels):
+        channels = tuple(dict.fromkeys(policy.channels))
+
+        async def deliver_channel(
+            channel: str,
+        ) -> tuple[str, bool, tuple[str, ...]]:
             provider = self._providers.get(channel)
             if provider is None:
-                errors.append(f"{channel}: provider unavailable")
-                failed.append(channel)
-                continue
+                return channel, False, (f"{channel}: provider unavailable",)
             try:
-                # Each phone destination has its own bounded service deadline.
-                # The channel envelope must not cancel later targets merely
-                # because the first destination consumed its own timeout.
                 destination_count = (
                     len(policy.notify_targets) + len(policy.mobile_app_services)
                     if channel == CHANNEL_PHONE
@@ -322,11 +318,21 @@ class DeliveryDispatcher:
                     channel,
                     err,
                 )
-                errors.append(f"{channel}: {type(err).__name__}")
-                failed.append(channel)
-            else:
-                succeeded.append(channel)
-                if isinstance(outcome, PartialDeliveryOutcome):
-                    failed.append(channel)
-                    errors.extend(f"{channel}: {error}" for error in outcome.errors)
-        return DeliveryResult(tuple(succeeded), tuple(errors), tuple(failed))
+                return channel, False, (f"{channel}: {type(err).__name__}",)
+            if isinstance(outcome, PartialDeliveryOutcome):
+                return channel, True, tuple(
+                    f"{channel}: {error}" for error in outcome.errors
+                )
+            return channel, True, ()
+
+        # Independent channels must not be delayed by a hung phone/voice provider.
+        # Results are aggregated in configured channel order for stable history.
+        outcomes = await asyncio.gather(
+            *(deliver_channel(channel) for channel in channels)
+        )
+        succeeded = tuple(channel for channel, ok, _ in outcomes if ok)
+        errors = tuple(error for _channel, _ok, issues in outcomes for error in issues)
+        failed = tuple(
+            channel for channel, ok, issues in outcomes if not ok or issues
+        )
+        return DeliveryResult(succeeded, errors, failed)
