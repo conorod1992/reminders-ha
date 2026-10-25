@@ -442,3 +442,19 @@ async def test_native_to_classic_conversion_survives_storage_reload(
     assert restored[original.id].activation_triggers == ()
     assert restored[original.id].trigger is not None
     assert restored[original.id].trigger.trigger_id == "replacement"
+
+
+def test_native_failure_roles_do_not_expose_trigger_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _ = _manager(monkeypatch)
+    from custom_components.reminders.native_automation import _TriggerFailure
+
+    manager._native_runtime._trigger_failures[("native-timed", "activation")] = (
+        _TriggerFailure(config_key=('{"event_type":"private"}',), attempts=2)
+    )
+    manager._native_runtime._trigger_failures[("other-user", "delivery")] = (
+        _TriggerFailure(config_key=(), attempts=1)
+    )
+    assert manager.native_failure_roles("native-timed") == ("activation",)
+    assert manager.native_failure_roles("other-unknown") == ()
