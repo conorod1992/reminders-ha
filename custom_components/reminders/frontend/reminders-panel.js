@@ -883,6 +883,8 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   async _saveReminder(dialog, form, reminder) {
+    if (form._saving) return;
+    form._saving = true;
     const save = form.querySelector("[type=submit]");
     const errorHost = form.querySelector(".form-error");
     errorHost.textContent = "";
@@ -945,12 +947,17 @@ class RemindersManagementPanel extends HTMLElement {
         data.activation_type = triggered ? "trigger" : "time";
         await this._call("update", data);
       } else await this._call(triggered ? "create_triggered" : recurring ? "create_recurring" : "create", data);
+      // Close once committed. A refresh error must not imply that Save failed:
+      // retrying Create at that point would produce a duplicate reminder.
       dialog.close();
-      await this._load();
+      try { await this._load(); }
+      catch (error) { this._showError(error); }
     } catch (error) {
       errorHost.textContent = error?.message || String(error);
       errorHost.classList.remove("hidden");
       errorHost.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } finally {
+      form._saving = false;
       save.disabled = false;
     }
   }
