@@ -10,7 +10,7 @@ import {
   recurrenceSummary,
   suggestedStates,
   triggerRepeatSummary,
-  upcomingBucket,
+  upcomingSection,
   relativeTime,
   reminderNextStep,
   zonedInputParts,
@@ -209,11 +209,15 @@ class RemindersManagementPanel extends HTMLElement {
       return;
     }
     if (this._view === "upcoming") {
-      const groups = new Map([["Waiting for conditions", []], ["Overdue", []], ["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []]]);
+      const groups = new Map([
+        ["Awaiting dismissal", []], ["Action available", []],
+        ["Waiting for conditions", []], ["Overdue", []],
+        ["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []],
+      ]);
       const ungrouped = [];
       for (const item of values) {
-        if (item.status === "waiting_for_context") groups.get("Waiting for conditions").push(item);
-        else if (item.activation_type === "time" && item.due) groups.get(upcomingBucket(item.due, this._hass.config.time_zone)).push(item);
+        const section = upcomingSection(item, this._hass.config.time_zone);
+        if (section && groups.has(section)) groups.get(section).push(item);
         else ungrouped.push(item);
       }
       for (const [label, items] of groups) {
@@ -238,7 +242,8 @@ class RemindersManagementPanel extends HTMLElement {
         : reminder.status === "waiting_for_context"
           ? `Due ${this._formatDate(reminder.scheduled_due || reminder.due)}`
           : this._formatDate(reminder.due);
-    if (reminder.activation_type === "time" && reminder.due && !reminder.paused && reminder.status !== "waiting_for_context") {
+    if (reminder.activation_type === "time" && reminder.due && !reminder.paused
+        && ["pending", "waiting_for_trigger", "inactive_before_available_from"].includes(reminder.status)) {
       const relative = document.createElement("span"); relative.className = "relative"; relative.textContent = relativeTime(reminder.due, this._hass.locale?.language); when.append(relative);
     }
     const body = document.createElement("div");
