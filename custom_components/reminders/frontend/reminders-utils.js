@@ -113,6 +113,18 @@ export function zonedInputParts(value, timeZone, locale = "en-CA") {
 export function localDateTime(date, time) {
   return `${date}T${time}:00`;
 }
+/** Format an HA-local date/time without interpreting it in the browser timezone.
+ *  The backend resolves local wall times in the selected HA/recurrence zone.
+ */
+export function scheduledLocalSummary(date, time, timeZone, locale = undefined) {
+  if (!date || !time) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  const displayDate = new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium", timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+  return `on ${displayDate} at ${time} (${timeZone})`;
+}
+
 
 export function quickTimeParts(choice, timeZone, now = Date.now()) {
   const instant = new Date(now);
@@ -123,8 +135,11 @@ export function quickTimeParts(choice, timeZone, now = Date.now()) {
   const today = zonedInputParts(instant, timeZone);
   if (choice === "later") {
     const currentHour = Number(today.time.slice(0, 2));
+    // Do not silently offer 23:59 when it is already too late to choose
+    // a meaningful "later today" time. The panel disables this shortcut.
+    if (currentHour >= 23) return null;
     const hour = Math.min(23, Math.max(18, currentHour + 2));
-    return { date: today.date, time: `${String(hour).padStart(2, "0")}:${hour === 23 ? "59" : "00"}` };
+    return { date: today.date, time: `${String(hour).padStart(2, "0")}:00` };
   }
   const [year, month, day] = today.date.split("-").map(Number);
   // Advance the calendar date, not the instant: +36h can skip tomorrow
@@ -154,6 +169,21 @@ export function triggerRepeatSummary(reminder) {
   }[reminder?.repeat_policy || "once"];
 }
 
+/** Keep only unresolved occurrences with a user action available in this reminder. */
+export function outstandingOccurrences(reminder) {
+  if (!reminder) return [];
+  return (reminder.occurrence_history || []).filter((item) =>
+    item.status === "awaiting_acknowledgement"
+    || (
+      item.status === "delivered"
+      && (reminder.allow_manual_completion
+        || (reminder.external_actions?.length && !item.external_action_id))
+    )
+  ).sort((a, b) => (
+    (Date.parse(b.scheduled_due || b.due) || 0) - (Date.parse(a.scheduled_due || a.due) || 0)
+  ));
+}
+
 export function awaitingOccurrences(reminder) {
   return (reminder?.occurrence_history || []).filter(
     (item) => item.status === "awaiting_acknowledgement",
@@ -173,7 +203,19 @@ export function canSnooze(reminder) {
   return TIMED_SNOOZE_STATUSES.has(reminder.status);
 }
 
+/** Group already-delivered actionable reminders apart from not-yet-delivered overdue work. */
+export function upcomingSection(reminder, timeZone, now = Date.now()) {
+  if (reminder.status === "waiting_for_context") return "Waiting for conditions";
+  if (reminder.status === "awaiting_acknowledgement") return "Awaiting dismissal";
+  if (reminder.status === "delivered") return "Action available";
+  if (reminder.activation_type === "time" && reminder.due) {
+    return upcomingBucket(reminder.due, timeZone, now);
+  }
+  return null;
+}
+
 export function upcomingBucket(value, timeZone, now = Date.now()) {
+  if (new Date(value).getTime() < now) return "Overdue";
   const local = zonedInputParts(value, timeZone).date;
   const today = zonedInputParts(now, timeZone).date;
   const dayNumber = (text) => Date.parse(`${text}T12:00:00Z`) / 86400000;
@@ -192,6 +234,24 @@ export function relativeTime(value, locale = undefined, now = Date.now()) {
   return formatter.format(Math.round(seconds / 86400), "day");
 }
 
+/** A history row must distinguish "not attempted" from a failed send. */
+export function historyDeliverySummary(occurrence) {
+  const succeeded = occurrence?.succeeded_channels || [];
+  const failed = occurrence?.failed_channels || [];
+  if (succeeded.length) return `Delivered by ${succeeded.join(", ")}`;
+  if (failed.length || occurrence?.status === "failed") return "Delivery failed";
+  if (occurrence?.delivered_at) return "Delivered (channels not recorded)";
+  if (occurrence?.status === "completed") return "Completed without notification";
+  if (occurrence?.status === "acknowledged") return "Dismissed (delivery not recorded)";
+  if (occurrence?.status === "expired") return "Expired without notification";
+  if (occurrence?.status === "skipped") return "Skipped without notification";
+  if (occurrence?.status === "cancelled") return "Cancelled without notification";
+  if (occurrence?.status === "waiting_for_context") return "Waiting for delivery conditions";
+  if (occurrence?.status === "scheduled") return "Not yet delivered";
+  if (occurrence?.status === "delivering") return "Delivery in progress";
+  return "No notification recorded";
+}
+
 export function historyHighlights(occurrence, formatDate) {
   const result = [];
   const display = (value) => formatDate(value);
@@ -205,8 +265,66 @@ export function historyHighlights(occurrence, formatDate) {
     result.push(`Completed ${display(occurrence.completed_at)}`);
   }
   if (occurrence.next_escalation_at) result.push(`Next follow-up ${display(occurrence.next_escalation_at)}`);
+  if (occurrence.completion_reason === "home_assistant_offline") {
+    result.push("Missed while Home Assistant was offline");
+  } else if (occurrence.completion_reason === "permission_denied") {
+    result.push("Skipped because required entity access was revoked");
+  } else if (occurrence.completion_reason === "context_wait_expired") {
+    result.push("Delivery conditions were not met before expiry");
+  }
   if (occurrence.delivery_errors?.length) {
     result.push(`Delivery errors: ${occurrence.delivery_errors.join(", ")}`);
   }
   return result;
+}
+
+/** Explain the next user-visible step without changing reminder lifecycle state. */
+export function reminderNextStep(reminder, formatDate = (value) => value) {
+  if (!reminder) return "";
+  if (reminder.native_trigger_failure_roles?.length) {
+    const roles = reminder.native_trigger_failure_roles;
+    if (roles.includes("conditions")) {
+      return "Home Assistant could not evaluate the delivery conditions. The current safety fallback may deliver this reminder anyway; review its rules.";
+    }
+    return `Home Assistant could not attach ${roles.join(", ")} listeners. Retrying automatically; the affected rules may not activate meanwhile.`;
+  }
+  if (reminder.status === "waiting_for_context") {
+    const active = (reminder.occurrence_history || []).find(
+      (item) => item.id === reminder.current_occurrence_id
+    );
+    const condition = reminder.deliver_when_summary
+      || (reminder.delivery_triggers?.length ? "a Home Assistant trigger"
+        : reminder.delivery_conditions?.length ? "the selected Home Assistant conditions"
+          : "its delivery condition");
+    const expiry = active?.expires_at
+      ? ` If it is still waiting, it expires ${formatDate(active.expires_at)}.`
+      : "";
+    return `Waiting for delivery conditions: ${condition}.${expiry}`;
+  }
+  if (reminder.status === "pending"
+      && (reminder.occurrence_history || []).some((item) => item.status === "awaiting_acknowledgement")) {
+    return "An earlier occurrence still needs dismissal; the next one remains scheduled.";
+  }
+  if (reminder.status === "awaiting_acknowledgement") {
+    return "Delivered — waiting for you to dismiss this occurrence.";
+  }
+  if (reminder.status === "failed") {
+    return "Delivery failed — review the delivery error or retry the reminder.";
+  }
+  if (reminder.status === "paused") {
+    return "This series is paused and will not deliver until resumed.";
+  }
+  if (reminder.status === "delivered" && reminder.allow_manual_completion) {
+    return "Delivered — mark Done when you complete the task.";
+  }
+  return "";
+}
+
+/** Return the one occurrence that the panel can mark Done before delivery. */
+export function currentCompletableOccurrence(reminder) {
+  if (!reminder || !reminder.allow_manual_completion || reminder.paused
+      || reminder.activation_type !== "time" || reminder.status !== "pending") return null;
+  return (reminder.occurrence_history || []).find(
+    (item) => item.id === reminder.current_occurrence_id && item.status === "scheduled"
+  ) || null;
 }

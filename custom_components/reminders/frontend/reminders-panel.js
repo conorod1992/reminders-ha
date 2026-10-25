@@ -1,16 +1,20 @@
 import {
   WEEKDAYS,
   acknowledgementSummary,
-  awaitingOccurrences,
+  currentCompletableOccurrence,
+  outstandingOccurrences,
   deliverySummary,
+  historyDeliverySummary,
   historyHighlights,
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
   suggestedStates,
   triggerRepeatSummary,
-  upcomingBucket,
+  upcomingSection,
   relativeTime,
+  reminderNextStep,
+  scheduledLocalSummary,
   zonedInputParts,
 } from "./reminders-utils.js";
 
@@ -34,6 +38,8 @@ class RemindersManagementPanel extends HTMLElement {
     this._loading = true;
     this._started = false;
     this._preferences = null;
+    this._linkedReminderId = new URLSearchParams(globalThis.location?.search || "").get("reminder_id");
+    this._linkedReminder = null;
   }
 
   set hass(value) {
@@ -110,18 +116,22 @@ class RemindersManagementPanel extends HTMLElement {
         button{border:0;border-radius:8px;padding:10px 15px;background:var(--primary-color);color:var(--text-primary-color,#fff);font:inherit;cursor:pointer}button.secondary,.actions button,.quick button{background:transparent;color:var(--primary-color);border:1px solid var(--divider-color)}button.danger{color:var(--error-color);background:transparent;border:1px solid var(--error-color)}button:disabled{opacity:.55;cursor:wait}
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
         select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}.picker-host,.picker-host ha-entity-picker,.picker-host select{display:block;width:100%}
-        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}
+        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}.next-step{margin-top:9px;font-size:13px;line-height:1.4;color:var(--primary-text-color);border-left:3px solid var(--warning-color);padding-left:10px}.linked-reminder-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.outstanding-occurrences{margin-top:12px;padding-top:8px;border-top:1px solid var(--divider-color)}.outstanding-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:8px}.outstanding-row .actions{justify-content:flex-start}
         .overflow{position:relative}.overflow>summary{list-style:none;margin:0;padding:7px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-color);font-size:20px;line-height:1;cursor:pointer}.overflow>summary::-webkit-details-marker{display:none}.overflow-menu{position:absolute;right:0;z-index:2;min-width:170px;display:grid;padding:6px;background:var(--card-background-color);border-radius:9px;box-shadow:0 5px 20px rgba(0,0,0,.3)}.overflow-menu button{border:0;text-align:left;color:var(--primary-text-color);background:transparent}.overflow-menu button.danger{color:var(--error-color)}.behavior-summary{padding:14px;border-radius:9px;background:var(--secondary-background-color)}.behavior-summary strong{display:block;margin-bottom:6px}.behavior-summary ul{margin:0;padding-left:20px}.expiry-custom.hidden{display:none}
+        .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
         .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
         dialog{width:min(680px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;border:0;border-radius:12px;padding:0;background:var(--card-background-color);color:var(--primary-text-color);box-shadow:0 8px 28px rgba(0,0,0,.35)}dialog::backdrop{background:rgba(0,0,0,.45)}.dialog{padding:22px}.dialog h2{margin:0 0 8px}.form{display:grid;gap:16px}.dialog-actions{justify-content:flex-end;margin-top:20px}.hidden{display:none!important}details{border-top:1px solid var(--divider-color);padding-top:12px}summary{cursor:pointer;color:var(--primary-color);margin-bottom:14px}.advanced{display:grid;gap:16px}.quick button.selected{background:var(--primary-color);color:#fff}.preview{padding:10px;border-radius:8px;background:var(--secondary-background-color)}
         .activation-panel,#recurrence{display:grid;gap:14px}.repeat-toggle{margin-top:2px}.notes textarea{min-height:64px}.advanced{gap:10px}.option-group{border:1px solid var(--divider-color);border-radius:9px;padding:0}.option-group>summary{display:grid;gap:2px;padding:12px 14px;margin:0;color:var(--primary-text-color);font-weight:500}.option-group>summary .hint{margin:0;font-size:12px;font-weight:400}.option-content{display:grid;gap:16px;padding:4px 14px 14px}.option-content h3,.context-editor h3{font-size:15px;margin:4px 0 0}.trigger-fields,.context-trigger-fields,.context-editor{display:grid;gap:12px}.expert-note{padding:9px 10px;border-radius:7px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-size:13px}.hint{font-size:13px}
+        :is(button,input,select,textarea,summary):focus-visible{outline:3px solid var(--primary-color);outline-offset:3px}
+        @media(max-width:420px){.page{padding:12px}.dialog{padding:14px}.top{align-items:stretch}.top h1{width:100%}.top button{flex:1 1 auto}.dialog-actions button{flex:1 1 100%}.card{padding:12px}.actions button{min-height:40px}}
         @media(max-width:720px){.page{padding:16px}.card{grid-template-columns:1fr;gap:8px}.actions{justify-content:flex-start;border-top:1px solid var(--divider-color);padding-top:8px}.fieldrow{grid-template-columns:1fr}.toolbar,.scope{width:100%}.scope select{flex:1}}
       </style>
       <main class="page">
         <div class="top"><h1>Reminders</h1><button id="prefs" class="secondary">Preferences</button><button id="add">+ Add reminder</button></div>
         <div id="error" class="error" role="alert"></div>
         <div id="filters" class="filters"></div>
-        <section id="list" class="list" aria-live="polite"></section>
+        <div id="list-status" class="sr-only" role="status" aria-live="polite"></div>
+        <section id="list" class="list"></section>
       </main><dialog id="dialog"></dialog>`;
     this.shadowRoot.querySelector("#add").onclick = () => this._openReminderForm();
     this.shadowRoot.querySelector("#prefs").onclick = () => this._openPreferences(false);
@@ -199,7 +209,21 @@ class RemindersManagementPanel extends HTMLElement {
     host.replaceChildren();
     if (this._loading) { host.innerHTML = '<div class="loading">Loading...</div>'; return; }
     const values = this._view === "history" ? this._history : this._items;
+    if (this._linkedReminder) {
+      const heading = document.createElement("div");
+      heading.className = "linked-reminder-heading";
+      const title = document.createElement("strong");
+      title.textContent = "Opened from notification";
+      const close = this._action("Close", () => {
+        this._linkedReminder = null;
+        this._linkedReminderId = null;
+        this._renderList();
+      }, "secondary");
+      heading.append(title, close);
+      host.append(heading, this._reminderCard(this._linkedReminder));
+    }
     if (!values.length) {
+      if (this._linkedReminder) return;
       const empty = document.createElement("div");
       empty.className = "empty";
       empty.innerHTML = `<p>${this._query ? "No matching reminders" : this._view === "history" ? "No reminder history yet" : "No reminders here"}</p>`;
@@ -207,10 +231,16 @@ class RemindersManagementPanel extends HTMLElement {
       return;
     }
     if (this._view === "upcoming") {
-      const groups = new Map([["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []]]);
+      const groups = new Map([
+        ["Awaiting dismissal", []], ["Action available", []],
+        ["Waiting for conditions", []], ["Overdue", []],
+        ["Today", []], ["Tomorrow", []], ["This week", []], ["Later", []],
+      ]);
       const ungrouped = [];
       for (const item of values) {
-        if (item.activation_type === "time" && item.due) groups.get(upcomingBucket(item.due, this._hass.config.time_zone)).push(item);
+        if (this._linkedReminder?.id === item.id) continue;
+        const section = upcomingSection(item, this._hass.config.time_zone);
+        if (section && groups.has(section)) groups.get(section).push(item);
         else ungrouped.push(item);
       }
       for (const [label, items] of groups) {
@@ -221,7 +251,10 @@ class RemindersManagementPanel extends HTMLElement {
       for (const item of ungrouped) host.append(this._reminderCard(item));
       return;
     }
-    for (const item of values) host.append(this._view === "history" ? this._historyCard(item) : this._reminderCard(item));
+    for (const item of values) {
+      if (this._view !== "history" && item.id === this._linkedReminder?.id) continue;
+      host.append(this._view === "history" ? this._historyCard(item) : this._reminderCard(item));
+    }
   }
 
   _reminderCard(reminder) {
@@ -231,8 +264,12 @@ class RemindersManagementPanel extends HTMLElement {
     when.className = "when";
     when.textContent = reminder.activation_type === "trigger"
       ? (reminder.trigger_summary || "Waiting for trigger")
-      : reminder.paused ? "Series paused" : this._formatDate(reminder.due);
-    if (reminder.activation_type === "time" && reminder.due && !reminder.paused) {
+      : reminder.paused ? "Series paused"
+        : reminder.status === "waiting_for_context"
+          ? `Due ${this._formatDate(reminder.scheduled_due || reminder.due)}`
+          : this._formatDate(reminder.due);
+    if (reminder.activation_type === "time" && reminder.due && !reminder.paused
+        && ["pending", "waiting_for_trigger", "inactive_before_available_from"].includes(reminder.status)) {
       const relative = document.createElement("span"); relative.className = "relative"; relative.textContent = relativeTime(reminder.due, this._hass.locale?.language); when.append(relative);
     }
     const body = document.createElement("div");
@@ -257,25 +294,42 @@ class RemindersManagementPanel extends HTMLElement {
     if (reminder.managed_externally && reminder.source) values.push(`Managed by ${reminder.source}`);
     meta.textContent = values.join(" · ");
     body.append(meta);
+    const nextStep = reminderNextStep(reminder, (value) => this._formatDate(value));
+    if (nextStep) {
+      const explanation = document.createElement("div");
+      explanation.className = "next-step";
+      explanation.textContent = nextStep;
+      body.append(explanation);
+    }
     const actions = document.createElement("div");
     actions.className = "actions";
-    const awaiting = awaitingOccurrences(reminder);
-    const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
-    const upcomingTask = (reminder.occurrence_history || []).find(
-      (item) => item.id === reminder.current_occurrence_id && item.status === "scheduled"
-    );
-    if (upcomingTask && reminder.status === "pending" && !reminder.paused
-        && reminder.activation_type === "time" && reminder.allow_manual_completion) {
+    const outstanding = outstandingOccurrences(reminder);
+    const single = outstanding.length === 1 ? outstanding[0] : null;
+    const upcomingTask = currentCompletableOccurrence(reminder);
+    if (upcomingTask) {
       actions.append(this._action("Done now", () => this._complete(reminder, upcomingTask.id)));
     }
-    if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
-    if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
+    // Generic "Done" and "Dismiss" must never silently select one of several
+    // unresolved recurring occurrences. Show each occurrence with its own date.
+    if (single && reminder.allow_manual_completion) {
+      actions.append(this._action("Done", () => this._complete(reminder, single.id)));
+    }
+    if (single && !single.external_action_id) {
+      for (const item of reminder.external_actions || []) {
+        actions.append(this._action(item.label, () => this._externalAction(reminder, single.id, item.id)));
+      }
+    }
+    if (outstanding.length > 1) {
+      body.append(this._outstandingDetails(reminder, outstanding));
+    }
     if (reminder.status === "failed" && reminder.activation_type === "time"
         && !reminder.recurring && !reminder.managed_externally && !reminder.paused) {
       actions.append(this._action("Retry now", () => this._retryFailed(reminder)));
     }
     if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder)));
-    if (awaiting.length) actions.append(this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
+    if (single?.status === "awaiting_acknowledgement") {
+      actions.append(this._action("Dismiss", () => this._acknowledge(reminder, single.id)));
+    }
     const overflow = document.createElement("details"); overflow.className = "overflow"; overflow.innerHTML = '<summary aria-label="More actions">⋮</summary><div class="overflow-menu"></div>';
     const menu = overflow.querySelector(".overflow-menu");
     if (!reminder.managed_externally) menu.append(this._action("Edit", () => this._openReminderForm(reminder)));
@@ -288,6 +342,46 @@ class RemindersManagementPanel extends HTMLElement {
     actions.append(overflow);
     card.append(when, body, actions);
     return card;
+  }
+
+  _outstandingDetails(reminder, occurrences) {
+    const details = document.createElement("details");
+    details.className = "outstanding-occurrences";
+    const heading = document.createElement("summary");
+    heading.textContent = `${occurrences.length} outstanding occurrences`;
+    details.append(heading);
+    for (const occurrence of occurrences.slice(0, 5)) {
+      const row = document.createElement("div");
+      row.className = "outstanding-row";
+      const when = document.createElement("span");
+      when.textContent = this._formatDate(occurrence.scheduled_due || occurrence.due);
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      if (reminder.allow_manual_completion) {
+        actions.append(this._action("Done", () => this._complete(reminder, occurrence.id)));
+      }
+      if (occurrence.status === "awaiting_acknowledgement") {
+        actions.append(this._action("Dismiss", () => this._acknowledge(reminder, occurrence.id)));
+      }
+      if (!occurrence.external_action_id) {
+        for (const item of reminder.external_actions || []) {
+          actions.append(this._action(item.label, () => this._externalAction(reminder, occurrence.id, item.id)));
+        }
+      }
+      row.append(when, actions);
+      details.append(row);
+    }
+    if (occurrences.length > 5) {
+      const more = document.createElement("div");
+      more.className = "hint";
+      more.textContent = "Older occurrences can be managed in History.";
+      const button = this._action("View History", () => {
+        this._view = "history";
+        this._load();
+      }, "secondary");
+      details.append(more, button);
+    }
+    return details;
   }
 
   _historyCard(row) {
@@ -306,7 +400,7 @@ class RemindersManagementPanel extends HTMLElement {
     status.textContent = occurrence.status === "acknowledged" ? "dismissed" : occurrence.status === "awaiting_acknowledgement" ? "awaiting dismissal" : occurrence.status.replaceAll("_", " ");
     const details = document.createElement("div");
     details.className = "meta";
-    const channelText = occurrence.succeeded_channels.length ? `Delivered by ${occurrence.succeeded_channels.join(", ")}` : "No channel succeeded";
+    const channelText = historyDeliverySummary(occurrence);
     const extras = [channelText];
     if (occurrence.failed_channels.length) extras.push(`Failed: ${occurrence.failed_channels.join(", ")}`);
     if (occurrence.suppressed_channels.length) extras.push(`Quiet hours suppressed: ${occurrence.suppressed_channels.join(", ")}`);
@@ -424,6 +518,7 @@ class RemindersManagementPanel extends HTMLElement {
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
       </form></div>`;
     const form = dialog.querySelector("form");
+    form._editingReminder = reminder;
     form.dataset.recurring = String(recurring);
     form.elements.title.value = source?.title || "";
     form.elements.message.value = source?.message || "";
@@ -518,14 +613,31 @@ class RemindersManagementPanel extends HTMLElement {
     const mobileApps = this._mobileAppServiceSelect(policy?.mobile_app_services || []);
     mobileApps.name = "mobile_app_services";
     dialog.querySelector(".mobile-app-label").append(mobileApps);
+    if (!this._hass.user?.is_admin) {
+      // Explicit mobile_app services have no HA per-user authorization API.
+      // Do not offer controls that the backend must reject for non-admins.
+      dialog.querySelector(".mobile-app-label").classList.add("hidden");
+      mobileApps.disabled = true;
+    }
     const voice = this._entitySelect("assist_satellite", policy?.voice_targets || []);
     voice.name = "voice_targets";
     dialog.querySelector(".voice-label").append(voice);
-    for (const button of dialog.querySelectorAll("[data-quick]")) button.onclick = () => {
-      const parts = quickTimeParts(button.dataset.quick, this._hass.config.time_zone);
-      form.elements.date.value = parts.date; form.elements.time.value = parts.time;
-      for (const other of dialog.querySelectorAll("[data-quick]")) other.classList.toggle("selected", other === button);
-    };
+    for (const button of dialog.querySelectorAll("[data-quick]")) {
+      if (button.dataset.quick === "later" && !quickTimeParts("later", this._hass.config.time_zone)) {
+        button.disabled = true;
+        button.title = "No later-today time is available; choose a date or tomorrow morning.";
+      }
+      button.onclick = () => {
+        const parts = quickTimeParts(button.dataset.quick, this._hass.config.time_zone);
+        if (!parts) {
+          button.disabled = true;
+          button.title = "No later-today time is available; choose a date or tomorrow morning.";
+          return;
+        }
+        form.elements.date.value = parts.date; form.elements.time.value = parts.time;
+        for (const other of dialog.querySelectorAll("[data-quick]")) other.classList.toggle("selected", other === button);
+      };
+    }
     for (const button of dialog.querySelectorAll("[data-days]")) button.onclick = () => {
       const selected = button.dataset.days === "weekday" ? WEEKDAYS.slice(0, 5) : WEEKDAYS.slice(5);
       for (const input of form.querySelectorAll("[name=weekday]")) input.checked = selected.includes(input.value);
@@ -553,10 +665,56 @@ class RemindersManagementPanel extends HTMLElement {
     form.addEventListener("input", updateSummary);
     form.addEventListener("change", updateSummary);
     updateSummary();
-    dialog.querySelector(".cancel").onclick = () => dialog.close();
+    // Respect unsaved edits even when the user presses Escape or uses Cancel.
+    form._initialSnapshot = this._formSnapshot(form);
+    const closeForm = () => {
+      if (form._saving) return;
+      if (this._formSnapshot(form) !== form._initialSnapshot
+          && !globalThis.confirm("Discard unsaved reminder changes?")) return;
+      dialog.close();
+    };
+    dialog.querySelector(".cancel").onclick = closeForm;
+    const onCancel = (event) => {
+      if (form._saving) {
+        event.preventDefault();
+        return;
+      }
+      if (this._formSnapshot(form) !== form._initialSnapshot
+          && !globalThis.confirm("Discard unsaved reminder changes?")) {
+        event.preventDefault();
+      }
+    };
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", () => {
+      dialog.removeEventListener("cancel", onCancel);
+    }, { once: true });
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
-    dialog.showModal();
+    this._showDialog(dialog);
     form.elements.title.focus();
+  }
+
+  _showDialog(dialog) {
+    const opener = this.shadowRoot?.activeElement;
+    const label = dialog.querySelector?.("h2")?.textContent;
+    if (label) dialog.setAttribute?.("aria-label", label);
+    dialog.addEventListener?.("close", () => opener?.focus?.(), { once: true });
+    dialog.showModal();
+  }
+
+  _formSnapshot(form) {
+    const data = [];
+    for (const input of form.querySelectorAll?.("input,select,textarea") || []) {
+      if (input.disabled || input.type === "hidden") continue;
+      const value = input.type === "checkbox" || input.type === "radio"
+        ? Boolean(input.checked)
+        : input.multiple
+          ? [...input.selectedOptions].map((option) => option.value)
+          : input.value;
+      data.push([input.name || input.id, value]);
+    }
+    // Native HA selector values are stored separately from ordinary inputs.
+    if (form._nativeRules) data.push(["nativeRules", form._nativeRules]);
+    return JSON.stringify(data);
   }
 
   _syncRecurrence(form, active) {
@@ -612,7 +770,7 @@ class RemindersManagementPanel extends HTMLElement {
     dialog.querySelector("#custom-delivery").classList.toggle("hidden", !custom);
     const selected = [...form.querySelectorAll("[name=channel]:checked")].map((input) => input.value);
     dialog.querySelector(".notify-label").classList.toggle("hidden", !selected.includes("phone"));
-    dialog.querySelector(".mobile-app-label").classList.toggle("hidden", !selected.includes("phone"));
+    dialog.querySelector(".mobile-app-label").classList.toggle("hidden", !this._hass.user?.is_admin || !selected.includes("phone"));
     dialog.querySelector(".voice-label").classList.toggle("hidden", !selected.includes("voice"));
   }
 
@@ -757,8 +915,20 @@ class RemindersManagementPanel extends HTMLElement {
     const recurring = !triggered && Boolean(form.elements.repeat?.checked || form.dataset.recurring === "true");
     const lines = [];
     if (triggered) lines.push(`activate when the selected ${form.elements.trigger_type.value.replaceAll("_", " ")} condition happens`);
-    else if (form.elements.date.value && form.elements.time.value) lines.push(`remind you ${this._formatDate(localDateTime(form.elements.date.value, form.elements.time.value))}`);
+    else if (form.elements.date.value && form.elements.time.value) {
+      const timezone = recurring ? (form.elements.timezone.value || this._hass.config.time_zone) : this._hass.config.time_zone;
+      lines.push(`remind you ${scheduledLocalSummary(form.elements.date.value, form.elements.time.value, timezone, this._hass.locale?.language)}`);
+    }
     if (recurring) {
+      if (form._editingReminder?.recurrence) {
+        const selected = this._recurrenceData(form);
+        selected.end_date = form.elements.end_date.value || null;
+        selected.occurrence_count = form.elements.occurrence_count.value
+          ? Number(form.elements.occurrence_count.value) : null;
+        if (this._recurrenceChanged(selected, form._editingReminder.recurrence)) {
+          lines.push("changing the repeat schedule will recalculate the next occurrence; previous history is kept");
+        }
+      }
       const frequency = form.elements.frequency.value;
       const interval = Number(form.elements.interval.value || 1);
       lines.push(interval === 1 ? `repeat ${frequency}` : `repeat every ${interval} ${frequency.replace("daily", "days").replace("weekly", "weeks").replace("monthly", "months").replace("yearly", "years")}`);
@@ -773,6 +943,8 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   async _saveReminder(dialog, form, reminder) {
+    if (form._saving) return;
+    form._saving = true;
     const save = form.querySelector("[type=submit]");
     const errorHost = form.querySelector(".form-error");
     errorHost.textContent = "";
@@ -835,12 +1007,17 @@ class RemindersManagementPanel extends HTMLElement {
         data.activation_type = triggered ? "trigger" : "time";
         await this._call("update", data);
       } else await this._call(triggered ? "create_triggered" : recurring ? "create_recurring" : "create", data);
+      // Close once committed. A refresh error must not imply that Save failed:
+      // retrying Create at that point would produce a duplicate reminder.
       dialog.close();
-      await this._load();
+      try { await this._load(); }
+      catch (error) { this._showError(error); }
     } catch (error) {
       errorHost.textContent = error?.message || String(error);
       errorHost.classList.remove("hidden");
       errorHost.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } finally {
+      form._saving = false;
       save.disabled = false;
     }
   }
@@ -864,7 +1041,7 @@ class RemindersManagementPanel extends HTMLElement {
       dialog.querySelector(".tomorrow").onclick = () => { const tomorrow = quickTimeParts("tomorrow", this._hass.config.time_zone); this._doSnooze(dialog, reminder, { due: localDateTime(tomorrow.date, tomorrow.time) }); };
       dialog.querySelector(".custom").onclick = () => this._doSnooze(dialog, reminder, { due: localDateTime(inputs[0].value, inputs[1].value) });
     }
-    dialog.showModal();
+    this._showDialog(dialog);
   }
 
   async _doSnooze(dialog, reminder, data) {
@@ -907,20 +1084,38 @@ class RemindersManagementPanel extends HTMLElement {
       try { await this._call("delete", { reminder_id: reminder.id }); dialog.close(); await this._load(); }
       catch (error) { this._showError(error); }
     };
-    dialog.showModal();
+    this._showDialog(dialog);
   }
 
   async _seriesAction(reminder, action) {
-    try { await this._call(action, { reminder_id: reminder.id }); await this._load(); }
+    try {
+      await this._call(action, { reminder_id: reminder.id });
+    } catch (error) {
+      this._showError(error);
+      return false;
+    }
+    // The action is committed. A subsequent refresh failure must not invite
+    // another click that could skip an additional occurrence.
+    try { await this._load(); }
     catch (error) { this._showError(error); }
+    return true;
   }
 
   _confirmSkip(reminder) {
     const dialog = this.shadowRoot.querySelector("#dialog");
     dialog.innerHTML = `<div class="dialog"><h2>Skip next occurrence?</h2><p>Skip <strong>${this._formatDate(reminder.scheduled_due || reminder.due)}</strong>?</p><p class="hint">The series will continue normally from the following scheduled occurrence.</p><div class="dialog-actions"><button class="secondary cancel">Cancel</button><button class="confirm">Skip next</button></div></div>`;
     dialog.querySelector(".cancel").onclick = () => dialog.close();
-    dialog.querySelector(".confirm").onclick = async () => { await this._seriesAction(reminder, "skip_next"); dialog.close(); };
-    dialog.showModal();
+    const confirm = dialog.querySelector(".confirm");
+    confirm.onclick = async () => {
+      if (confirm.disabled) return;
+      confirm.disabled = true;
+      try {
+        if (await this._seriesAction(reminder, "skip_next")) dialog.close();
+      } finally {
+        confirm.disabled = false;
+      }
+    };
+    this._showDialog(dialog);
   }
 
   async _openPreferences(firstRun) {
@@ -947,7 +1142,8 @@ class RemindersManagementPanel extends HTMLElement {
       if (await this._savePreferences(dialog, target, true)) dialog.close();
     };
     for (const button of dialog.querySelectorAll("[data-test]")) button.onclick = () => this._testDelivery(dialog, target, button.dataset.test);
-    dialog.showModal();
+    if (!this._hass.user?.is_admin) dialog.querySelector(".mobile-app-label")?.classList.add("hidden");
+    this._showDialog(dialog);
     await load(target);
   }
 
@@ -961,8 +1157,11 @@ class RemindersManagementPanel extends HTMLElement {
       const old = dialog.querySelector(`${selector} select`); if (old) old.remove();
       dialog.querySelector(selector).append(this._entitySelect(domain, selected));
     }
-    const oldMobile = dialog.querySelector(".mobile-app-label select"); if (oldMobile) oldMobile.remove();
-    dialog.querySelector(".mobile-app-label").append(this._mobileAppServiceSelect(prefs.default_delivery_policy.mobile_app_services || []));
+    const mobileLabel = dialog.querySelector(".mobile-app-label");
+    if (mobileLabel && this._hass.user?.is_admin) {
+      const oldMobile = mobileLabel.querySelector("select"); if (oldMobile) oldMobile.remove();
+      mobileLabel.append(this._mobileAppServiceSelect(prefs.default_delivery_policy.mobile_app_services || []));
+    }
     dialog.querySelector("[name=require_acknowledgement]").checked = prefs.require_acknowledgement;
     dialog.querySelector("[name=quiet_enabled]").checked = prefs.quiet_hours_enabled;
     dialog.querySelector("[name=quiet_start]").value = prefs.quiet_hours_start;
@@ -976,7 +1175,7 @@ class RemindersManagementPanel extends HTMLElement {
       user_id: target,
       channels: [...dialog.querySelectorAll(".channels input:checked")].map((input) => input.value),
       notify_targets: this._selected(dialog.querySelector(".notify-label select")),
-      mobile_app_services: this._selected(dialog.querySelector(".mobile-app-label select")),
+      mobile_app_services: this._hass?.user?.is_admin ? this._selected(dialog.querySelector(".mobile-app-label select")) : [],
       voice_targets: this._selected(dialog.querySelector(".voice-label select")),
       require_acknowledgement: dialog.querySelector("[name=require_acknowledgement]").checked,
       configured: true,
@@ -1013,8 +1212,14 @@ class RemindersManagementPanel extends HTMLElement {
     const resultHost = dialog.querySelector(".test-result"); resultHost.textContent = "Sending test...";
     try {
       const result = await this._call("test_delivery", payload);
-      resultHost.className = result.failed_channels.length ? "test-result hint" : "test-result success";
-      resultHost.textContent = result.failed_channels.length ? `Failed: ${result.failed_channels.join(", ")}` : `Success: ${result.succeeded_channels.join(", ")}`;
+      const succeeded = result.succeeded_channels || [];
+      const failed = result.failed_channels || [];
+      resultHost.className = failed.length ? "test-result hint" : "test-result success";
+      resultHost.textContent = [
+        succeeded.length ? `Succeeded: ${succeeded.join(", ")}` : "",
+        failed.length ? `Failed: ${failed.join(", ")}` : "",
+        !succeeded.length && !failed.length ? "No delivery channels were attempted." : "",
+      ].filter(Boolean).join(" · ");
     } catch (error) { resultHost.className = "test-result hint"; resultHost.textContent = error.message || String(error); }
   }
 

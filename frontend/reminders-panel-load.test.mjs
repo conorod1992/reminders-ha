@@ -244,3 +244,104 @@ test("history outcome selector survives the generic view filter cleanup", () => 
   panel._renderFilters();
   assert.ok(toolbar.querySelector(".history-outcome-wrap"));
 });
+
+test("Upcoming distinguishes actionable deliveries, context waits and overdue reminders", () => {
+  const originalDocument = globalThis.document;
+  try {
+    const createElement = (tag) => ({
+      tag,
+      className: "",
+      textContent: "",
+      children: [],
+      append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; },
+    });
+    globalThis.document = { createElement };
+    const host = createElement("section");
+    const panel = makePanel();
+    delete panel._renderList;
+    panel._view = "upcoming";
+    panel._hass = { config: { time_zone: "UTC" } };
+    panel._listTotal = 4;
+    panel._items = [
+      { id: "waiting", status: "waiting_for_context", activation_type: "time", due: "2026-01-01T12:00:00Z" },
+      { id: "overdue", status: "pending", activation_type: "time", due: "2026-01-02T12:00:00Z" },
+      { id: "dismiss", status: "awaiting_acknowledgement", activation_type: "time", due: "2026-01-03T12:00:00Z" },
+      { id: "done", status: "delivered", activation_type: "time", due: "2026-01-04T12:00:00Z" },
+    ];
+    panel._reminderCard = (reminder) => ({ tag: "card", id: reminder.id });
+    panel.shadowRoot = {
+      querySelector(selector) { return selector === "#list" ? host : null; },
+    };
+    panel._renderList();
+    assert.deepEqual(
+      host.children.filter((node) => node.tag === "h2").map((node) => node.textContent),
+      ["Awaiting dismissal", "Action available", "Waiting for conditions", "Overdue"],
+    );
+    assert.deepEqual(
+      host.children.filter((node) => node.tag === "card").map((node) => node.id),
+      ["dismiss", "done", "waiting", "overdue"],
+    );
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test("notification deep links fetch only the authorized reminder detail", async () => {
+  const panel = makePanel();
+  panel._linkedReminderId = "target-reminder";
+  const actions = [];
+  panel._call = async (name, payload) => {
+    actions.push([name, payload]);
+    if (name === "list") return { reminders: [], total: 0 };
+    if (name === "get") return { reminder: { id: "target-reminder", title: "Authorized" } };
+    throw new Error("Unexpected WebSocket call");
+  };
+  await panel._load();
+  assert.equal(panel._linkedReminder.id, "target-reminder");
+  assert.equal(actions[1][0], "get");
+  assert.deepEqual(actions[1][1], { reminder_id: "target-reminder" });
+});
+
+test("an unauthorized or deleted deep-linked reminder is never shown", async () => {
+  const panel = makePanel();
+  panel._linkedReminderId = "unavailable";
+  panel._linkedReminder = { id: "stale", title: "Stale private data" };
+  panel._call = async (name) => {
+    if (name === "list") return { reminders: [], total: 0 };
+    throw new Error("Not authorized");
+  };
+  await panel._load();
+  assert.equal(panel._linkedReminder, null);
+});
+
+test("notification-linked reminder appears even when omitted from the current page", () => {
+  const previousDocument = globalThis.document;
+  try {
+    const element = (tag) => ({
+      tag, children: [], className: "", textContent: "",
+      append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; },
+    });
+    globalThis.document = { createElement: element };
+    const list = element("section");
+    const panel = makePanel();
+    delete panel._renderList;
+    panel._loading = false;
+    panel._view = "upcoming";
+    panel._linkedReminder = { id: "linked", title: "Open me" };
+    panel._linkedReminderId = "linked";
+    panel._items = [];
+    panel._reminderCard = (item) => ({ tag: "reminder-card", id: item.id });
+    panel.shadowRoot = { querySelector: (selector) => selector === "#list" ? list : null };
+    panel._renderList();
+    assert.equal(list.children[1].id, "linked");
+    const heading = list.children[0];
+    assert.equal(heading.children[0].textContent, "Opened from notification");
+    heading.children[1].onclick();
+    assert.equal(panel._linkedReminder, null);
+    assert.equal(panel._linkedReminderId, null);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});

@@ -25,6 +25,7 @@ from custom_components.reminders.recurrence import (
     RecurrenceFrequency,
     RecurrenceRule,
     Weekday,
+    next_due_after,
 )
 from custom_components.reminders.storage import serialize_storage
 from custom_components.reminders.triggers.models import TriggerDefinition
@@ -734,7 +735,9 @@ async def test_recurring_expiry_window_edit_advances_from_anchor(
     assert advanced.occurrence_history[0].status is OccurrenceStatus.EXPIRED
     assert advanced.last_occurrence_due == due
     assert advanced.last_occurrence_status is ReminderStatus.EXPIRED
-    assert advanced.due == due + timedelta(days=1)
+    # Daily recurrence follows Europe/Dublin wall time, not a fixed 24h UTC jump.
+    # This assertion must also hold over the October DST transition.
+    assert advanced.due == next_due_after(reminder.recurrence, due)
     assert not advanced.trigger_duration_waits
 
 
