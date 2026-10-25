@@ -2895,8 +2895,21 @@ class ReminderManager:
                     await self._async_persist_state(candidate, self._users)
             if waiting:
                 await self._trigger_registry.async_sync(self._reminders.values())
-            for claimed in due:
-                await self._async_deliver_claimed(claimed.id, effective_now)
+            # The claims were durably persisted above. Dispatch distinct
+            # occurrences concurrently so a slow provider cannot delay every
+            # other due reminder. Keep the fan-out bounded to avoid flooding HA.
+            limiter = asyncio.Semaphore(4)
+
+            async def deliver_due(reminder_id: str) -> None:
+                async with limiter:
+                    try:
+                        await self._async_deliver_claimed(reminder_id, effective_now)
+                    except Exception:
+                        _LOGGER.exception(
+                            "Unable to finalize due reminder %s", reminder_id
+                        )
+
+            await asyncio.gather(*(deliver_due(item.id) for item in due))
             for reminder, occurrence in (*missed, *expired):
                 self._fire_lifecycle_event(
                     self._reminders.get(reminder.id, reminder),
