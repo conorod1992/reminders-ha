@@ -119,6 +119,8 @@ if (proto && !proto.__frontendPolishInstalled) {
     if (!tabs || !toolbar) return;
 
     tabs.classList.add("primary-tabs");
+    tabs.setAttribute?.("role", "tablist");
+    tabs.setAttribute?.("aria-label", "Reminder views");
     tabs.replaceChildren();
     const primary = [
       ["attention", "Needs attention"],
@@ -132,9 +134,24 @@ if (proto && !proto.__frontendPolishInstalled) {
       button.className = `tab${active ? " active" : ""}`;
       button.dataset.view = view;
       button.textContent = label;
+      button.setAttribute?.("role", "tab");
+      button.setAttribute?.("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
       button.onclick = () => {
         this._view = view;
         this._load();
+      };
+      button.onkeydown = (event) => {
+        const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+        if (!keys.includes(event.key)) return;
+        const buttons = [...tabs.querySelectorAll('[role="tab"]')];
+        const current = buttons.indexOf(button);
+        const next = event.key === "Home" ? 0
+          : event.key === "End" ? buttons.length - 1
+            : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+        event.preventDefault();
+        buttons[next]?.focus();
+        buttons[next]?.click();
       };
       tabs.append(button);
     }
