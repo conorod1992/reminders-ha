@@ -93,6 +93,18 @@ if (proto && !proto.__frontendPolishInstalled) {
           ? result.total
           : this._items.length;
       }
+      if (this._linkedReminderId && !appendHistory && !appendList) {
+        const requestedId = this._linkedReminderId;
+        try {
+          const result = await this._call("get", { reminder_id: requestedId });
+          if (requestId !== this._loadRequestId) return true;
+          if (this._linkedReminderId === requestedId) this._linkedReminder = result.reminder || null;
+        } catch {
+          // The detail API applies HA authorization. Never display cached
+          // reminder data after an unsuccessful authorized fetch.
+          this._linkedReminder = null;
+        }
+      }
       const total = historyView ? this._historyTotal : this._listTotal;
       const announcement = `${total} ${historyView ? "history entries" : "reminders"} match the current view.`;
       if (this._lastListAnnouncement !== announcement || this._lastAnnouncementFilter !== filterKey) {
