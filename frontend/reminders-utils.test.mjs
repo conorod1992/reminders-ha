@@ -11,6 +11,7 @@ import {
   quickTimeParts,
   recurrenceSummary,
   reminderNextStep,
+  scheduledLocalSummary,
   suggestedStates,
   triggerRepeatSummary,
   upcomingBucket,
@@ -195,4 +196,19 @@ test("upcoming sections do not mislabel delivered action-required reminders as o
   assert.equal(upcomingSection({
     activation_type: "trigger", status: "waiting_for_trigger", due: null,
   }, timeZone, now), null);
+});
+
+test("schedule preview preserves HA wall time independent of browser timezone", () => {
+  assert.match(
+    scheduledLocalSummary("2026-10-25", "09:00", "Europe/Dublin", "en-GB"),
+    /^on 25 Oct 2026 at 09:00 \\(Europe\\/Dublin\\)$/,
+  );
+  assert.match(
+    scheduledLocalSummary("2026-03-29", "02:30", "Europe/Dublin", "en-GB"),
+    /02:30 \\(Europe\\/Dublin\\)$/,
+  );
+  assert.match(
+    scheduledLocalSummary("2026-11-01", "14:00", "America/New_York", "en-US"),
+    /14:00 \\(America\\/New_York\\)$/,
+  );
 });
