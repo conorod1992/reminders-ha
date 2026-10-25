@@ -591,7 +591,7 @@ class RemindersManagementPanel extends HTMLElement {
     if (!this._hass.user?.is_admin) {
       // Explicit mobile_app services have no HA per-user authorization API.
       // Do not offer controls that the backend must reject for non-admins.
-      dialog.querySelector(".mobile-app-label").remove();
+      dialog.querySelector(".mobile-app-label").classList.add("hidden");
       mobileApps.disabled = true;
     }
     const voice = this._entitySelect("assist_satellite", policy?.voice_targets || []);
@@ -725,7 +725,7 @@ class RemindersManagementPanel extends HTMLElement {
     dialog.querySelector("#custom-delivery").classList.toggle("hidden", !custom);
     const selected = [...form.querySelectorAll("[name=channel]:checked")].map((input) => input.value);
     dialog.querySelector(".notify-label").classList.toggle("hidden", !selected.includes("phone"));
-    dialog.querySelector(".mobile-app-label").classList.toggle("hidden", !selected.includes("phone"));
+    dialog.querySelector(".mobile-app-label").classList.toggle("hidden", !this._hass.user?.is_admin || !selected.includes("phone"));
     dialog.querySelector(".voice-label").classList.toggle("hidden", !selected.includes("voice"));
   }
 
@@ -1088,7 +1088,7 @@ class RemindersManagementPanel extends HTMLElement {
       if (await this._savePreferences(dialog, target, true)) dialog.close();
     };
     for (const button of dialog.querySelectorAll("[data-test]")) button.onclick = () => this._testDelivery(dialog, target, button.dataset.test);
-    if (!this._hass.user?.is_admin) dialog.querySelector(".mobile-app-label")?.remove();
+    if (!this._hass.user?.is_admin) dialog.querySelector(".mobile-app-label")?.classList.add("hidden");
     dialog.showModal();
     await load(target);
   }
