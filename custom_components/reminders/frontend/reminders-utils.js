@@ -169,6 +169,18 @@ export function triggerRepeatSummary(reminder) {
   }[reminder?.repeat_policy || "once"];
 }
 
+/** Keep only unresolved occurrences with a user action available in this reminder. */
+export function outstandingOccurrences(reminder) {
+  if (!reminder) return [];
+  const hasTaskAction = Boolean(reminder.allow_manual_completion || reminder.external_actions?.length);
+  return (reminder.occurrence_history || []).filter((item) =>
+    item.status === "awaiting_acknowledgement"
+    || (item.status === "delivered" && hasTaskAction && !item.external_action_id)
+  ).sort((a, b) => (
+    (Date.parse(b.scheduled_due || b.due) || 0) - (Date.parse(a.scheduled_due || a.due) || 0)
+  ));
+}
+
 export function awaitingOccurrences(reminder) {
   return (reminder?.occurrence_history || []).filter(
     (item) => item.status === "awaiting_acknowledgement",
