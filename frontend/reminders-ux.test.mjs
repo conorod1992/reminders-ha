@@ -22,6 +22,9 @@ test("dirty-form snapshot tracks only editable state and native rules", () => {
     { name: "internal_id", type: "hidden", value: "token" },
     { name: "disabled", type: "text", value: "ignored", disabled: true },
   ];
+  const targets = { name: "notify_targets", type: "select-multiple", multiple: true,
+    selectedOptions: [{ value: "notify.phone" }], value: "notify.phone" };
+  fields.push(targets);
   const form = { querySelectorAll: () => fields };
   const original = panel._formSnapshot(form);
   fields[2].value = "changed";
@@ -30,6 +33,9 @@ test("dirty-form snapshot tracks only editable state and native rules", () => {
   fields[1].checked = true;
   assert.notEqual(panel._formSnapshot(form), original);
   fields[1].checked = false;
+  targets.selectedOptions.push({ value: "notify.backup" });
+  assert.notEqual(panel._formSnapshot(form), original);
+  targets.selectedOptions.pop();
   form._nativeRules = { activation: [{ trigger: "state", entity_id: "light.room" }] };
   const nativeSnapshot = panel._formSnapshot(form);
   form._nativeRules.activation.push({ trigger: "event", event_type: "changed" });
