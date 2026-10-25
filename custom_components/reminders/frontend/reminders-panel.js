@@ -661,7 +661,7 @@ class RemindersManagementPanel extends HTMLElement {
 
   _formSnapshot(form) {
     const data = [];
-    for (const input of form.querySelectorAll("input,select,textarea")) {
+    for (const input of form.querySelectorAll?.("input,select,textarea") || []) {
       if (input.disabled || input.type === "hidden") continue;
       const value = input.type === "checkbox" || input.type === "radio"
         ? Boolean(input.checked) : input.value;
@@ -1121,7 +1121,7 @@ class RemindersManagementPanel extends HTMLElement {
       user_id: target,
       channels: [...dialog.querySelectorAll(".channels input:checked")].map((input) => input.value),
       notify_targets: this._selected(dialog.querySelector(".notify-label select")),
-      mobile_app_services: this._hass.user?.is_admin ? this._selected(dialog.querySelector(".mobile-app-label select")) : [],
+      mobile_app_services: this._hass?.user?.is_admin ? this._selected(dialog.querySelector(".mobile-app-label select")) : [],
       voice_targets: this._selected(dialog.querySelector(".voice-label select")),
       require_acknowledgement: dialog.querySelector("[name=require_acknowledgement]").checked,
       configured: true,
