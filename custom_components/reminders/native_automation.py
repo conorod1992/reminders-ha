@@ -64,6 +64,7 @@ class NativeAutomationRuntime:
         self._callback = callback
         self._trigger_entries: dict[tuple[str, str], _TriggerEntry] = {}
         self._condition_entries: dict[str, _ConditionEntry] = {}
+        self._condition_failures: set[str] = set()
         self._trigger_failures: dict[tuple[str, str], _TriggerFailure] = {}
         self._trigger_retry_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._sync_lock = asyncio.Lock()
@@ -89,11 +90,14 @@ class NativeAutomationRuntime:
 
     def failed_roles_for_reminder(self, reminder_id: str) -> tuple[str, ...]:
         """Expose failure roles without leaking trigger configuration or credentials."""
-        return tuple(
+        roles = [
             role
             for role in ("activation", "delivery", "completion")
             if (reminder_id, role) in self._trigger_failures
-        )
+        ]
+        if reminder_id in self._condition_failures:
+            roles.append("conditions")
+        return tuple(roles)
 
     async def async_sync(self, reminders: Iterable[Reminder]) -> None:
         """Reconcile native trigger listeners and compiled condition checkers."""
@@ -126,6 +130,7 @@ class NativeAutomationRuntime:
                 self._clear_trigger_failure(reference)
             for reminder_id in set(self._condition_entries) - set(conditions):
                 self._remove_conditions(reminder_id)
+            self._condition_failures.intersection_update(conditions)
 
             for reference, configs in desired.items():
                 failure = self._trigger_failures.get(reference)
@@ -159,15 +164,19 @@ class NativeAutomationRuntime:
                 "delivering rather than silently skipping the reminder",
                 reminder.id,
             )
+            self._condition_failures.add(reminder.id)
             return True
         try:
-            return bool(entry.checker.async_check(variables={}))
+            result = bool(entry.checker.async_check(variables={}))
+            self._condition_failures.discard(reminder.id)
+            return result
         except Exception:
             _LOGGER.exception(
                 "Error evaluating native delivery conditions for reminder %s; "
                 "delivering rather than silently skipping the reminder",
                 reminder.id,
             )
+            self._condition_failures.add(reminder.id)
             return True
 
     async def async_unload(self) -> None:
@@ -182,6 +191,7 @@ class NativeAutomationRuntime:
                 task.cancel()
             self._trigger_retry_tasks.clear()
             self._trigger_failures.clear()
+            self._condition_failures.clear()
             for reminder_id in tuple(self._condition_entries):
                 self._remove_conditions(reminder_id)
         if retry_tasks:
@@ -319,7 +329,9 @@ class NativeAutomationRuntime:
                 "Unable to prepare native delivery conditions for reminder %s",
                 reminder_id,
             )
+            self._condition_failures.add(reminder_id)
             return
+        self._condition_failures.discard(reminder_id)
         self._condition_entries[reminder_id] = _ConditionEntry(key, checker)
 
     def _action(
