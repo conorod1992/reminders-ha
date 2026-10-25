@@ -314,3 +314,34 @@ test("an unauthorized or deleted deep-linked reminder is never shown", async () 
   await panel._load();
   assert.equal(panel._linkedReminder, null);
 });
+
+test("notification-linked reminder appears even when omitted from the current page", () => {
+  const previousDocument = globalThis.document;
+  try {
+    const element = (tag) => ({
+      tag, children: [], className: "", textContent: "",
+      append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; },
+    });
+    globalThis.document = { createElement: element };
+    const list = element("section");
+    const panel = makePanel();
+    delete panel._renderList;
+    panel._loading = false;
+    panel._view = "upcoming";
+    panel._linkedReminder = { id: "linked", title: "Open me" };
+    panel._linkedReminderId = "linked";
+    panel._items = [];
+    panel._reminderCard = (item) => ({ tag: "reminder-card", id: item.id });
+    panel.shadowRoot = { querySelector: (selector) => selector === "#list" ? list : null };
+    panel._renderList();
+    assert.equal(list.children[1].id, "linked");
+    const heading = list.children[0];
+    assert.equal(heading.children[0].textContent, "Opened from notification");
+    heading.children[1].onclick();
+    assert.equal(panel._linkedReminder, null);
+    assert.equal(panel._linkedReminderId, null);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
