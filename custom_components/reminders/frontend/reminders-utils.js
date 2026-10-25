@@ -281,6 +281,10 @@ export function historyHighlights(occurrence, formatDate) {
 /** Explain the next user-visible step without changing reminder lifecycle state. */
 export function reminderNextStep(reminder, formatDate = (value) => value) {
   if (!reminder) return "";
+  if (reminder.native_trigger_failure_roles?.length) {
+    const roles = reminder.native_trigger_failure_roles.join(", ");
+    return `Home Assistant could not attach ${roles} listeners. Retrying automatically; the affected rules may not activate meanwhile.`;
+  }
   if (reminder.status === "waiting_for_context") {
     const active = (reminder.occurrence_history || []).find(
       (item) => item.id === reminder.current_occurrence_id
