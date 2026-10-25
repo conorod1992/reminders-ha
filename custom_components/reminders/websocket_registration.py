@@ -356,12 +356,18 @@ async def websocket_list(
     names = (
         await _user_names(hass) if connection.user.is_admin and scope != "mine" else {}
     )
+    health = getattr(manager, "native_failure_roles", None)
+    summaries = []
+    for item in reminders:
+        summary = _serialize_summary(item, names)
+        if callable(health):
+            roles = health(item.id)
+            if roles:
+                summary["native_trigger_failure_roles"] = list(roles)
+        summaries.append(summary)
     connection.send_result(
         msg["id"],
-        {
-            "reminders": [_serialize_summary(item, names) for item in reminders],
-            "total": total,
-        },
+        {"reminders": summaries, "total": total},
     )
 
 
