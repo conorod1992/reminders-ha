@@ -648,11 +648,15 @@ class RemindersManagementPanel extends HTMLElement {
       dialog.close();
     };
     dialog.querySelector(".cancel").onclick = closeForm;
-    dialog.addEventListener("cancel", (event) => {
+    const onCancel = (event) => {
       if (this._formSnapshot(form) !== form._initialSnapshot
           && !globalThis.confirm("Discard unsaved reminder changes?")) {
         event.preventDefault();
       }
+    };
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", () => {
+      dialog.removeEventListener("cancel", onCancel);
     }, { once: true });
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
     dialog.showModal();
