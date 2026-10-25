@@ -588,6 +588,12 @@ class RemindersManagementPanel extends HTMLElement {
     const mobileApps = this._mobileAppServiceSelect(policy?.mobile_app_services || []);
     mobileApps.name = "mobile_app_services";
     dialog.querySelector(".mobile-app-label").append(mobileApps);
+    if (!this._hass.user?.is_admin) {
+      // Explicit mobile_app services have no HA per-user authorization API.
+      // Do not offer controls that the backend must reject for non-admins.
+      dialog.querySelector(".mobile-app-label").remove();
+      mobileApps.disabled = true;
+    }
     const voice = this._entitySelect("assist_satellite", policy?.voice_targets || []);
     voice.name = "voice_targets";
     dialog.querySelector(".voice-label").append(voice);
@@ -1082,6 +1088,7 @@ class RemindersManagementPanel extends HTMLElement {
       if (await this._savePreferences(dialog, target, true)) dialog.close();
     };
     for (const button of dialog.querySelectorAll("[data-test]")) button.onclick = () => this._testDelivery(dialog, target, button.dataset.test);
+    if (!this._hass.user?.is_admin) dialog.querySelector(".mobile-app-label")?.remove();
     dialog.showModal();
     await load(target);
   }
@@ -1096,8 +1103,11 @@ class RemindersManagementPanel extends HTMLElement {
       const old = dialog.querySelector(`${selector} select`); if (old) old.remove();
       dialog.querySelector(selector).append(this._entitySelect(domain, selected));
     }
-    const oldMobile = dialog.querySelector(".mobile-app-label select"); if (oldMobile) oldMobile.remove();
-    dialog.querySelector(".mobile-app-label").append(this._mobileAppServiceSelect(prefs.default_delivery_policy.mobile_app_services || []));
+    const mobileLabel = dialog.querySelector(".mobile-app-label");
+    if (mobileLabel && this._hass.user?.is_admin) {
+      const oldMobile = mobileLabel.querySelector("select"); if (oldMobile) oldMobile.remove();
+      mobileLabel.append(this._mobileAppServiceSelect(prefs.default_delivery_policy.mobile_app_services || []));
+    }
     dialog.querySelector("[name=require_acknowledgement]").checked = prefs.require_acknowledgement;
     dialog.querySelector("[name=quiet_enabled]").checked = prefs.quiet_hours_enabled;
     dialog.querySelector("[name=quiet_start]").value = prefs.quiet_hours_start;
@@ -1111,7 +1121,7 @@ class RemindersManagementPanel extends HTMLElement {
       user_id: target,
       channels: [...dialog.querySelectorAll(".channels input:checked")].map((input) => input.value),
       notify_targets: this._selected(dialog.querySelector(".notify-label select")),
-      mobile_app_services: this._selected(dialog.querySelector(".mobile-app-label select")),
+      mobile_app_services: this._hass.user?.is_admin ? this._selected(dialog.querySelector(".mobile-app-label select")) : [],
       voice_targets: this._selected(dialog.querySelector(".voice-label select")),
       require_acknowledgement: dialog.querySelector("[name=require_acknowledgement]").checked,
       configured: true,
