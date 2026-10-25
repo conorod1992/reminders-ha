@@ -634,10 +634,36 @@ class RemindersManagementPanel extends HTMLElement {
     form.addEventListener("input", updateSummary);
     form.addEventListener("change", updateSummary);
     updateSummary();
-    dialog.querySelector(".cancel").onclick = () => dialog.close();
+    // Respect unsaved edits even when the user presses Escape or uses Cancel.
+    const initialState = this._formSnapshot(form);
+    const closeForm = () => {
+      if (this._formSnapshot(form) !== initialState
+          && !globalThis.confirm("Discard unsaved reminder changes?")) return;
+      dialog.close();
+    };
+    dialog.querySelector(".cancel").onclick = closeForm;
+    dialog.addEventListener("cancel", (event) => {
+      if (this._formSnapshot(form) !== initialState
+          && !globalThis.confirm("Discard unsaved reminder changes?")) {
+        event.preventDefault();
+      }
+    }, { once: true });
     form.onsubmit = (event) => { event.preventDefault(); this._saveReminder(dialog, form, reminder); };
     dialog.showModal();
     form.elements.title.focus();
+  }
+
+  _formSnapshot(form) {
+    const data = [];
+    for (const input of form.querySelectorAll("input,select,textarea")) {
+      if (input.disabled || input.type === "hidden") continue;
+      const value = input.type === "checkbox" || input.type === "radio"
+        ? Boolean(input.checked) : input.value;
+      data.push([input.name || input.id, value]);
+    }
+    // Native HA selector values are stored separately from ordinary inputs.
+    if (form._nativeRules) data.push(["nativeRules", form._nativeRules]);
+    return JSON.stringify(data);
   }
 
   _syncRecurrence(form, active) {
