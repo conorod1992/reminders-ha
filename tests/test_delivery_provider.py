@@ -384,14 +384,18 @@ async def test_independent_channels_do_not_wait_for_slow_provider() -> None:
     class Slow:
         channel = "phone"
 
-        async def async_deliver(self, _reminder: Reminder, _policy: DeliveryPolicy) -> None:
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> None:
             slow_started.set()
             await release_slow.wait()
 
     class Fast:
         channel = "voice"
 
-        async def async_deliver(self, _reminder: Reminder, _policy: DeliveryPolicy) -> None:
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> None:
             fast_delivered.set()
 
     dispatcher = DeliveryDispatcher([Slow(), Fast()])  # type: ignore[list-item]
@@ -408,23 +412,31 @@ async def test_independent_channels_do_not_wait_for_slow_provider() -> None:
     assert result.failed_channels == ()
 
 
-async def test_partial_channel_outcome_still_records_failure_with_parallel_channels() -> None:
+async def test_partial_channel_outcome_still_records_failure_with_parallel_channels() -> (
+    None
+):
     from custom_components.reminders.delivery import PartialDeliveryOutcome
 
     class Partial:
         channel = "phone"
 
-        async def async_deliver(self, _reminder: Reminder, _policy: DeliveryPolicy) -> PartialDeliveryOutcome:
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> PartialDeliveryOutcome:
             return PartialDeliveryOutcome(("notify.offline: RuntimeError",))
 
     class Healthy:
         channel = "voice"
 
-        async def async_deliver(self, _reminder: Reminder, _policy: DeliveryPolicy) -> None:
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> None:
             return None
 
     dispatcher = DeliveryDispatcher([Partial(), Healthy()])  # type: ignore[list-item]
-    result = await dispatcher.async_deliver(reminder(), DeliveryPolicy(("phone", "voice")))
+    result = await dispatcher.async_deliver(
+        reminder(), DeliveryPolicy(("phone", "voice"))
+    )
     assert result.succeeded == ("phone", "voice")
     assert result.failed_channels == ("phone",)
     assert result.errors == ("phone: notify.offline: RuntimeError",)
