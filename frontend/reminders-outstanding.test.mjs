@@ -76,7 +76,7 @@ test("multiple unresolved recurring occurrences expose dated, targeted buttons",
   assert.deepEqual(primaryActions.map((node) => node.textContent), ["Done now", "Snooze"]);
   const details = body.children.find((node) => node.className === "outstanding-occurrences");
   assert.ok(details);
-  assert.equal(details.children[0].textContent, "2 earlier occurrences need action");
+  assert.equal(details.children[0].textContent, "2 outstanding occurrences");
   const firstRow = details.children[1];
   assert.equal(firstRow.children[0].textContent, "2026-10-02T12:00:00Z");
   await firstRow.children[1].children[0].onclick();
