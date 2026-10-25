@@ -104,3 +104,39 @@ test("a committed Save stays successful when list refresh fails", async () => {
   assert.equal(errorHost.textContent, "");
   assert.match(panel.lastError.message, /Connection temporarily lost/);
 });
+
+test("dialogs expose their title and restore keyboard focus after closing", () => {
+  const panel = new Panel();
+  let focused = 0;
+  panel.shadowRoot = { activeElement: { focus() { focused++; } } };
+  const handlers = new Map();
+  const dialog = {
+    label: null,
+    querySelector: () => ({ textContent: "Edit reminder" }),
+    setAttribute(name, value) { if (name === "aria-label") this.label = value; },
+    addEventListener(name, handler) { handlers.set(name, handler); },
+    showModal() { this.open = true; },
+  };
+  panel._showDialog(dialog);
+  assert.equal(dialog.label, "Edit reminder");
+  assert.equal(dialog.open, true);
+  handlers.get("close")();
+  assert.equal(focused, 1);
+});
+
+test("delivery test feedback includes partial success rather than hiding healthy channels", async () => {
+  const panel = new Panel();
+  panel._preferencesPayload = () => ({
+    channels: ["phone", "voice"], notify_targets: [], mobile_app_services: [], voice_targets: [],
+  });
+  panel._call = async () => ({
+    succeeded_channels: ["phone"],
+    failed_channels: ["voice"],
+  });
+  const host = { textContent: "", className: "" };
+  const dialog = { querySelector: () => host };
+  await panel._testDelivery(dialog, "owner", "all");
+  assert.match(host.textContent, /Succeeded: phone/);
+  assert.match(host.textContent, /Failed: voice/);
+  assert.equal(host.className, "test-result hint");
+});
