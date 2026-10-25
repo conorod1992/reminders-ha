@@ -1,8 +1,8 @@
 import {
   WEEKDAYS,
   acknowledgementSummary,
-  awaitingOccurrences,
   currentCompletableOccurrence,
+  outstandingOccurrences,
   deliverySummary,
   historyDeliverySummary,
   historyHighlights,
@@ -114,7 +114,7 @@ class RemindersManagementPanel extends HTMLElement {
         button{border:0;border-radius:8px;padding:10px 15px;background:var(--primary-color);color:var(--text-primary-color,#fff);font:inherit;cursor:pointer}button.secondary,.actions button,.quick button{background:transparent;color:var(--primary-color);border:1px solid var(--divider-color)}button.danger{color:var(--error-color);background:transparent;border:1px solid var(--error-color)}button:disabled{opacity:.55;cursor:wait}
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
         select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}.picker-host,.picker-host ha-entity-picker,.picker-host select{display:block;width:100%}
-        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}.next-step{margin-top:9px;font-size:13px;line-height:1.4;color:var(--primary-text-color);border-left:3px solid var(--warning-color);padding-left:10px}
+        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}.next-step{margin-top:9px;font-size:13px;line-height:1.4;color:var(--primary-text-color);border-left:3px solid var(--warning-color);padding-left:10px}.outstanding-occurrences{margin-top:12px;padding-top:8px;border-top:1px solid var(--divider-color)}.outstanding-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:8px}.outstanding-row .actions{justify-content:flex-start}
         .overflow{position:relative}.overflow>summary{list-style:none;margin:0;padding:7px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-color);font-size:20px;line-height:1;cursor:pointer}.overflow>summary::-webkit-details-marker{display:none}.overflow-menu{position:absolute;right:0;z-index:2;min-width:170px;display:grid;padding:6px;background:var(--card-background-color);border-radius:9px;box-shadow:0 5px 20px rgba(0,0,0,.3)}.overflow-menu button{border:0;text-align:left;color:var(--primary-text-color);background:transparent}.overflow-menu button.danger{color:var(--error-color)}.behavior-summary{padding:14px;border-radius:9px;background:var(--secondary-background-color)}.behavior-summary strong{display:block;margin-bottom:6px}.behavior-summary ul{margin:0;padding-left:20px}.expiry-custom.hidden{display:none}
         .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
         dialog{width:min(680px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;border:0;border-radius:12px;padding:0;background:var(--card-background-color);color:var(--primary-text-color);box-shadow:0 8px 28px rgba(0,0,0,.35)}dialog::backdrop{background:rgba(0,0,0,.45)}.dialog{padding:22px}.dialog h2{margin:0 0 8px}.form{display:grid;gap:16px}.dialog-actions{justify-content:flex-end;margin-top:20px}.hidden{display:none!important}details{border-top:1px solid var(--divider-color);padding-top:12px}summary{cursor:pointer;color:var(--primary-color);margin-bottom:14px}.advanced{display:grid;gap:16px}.quick button.selected{background:var(--primary-color);color:#fff}.preview{padding:10px;border-radius:8px;background:var(--secondary-background-color)}
@@ -279,20 +279,33 @@ class RemindersManagementPanel extends HTMLElement {
     }
     const actions = document.createElement("div");
     actions.className = "actions";
-    const awaiting = awaitingOccurrences(reminder);
-    const actionable = [...(reminder.occurrence_history || [])].reverse().find((item) => ["delivered", "awaiting_acknowledgement"].includes(item.status));
+    const outstanding = outstandingOccurrences(reminder);
+    const single = outstanding.length === 1 ? outstanding[0] : null;
     const upcomingTask = currentCompletableOccurrence(reminder);
     if (upcomingTask) {
       actions.append(this._action("Done now", () => this._complete(reminder, upcomingTask.id)));
     }
-    if (actionable && reminder.allow_manual_completion) actions.append(this._action("Done", () => this._complete(reminder, actionable.id)));
-    if (actionable && !actionable.external_action_id) for (const item of reminder.external_actions || []) actions.append(this._action(item.label, () => this._externalAction(reminder, actionable.id, item.id)));
+    // Generic "Done" and "Dismiss" must never silently select one of several
+    // unresolved recurring occurrences. Show each occurrence with its own date.
+    if (single && reminder.allow_manual_completion) {
+      actions.append(this._action("Done", () => this._complete(reminder, single.id)));
+    }
+    if (single && !single.external_action_id) {
+      for (const item of reminder.external_actions || []) {
+        actions.append(this._action(item.label, () => this._externalAction(reminder, single.id, item.id)));
+      }
+    }
+    if (outstanding.length > 1) {
+      body.append(this._outstandingDetails(reminder, outstanding));
+    }
     if (reminder.status === "failed" && reminder.activation_type === "time"
         && !reminder.recurring && !reminder.managed_externally && !reminder.paused) {
       actions.append(this._action("Retry now", () => this._retryFailed(reminder)));
     }
     if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder)));
-    if (awaiting.length) actions.append(this._action("Dismiss", () => this._acknowledge(reminder, awaiting[awaiting.length - 1].id)));
+    if (single?.status === "awaiting_acknowledgement") {
+      actions.append(this._action("Dismiss", () => this._acknowledge(reminder, single.id)));
+    }
     const overflow = document.createElement("details"); overflow.className = "overflow"; overflow.innerHTML = '<summary aria-label="More actions">⋮</summary><div class="overflow-menu"></div>';
     const menu = overflow.querySelector(".overflow-menu");
     if (!reminder.managed_externally) menu.append(this._action("Edit", () => this._openReminderForm(reminder)));
@@ -305,6 +318,46 @@ class RemindersManagementPanel extends HTMLElement {
     actions.append(overflow);
     card.append(when, body, actions);
     return card;
+  }
+
+  _outstandingDetails(reminder, occurrences) {
+    const details = document.createElement("details");
+    details.className = "outstanding-occurrences";
+    const heading = document.createElement("summary");
+    heading.textContent = `${occurrences.length} earlier occurrences need action`;
+    details.append(heading);
+    for (const occurrence of occurrences.slice(0, 5)) {
+      const row = document.createElement("div");
+      row.className = "outstanding-row";
+      const when = document.createElement("span");
+      when.textContent = this._formatDate(occurrence.scheduled_due || occurrence.due);
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      if (reminder.allow_manual_completion) {
+        actions.append(this._action("Done", () => this._complete(reminder, occurrence.id)));
+      }
+      if (occurrence.status === "awaiting_acknowledgement") {
+        actions.append(this._action("Dismiss", () => this._acknowledge(reminder, occurrence.id)));
+      }
+      if (!occurrence.external_action_id) {
+        for (const item of reminder.external_actions || []) {
+          actions.append(this._action(item.label, () => this._externalAction(reminder, occurrence.id, item.id)));
+        }
+      }
+      row.append(when, actions);
+      details.append(row);
+    }
+    if (occurrences.length > 5) {
+      const more = document.createElement("div");
+      more.className = "hint";
+      more.textContent = "Older occurrences can be managed in History.";
+      const button = this._action("View History", () => {
+        this._view = "history";
+        this._load();
+      }, "secondary");
+      details.append(more, button);
+    }
+    return details;
   }
 
   _historyCard(row) {
