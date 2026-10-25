@@ -8,6 +8,7 @@ import {
   deliverySummary,
   historyDeliverySummary,
   historyHighlights,
+  outstandingOccurrences,
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
@@ -238,4 +239,26 @@ test("history gives specific reasons for missed, revoked and expired reminders",
   assert.deepEqual(historyHighlights({ completion_reason: "context_wait_expired" }, format),
     ["Delivery conditions were not met before expiry"]);
   assert.deepEqual(historyHighlights({ completion_reason: "done" }, format), []);
+});
+
+test("unresolved actions are matched to individual occurrences, with resolved history excluded", () => {
+  const reminder = {
+    allow_manual_completion: true,
+    occurrence_history: [
+      { id: "old", status: "awaiting_acknowledgement", scheduled_due: "2026-10-01T10:00:00Z" },
+      { id: "done", status: "completed", scheduled_due: "2026-10-02T10:00:00Z" },
+      { id: "new", status: "delivered", scheduled_due: "2026-10-03T10:00:00Z" },
+      { id: "scheduled", status: "scheduled", scheduled_due: "2026-10-04T10:00:00Z" },
+    ],
+  };
+  assert.deepEqual(outstandingOccurrences(reminder).map((x) => x.id), ["new", "old"]);
+  assert.deepEqual(outstandingOccurrences({
+    ...reminder, allow_manual_completion: false,
+  }).map((x) => x.id), ["old"]);
+  assert.deepEqual(outstandingOccurrences({
+    ...reminder, occurrence_history: [
+      { id: "already-selected", status: "delivered", external_action_id: "done" },
+    ],
+  }), []);
+  assert.deepEqual(outstandingOccurrences(null), []);
 });
