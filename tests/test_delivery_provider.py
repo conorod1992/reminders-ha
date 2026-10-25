@@ -412,9 +412,7 @@ async def test_independent_channels_do_not_wait_for_slow_provider() -> None:
     assert result.failed_channels == ()
 
 
-async def test_partial_channel_outcome_still_records_failure_with_parallel_channels() -> (
-    None
-):
+async def test_parallel_channel_partial_failure() -> None:
     from custom_components.reminders.delivery import PartialDeliveryOutcome
 
     class Partial:
