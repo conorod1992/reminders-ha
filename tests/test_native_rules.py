@@ -458,3 +458,12 @@ def test_native_failure_roles_do_not_expose_trigger_configuration(
     )
     assert manager.native_failure_roles("native-timed") == ("activation",)
     assert manager.native_failure_roles("other-unknown") == ()
+
+
+def test_native_condition_failures_are_visible_without_exposing_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _ = _manager(monkeypatch)
+    manager._native_runtime._condition_failures.add("native-timed")
+    assert manager.native_failure_roles("native-timed") == ("conditions",)
+    assert manager.native_failure_roles("different") == ()
