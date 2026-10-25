@@ -496,6 +496,7 @@ class RemindersManagementPanel extends HTMLElement {
         <div class="dialog-actions"><button type="button" class="secondary cancel">Cancel</button><button type="submit">Save</button></div>
       </form></div>`;
     const form = dialog.querySelector("form");
+    form._editingReminder = reminder;
     form.dataset.recurring = String(recurring);
     form.elements.title.value = source?.title || "";
     form.elements.message.value = source?.message || "";
@@ -894,6 +895,15 @@ class RemindersManagementPanel extends HTMLElement {
       lines.push(`remind you ${scheduledLocalSummary(form.elements.date.value, form.elements.time.value, timezone, this._hass.locale?.language)}`);
     }
     if (recurring) {
+      if (form._editingReminder?.recurrence) {
+        const selected = this._recurrenceData(form);
+        selected.end_date = form.elements.end_date.value || null;
+        selected.occurrence_count = form.elements.occurrence_count.value
+          ? Number(form.elements.occurrence_count.value) : null;
+        if (this._recurrenceChanged(selected, form._editingReminder.recurrence)) {
+          lines.push("changing the repeat schedule will recalculate the next occurrence; previous history is kept");
+        }
+      }
       const frequency = form.elements.frequency.value;
       const interval = Number(form.elements.interval.value || 1);
       lines.push(interval === 1 ? `repeat ${frequency}` : `repeat every ${interval} ${frequency.replace("daily", "days").replace("weekly", "weeks").replace("monthly", "months").replace("yearly", "years")}`);
