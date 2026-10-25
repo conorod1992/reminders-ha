@@ -4,6 +4,7 @@ import {
   awaitingOccurrences,
   currentCompletableOccurrence,
   deliverySummary,
+  historyDeliverySummary,
   historyHighlights,
   localDateTime,
   quickTimeParts,
@@ -322,7 +323,7 @@ class RemindersManagementPanel extends HTMLElement {
     status.textContent = occurrence.status === "acknowledged" ? "dismissed" : occurrence.status === "awaiting_acknowledgement" ? "awaiting dismissal" : occurrence.status.replaceAll("_", " ");
     const details = document.createElement("div");
     details.className = "meta";
-    const channelText = occurrence.succeeded_channels.length ? `Delivered by ${occurrence.succeeded_channels.join(", ")}` : "No channel succeeded";
+    const channelText = historyDeliverySummary(occurrence);
     const extras = [channelText];
     if (occurrence.failed_channels.length) extras.push(`Failed: ${occurrence.failed_channels.join(", ")}`);
     if (occurrence.suppressed_channels.length) extras.push(`Quiet hours suppressed: ${occurrence.suppressed_channels.join(", ")}`);
