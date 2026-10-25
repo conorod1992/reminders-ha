@@ -2899,17 +2899,23 @@ class ReminderManager:
             # occurrences concurrently so a slow provider cannot delay every
             # other due reminder. Keep the fan-out bounded to avoid flooding HA.
             limiter = asyncio.Semaphore(4)
+            failures: list[Exception] = []
 
             async def deliver_due(reminder_id: str) -> None:
                 async with limiter:
                     try:
                         await self._async_deliver_claimed(reminder_id, effective_now)
-                    except Exception:
+                    except Exception as err:
                         _LOGGER.exception(
                             "Unable to finalize due reminder %s", reminder_id
                         )
+                        failures.append(err)
 
             await asyncio.gather(*(deliver_due(item.id) for item in due))
+            if failures:
+                # All other claims have had a chance to finish, but callers and
+                # retry/recovery tests must still observe persistence failures.
+                raise failures[0]
             for reminder, occurrence in (*missed, *expired):
                 self._fire_lifecycle_event(
                     self._reminders.get(reminder.id, reminder),
