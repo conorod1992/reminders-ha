@@ -320,8 +320,10 @@ class DeliveryDispatcher:
                 )
                 return channel, False, (f"{channel}: {type(err).__name__}",)
             if isinstance(outcome, PartialDeliveryOutcome):
-                return channel, True, tuple(
-                    f"{channel}: {error}" for error in outcome.errors
+                return (
+                    channel,
+                    True,
+                    tuple(f"{channel}: {error}" for error in outcome.errors),
                 )
             return channel, True, ()
 
@@ -332,7 +334,5 @@ class DeliveryDispatcher:
         )
         succeeded = tuple(channel for channel, ok, _ in outcomes if ok)
         errors = tuple(error for _channel, _ok, issues in outcomes for error in issues)
-        failed = tuple(
-            channel for channel, ok, issues in outcomes if not ok or issues
-        )
+        failed = tuple(channel for channel, ok, issues in outcomes if not ok or issues)
         return DeliveryResult(succeeded, errors, failed)
