@@ -204,9 +204,7 @@ async def _attention_page(
         predicate=lambda item: (
             _attention_reason(item) is not None
             or bool(
-                getattr(_manager(hass), "native_failure_roles", lambda _id: ())(
-                    item.id
-                )
+                getattr(_manager(hass), "native_failure_roles", lambda _id: ())(item.id)
             )
         ),
     )
