@@ -635,15 +635,15 @@ class RemindersManagementPanel extends HTMLElement {
     form.addEventListener("change", updateSummary);
     updateSummary();
     // Respect unsaved edits even when the user presses Escape or uses Cancel.
-    const initialState = this._formSnapshot(form);
+    form._initialSnapshot = this._formSnapshot(form);
     const closeForm = () => {
-      if (this._formSnapshot(form) !== initialState
+      if (this._formSnapshot(form) !== form._initialSnapshot
           && !globalThis.confirm("Discard unsaved reminder changes?")) return;
       dialog.close();
     };
     dialog.querySelector(".cancel").onclick = closeForm;
     dialog.addEventListener("cancel", (event) => {
-      if (this._formSnapshot(form) !== initialState
+      if (this._formSnapshot(form) !== form._initialSnapshot
           && !globalThis.confirm("Discard unsaved reminder changes?")) {
         event.preventDefault();
       }
