@@ -201,7 +201,14 @@ async def _attention_page(
         source_id=source_id,
         limit=limit,
         offset=offset,
-        predicate=lambda item: _attention_reason(item) is not None,
+        predicate=lambda item: (
+            _attention_reason(item) is not None
+            or bool(
+                getattr(_manager(hass), "native_failure_roles", lambda _id: ())(
+                    item.id
+                )
+            )
+        ),
     )
 
 
@@ -364,6 +371,7 @@ async def websocket_list(
             roles = health(item.id)
             if roles:
                 summary["native_trigger_failure_roles"] = list(roles)
+                summary.setdefault("attention_reason", "automation_unavailable")
         summaries.append(summary)
     connection.send_result(
         msg["id"],
