@@ -157,6 +157,8 @@ These include:
 
 Quick time choices simply fill in the normal date/time fields. You can still edit either before saving. **Later today** becomes unavailable late at night when no suitable time remains today, rather than selecting a time in the past.
 
+The editor warns before discarding unsaved fields or Home Assistant-native rules, and changing a recurring schedule is explained before saving. Save requests are guarded against accidental double-submission. On a small screen or keyboard, dialog controls remain accessible and the focused control is restored after closing a dialog.
+
 ### Reminder actions
 
 Depending on the reminder's settings, a reminder can offer:
@@ -686,6 +688,8 @@ Generic Notify entities receive the standard notification title/message only.
 If a selected Companion App service rejects the action payload, Reminders retries that same service once as a normal notification without buttons.
 
 No Home Assistant automation is required to handle these actions.
+
+Opening a supported Companion App notification navigates directly to the linked reminder using an authorized Reminders WebSocket lookup. If the reminder has been deleted or the user does not have access, its private details are not shown.
 
 ## Multiple Home Assistant users
 
