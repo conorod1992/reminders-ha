@@ -164,30 +164,29 @@ class NotifyProvider:
             "title": reminder.title,
             "message": reminder.message or reminder.title,
         }
-        succeeded = 0
-        errors: list[str] = []
-        for notify_target in policy.notify_targets:
-            try:
-                # Dispatch individually so one unavailable entity does not
-                # block independent, healthy notification targets.
-                await _async_service_call(
-                    self._hass,
-                    "notify",
-                    "send_message",
-                    ordinary_data,
-                    target={"entity_id": [notify_target]},
-                    blocking=True,
-                    context=Context(user_id=reminder.user_id),
-                )
-            except Exception as err:
-                errors.append(f"{notify_target}: {type(err).__name__}")
-            else:
-                succeeded += 1
-        for action_name in policy.mobile_app_services:
+        # A stalled phone destination must not block unrelated recipients.
+        # Cap active service calls and preserve configured order in diagnostics.
+        limiter = asyncio.Semaphore(4)
+
+        async def send_regular(target: str) -> str | None:
+            async with limiter:
+                try:
+                    await _async_service_call(
+                        self._hass,
+                        "notify",
+                        "send_message",
+                        ordinary_data,
+                        target={"entity_id": [target]},
+                        blocking=True,
+                        context=Context(user_id=reminder.user_id),
+                    )
+                except Exception as err:
+                    return f"{target}: {type(err).__name__}"
+            return None
+
+        async def send_mobile(action_name: str) -> str | None:
             _domain, service = action_name.split(".", 1)
             actionable_data = dict(ordinary_data)
-            # A stable occurrence tag replaces repeated announcements instead
-            # of accumulating independent notifications on the same device.
             occurrence_id = _delivery_occurrence_id(reminder)
             actionable_data["data"] = {
                 "tag": f"reminders_{reminder.id}_{occurrence_id or 'current'}",
@@ -197,37 +196,41 @@ class NotifyProvider:
                 actionable_data["data"]["actions"] = _mobile_actions(
                     reminder.notification_actions
                 )
-            try:
-                await _async_service_call(
-                    self._hass,
-                    "notify",
-                    service,
-                    actionable_data,
-                    blocking=True,
-                    context=Context(user_id=reminder.user_id),
-                )
-            except ServiceValidationError as action_err:
-                # A registered target may stop supporting action metadata. Keep
-                # the reminder deliverable by retrying once without buttons.
+            async with limiter:
                 try:
                     await _async_service_call(
                         self._hass,
                         "notify",
                         service,
-                        ordinary_data,
+                        actionable_data,
                         blocking=True,
                         context=Context(user_id=reminder.user_id),
                     )
-                except Exception as fallback_err:
-                    errors.append(
-                        f"{action_name}: {type(action_err).__name__}/"
-                        f"{type(fallback_err).__name__}"
-                    )
-                    continue
-            except Exception as err:
-                errors.append(f"{action_name}: {type(err).__name__}")
-                continue
-            succeeded += 1
+                except ServiceValidationError as action_err:
+                    try:
+                        await _async_service_call(
+                            self._hass,
+                            "notify",
+                            service,
+                            ordinary_data,
+                            blocking=True,
+                            context=Context(user_id=reminder.user_id),
+                        )
+                    except Exception as fallback_err:
+                        return (
+                            f"{action_name}: {type(action_err).__name__}/"
+                            f"{type(fallback_err).__name__}"
+                        )
+                except Exception as err:
+                    return f"{action_name}: {type(err).__name__}"
+            return None
+
+        outcomes = await asyncio.gather(
+            *(send_regular(target) for target in policy.notify_targets),
+            *(send_mobile(target) for target in policy.mobile_app_services),
+        )
+        errors = [error for error in outcomes if error is not None]
+        succeeded = len(outcomes) - len(errors)
         if errors:
             if succeeded:
                 # Preserve actionable success for a phone which did receive the
