@@ -299,9 +299,7 @@ async def test_due_delivery_condition_rechecks_revoked_read_access(
 
 
 async def test_revoked_one_of_multiple_targets_preserves_healthy_destination() -> None:
-    hass = hass_with(
-        user("u1", control={"notify.allowed", "assist_satellite.allowed"})
-    )
+    hass = hass_with(user("u1", control={"notify.allowed", "assist_satellite.allowed"}))
     permitted, denied = await async_filter_delivery_policy_permissions(
         hass,  # type: ignore[arg-type]
         "u1",
