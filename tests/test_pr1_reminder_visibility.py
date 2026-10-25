@@ -10,7 +10,6 @@ import pytest
 
 from custom_components.reminders import websocket_registration as registration
 from custom_components.reminders.manager import ReminderManager
-from custom_components.reminders.recurrence import RecurrenceFrequency, RecurrenceRule
 from custom_components.reminders.models import (
     ActivationType,
     Occurrence,
@@ -18,6 +17,7 @@ from custom_components.reminders.models import (
     Reminder,
     ReminderStatus,
 )
+from custom_components.reminders.recurrence import RecurrenceFrequency, RecurrenceRule
 
 
 def _timed_reminder(
@@ -163,6 +163,11 @@ async def test_early_done_round_trip_keeps_recurring_schedule_and_history(
     assert completed.status is OccurrenceStatus.COMPLETED
     assert updated.due == created.due + timedelta(days=1)
     assert updated.current_occurrence_id != completed.id
-    assert any(item.id == completed.id and item.status is OccurrenceStatus.COMPLETED
-               for item in updated.occurrence_history)
-    assert registration._serialize_summary(updated, {})["occurrence_history"][0]["id"] == updated.current_occurrence_id
+    assert any(
+        item.id == completed.id and item.status is OccurrenceStatus.COMPLETED
+        for item in updated.occurrence_history
+    )
+    assert (
+        registration._serialize_summary(updated, {})["occurrence_history"][0]["id"]
+        == updated.current_occurrence_id
+    )
