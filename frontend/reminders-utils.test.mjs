@@ -14,6 +14,7 @@ import {
   suggestedStates,
   triggerRepeatSummary,
   upcomingBucket,
+  upcomingSection,
   relativeTime,
 } from "../custom_components/reminders/frontend/reminders-utils.js";
 
@@ -177,4 +178,21 @@ test("an advanced recurring series explains a prior unresolved occurrence", () =
     occurrence_history: [{ id: "older", status: "awaiting_acknowledgement" }],
   });
   assert.match(text, /earlier occurrence still needs dismissal/);
+});
+
+test("upcoming sections do not mislabel delivered action-required reminders as overdue", () => {
+  const now = Date.parse("2026-09-22T10:00:00Z");
+  const timeZone = "Europe/Dublin";
+  const due = "2026-09-21T08:00:00Z";
+  const base = { activation_type: "time", due };
+  assert.equal(upcomingSection({ ...base, status: "pending" }, timeZone, now), "Overdue");
+  assert.equal(upcomingSection({ ...base, status: "waiting_for_context" }, timeZone, now), "Waiting for conditions");
+  assert.equal(upcomingSection({ ...base, status: "awaiting_acknowledgement" }, timeZone, now), "Awaiting dismissal");
+  assert.equal(upcomingSection({ ...base, status: "delivered" }, timeZone, now), "Action available");
+  assert.equal(upcomingSection({
+    ...base, status: "pending", due: "2026-09-23T08:00:00Z",
+  }, timeZone, now), "Tomorrow");
+  assert.equal(upcomingSection({
+    activation_type: "trigger", status: "waiting_for_trigger", due: null,
+  }, timeZone, now), null);
 });
