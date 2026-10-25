@@ -38,6 +38,8 @@ class RemindersManagementPanel extends HTMLElement {
     this._loading = true;
     this._started = false;
     this._preferences = null;
+    this._linkedReminderId = new URLSearchParams(globalThis.location?.search || "").get("reminder_id");
+    this._linkedReminder = null;
   }
 
   set hass(value) {
@@ -114,7 +116,7 @@ class RemindersManagementPanel extends HTMLElement {
         button{border:0;border-radius:8px;padding:10px 15px;background:var(--primary-color);color:var(--text-primary-color,#fff);font:inherit;cursor:pointer}button.secondary,.actions button,.quick button{background:transparent;color:var(--primary-color);border:1px solid var(--divider-color)}button.danger{color:var(--error-color);background:transparent;border:1px solid var(--error-color)}button:disabled{opacity:.55;cursor:wait}
         .filters{display:grid;gap:12px;margin:22px 0 16px}.tabs{display:flex;border-bottom:1px solid var(--divider-color);overflow:auto}.tab{border:0;border-radius:0;background:transparent;color:var(--secondary-text-color);padding:12px}.tab.active{color:var(--primary-color);border-bottom:3px solid var(--primary-color)}.toolbar input{flex:1;min-width:220px}.scope{display:flex;gap:8px;align-items:center}
         select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:7px;padding:10px;width:100%}select[multiple]{min-height:100px}label{display:grid;gap:6px;color:var(--secondary-text-color)}textarea{min-height:76px;resize:vertical}.fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.checkrow label{display:flex;align-items:center;gap:6px;color:var(--primary-text-color)}input[type=checkbox],input[type=radio]{width:auto}.picker-host,.picker-host ha-entity-picker,.picker-host select{display:block;width:100%}
-        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}.next-step{margin-top:9px;font-size:13px;line-height:1.4;color:var(--primary-text-color);border-left:3px solid var(--warning-color);padding-left:10px}.outstanding-occurrences{margin-top:12px;padding-top:8px;border-top:1px solid var(--divider-color)}.outstanding-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:8px}.outstanding-row .actions{justify-content:flex-start}
+        .list{display:grid;gap:12px}.date-heading{margin:18px 2px 2px;font-size:18px}.card{display:grid;grid-template-columns:165px 1fr auto;gap:18px;align-items:center;padding:18px;background:var(--card-background-color);border-radius:12px;box-shadow:var(--ha-card-box-shadow,0 2px 4px rgba(0,0,0,.12))}.when{font-weight:500}.when .relative{display:block;margin-top:4px;color:var(--secondary-text-color);font-size:13px;font-weight:400}.name{font-size:18px;font-weight:500}.meta,.message,.hint{margin-top:5px;color:var(--secondary-text-color);line-height:1.4}.actions{justify-content:flex-end}.actions button{padding:7px 10px}.status{display:inline-block;border-radius:999px;padding:3px 8px;background:var(--secondary-background-color);font-size:12px;text-transform:capitalize}.status.awaiting_acknowledgement{color:var(--warning-color)}.status.failed{color:var(--error-color)}.status.paused{color:var(--warning-color)}.next-step{margin-top:9px;font-size:13px;line-height:1.4;color:var(--primary-text-color);border-left:3px solid var(--warning-color);padding-left:10px}.linked-reminder-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.outstanding-occurrences{margin-top:12px;padding-top:8px;border-top:1px solid var(--divider-color)}.outstanding-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:8px}.outstanding-row .actions{justify-content:flex-start}
         .overflow{position:relative}.overflow>summary{list-style:none;margin:0;padding:7px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-color);font-size:20px;line-height:1;cursor:pointer}.overflow>summary::-webkit-details-marker{display:none}.overflow-menu{position:absolute;right:0;z-index:2;min-width:170px;display:grid;padding:6px;background:var(--card-background-color);border-radius:9px;box-shadow:0 5px 20px rgba(0,0,0,.3)}.overflow-menu button{border:0;text-align:left;color:var(--primary-text-color);background:transparent}.overflow-menu button.danger{color:var(--error-color)}.behavior-summary{padding:14px;border-radius:9px;background:var(--secondary-background-color)}.behavior-summary strong{display:block;margin-bottom:6px}.behavior-summary ul{margin:0;padding-left:20px}.expiry-custom.hidden{display:none}
         .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
         .empty,.loading{padding:48px 16px;text-align:center;color:var(--secondary-text-color)}.error{display:none;padding:12px 16px;margin:16px 0;border-left:4px solid var(--error-color);background:var(--card-background-color)}.error.show{display:block}.form-error{padding:12px 16px;border-left:4px solid var(--error-color);background:var(--secondary-background-color);color:var(--primary-text-color)}.success{color:var(--success-color);padding:8px 0}
@@ -207,7 +209,21 @@ class RemindersManagementPanel extends HTMLElement {
     host.replaceChildren();
     if (this._loading) { host.innerHTML = '<div class="loading">Loading...</div>'; return; }
     const values = this._view === "history" ? this._history : this._items;
+    if (this._linkedReminder) {
+      const heading = document.createElement("div");
+      heading.className = "linked-reminder-heading";
+      const title = document.createElement("strong");
+      title.textContent = "Opened from notification";
+      const close = this._action("Close", () => {
+        this._linkedReminder = null;
+        this._linkedReminderId = null;
+        this._renderList();
+      }, "secondary");
+      heading.append(title, close);
+      host.append(heading, this._reminderCard(this._linkedReminder));
+    }
     if (!values.length) {
+      if (this._linkedReminder) return;
       const empty = document.createElement("div");
       empty.className = "empty";
       empty.innerHTML = `<p>${this._query ? "No matching reminders" : this._view === "history" ? "No reminder history yet" : "No reminders here"}</p>`;
