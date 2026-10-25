@@ -286,3 +286,31 @@ test("Upcoming distinguishes actionable deliveries, context waits and overdue re
     globalThis.document = originalDocument;
   }
 });
+
+test("notification deep links fetch only the authorized reminder detail", async () => {
+  const panel = makePanel();
+  panel._linkedReminderId = "target-reminder";
+  const actions = [];
+  panel._call = async (name, payload) => {
+    actions.push([name, payload]);
+    if (name === "list") return { reminders: [], total: 0 };
+    if (name === "get") return { reminder: { id: "target-reminder", title: "Authorized" } };
+    throw new Error("Unexpected WebSocket call");
+  };
+  await panel._load();
+  assert.equal(panel._linkedReminder.id, "target-reminder");
+  assert.equal(actions[1][0], "get");
+  assert.deepEqual(actions[1][1], { reminder_id: "target-reminder" });
+});
+
+test("an unauthorized or deleted deep-linked reminder is never shown", async () => {
+  const panel = makePanel();
+  panel._linkedReminderId = "unavailable";
+  panel._linkedReminder = { id: "stale", title: "Stale private data" };
+  panel._call = async (name) => {
+    if (name === "list") return { reminders: [], total: 0 };
+    throw new Error("Not authorized");
+  };
+  await panel._load();
+  assert.equal(panel._linkedReminder, null);
+});
