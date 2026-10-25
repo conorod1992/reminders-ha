@@ -961,6 +961,14 @@ For recurring reminders, a failed occurrence is recorded and the series advances
 
 Repeated-reminder/escalation attempts are tracked separately and use their configured repeat delay.
 
+### Isolated delivery and rule health
+
+When several reminders become due at once, delivery attempts run with bounded concurrency rather than allowing one slow notification provider to delay every other reminder. Independent channels and phone destinations are likewise isolated, with timeouts, partial-failure reporting, and deterministic result ordering.
+
+If a non-administrator loses access to one phone or Assist target, remaining authorized targets are still attempted. Reminders records that the channel partially failed; it never reveals restricted entity IDs through another user's reminder list.
+
+When Home Assistant cannot attach a native activation, delivery, or completion listener, the affected reminder displays a warning in **Needs attention**. Native delivery-condition evaluation failures are also visible. For compatibility with the existing safety-biased rule policy, a native delivery-condition error currently **fails open** (the reminder may still deliver); users should review the affected rules.
+
 ## Recurrence timing and daylight saving time
 
 Recurring reminders use the original local date/time as their schedule anchor.
