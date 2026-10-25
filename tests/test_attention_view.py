@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from custom_components.reminders import websocket_registration as registration
 
 from custom_components.reminders.models import (
     Occurrence,
@@ -91,3 +97,36 @@ def test_attention_panel_is_additive_wrapper_over_native_panel() -> None:
     assert 'button.textContent = "Needs attention"' in source
     assert 'this._view = "attention"' in source
     assert "Nothing needs your attention" in source
+
+
+async def test_native_listener_failure_appears_in_needs_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reminder with an unavailable automation must be discoverable."""
+    broken = _reminder(
+        id="broken",
+        status=ReminderStatus.WAITING_FOR_TRIGGER,
+    )
+
+    class FakeManager:
+        def native_failure_roles(self, reminder_id: str) -> tuple[str, ...]:
+            return ("activation",) if reminder_id == broken.id else ()
+
+        async def async_list_page(self, **kwargs: Any) -> tuple[list[Reminder], int]:
+            assert kwargs["user_id"] == "user"
+            return [broken], 1
+
+    monkeypatch.setattr(registration, "_manager", lambda _hass: FakeManager())
+    matches, total = await registration._attention_page(
+        SimpleNamespace(),
+        user_id="user",
+        query=None,
+        due_after=None,
+        due_before=None,
+        source=None,
+        source_id=None,
+        limit=50,
+        offset=0,
+    )
+    assert matches == [broken]
+    assert total == 1
