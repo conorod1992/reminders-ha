@@ -93,6 +93,14 @@ if (proto && !proto.__frontendPolishInstalled) {
           ? result.total
           : this._items.length;
       }
+      const total = historyView ? this._historyTotal : this._listTotal;
+      const announcement = `${total} ${historyView ? "history entries" : "reminders"} match the current view.`;
+      if (this._lastListAnnouncement !== announcement || this._lastAnnouncementFilter !== filterKey) {
+        const status = this.shadowRoot?.querySelector("#list-status");
+        if (status) status.textContent = announcement;
+        this._lastListAnnouncement = announcement;
+        this._lastAnnouncementFilter = filterKey;
+      }
       this._loadedFilterKey = filterKey;
       this._clearError();
       return true;
