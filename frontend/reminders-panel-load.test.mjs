@@ -245,7 +245,7 @@ test("history outcome selector survives the generic view filter cleanup", () => 
   assert.ok(toolbar.querySelector(".history-outcome-wrap"));
 });
 
-test("Upcoming renders waiting and overdue reminders in distinct groups", () => {
+test("Upcoming distinguishes actionable deliveries, context waits and overdue reminders", () => {
   const originalDocument = globalThis.document;
   try {
     const createElement = (tag) => ({
@@ -262,10 +262,12 @@ test("Upcoming renders waiting and overdue reminders in distinct groups", () => 
     delete panel._renderList;
     panel._view = "upcoming";
     panel._hass = { config: { time_zone: "UTC" } };
-    panel._listTotal = 2;
+    panel._listTotal = 4;
     panel._items = [
       { id: "waiting", status: "waiting_for_context", activation_type: "time", due: "2026-01-01T12:00:00Z" },
       { id: "overdue", status: "pending", activation_type: "time", due: "2026-01-02T12:00:00Z" },
+      { id: "dismiss", status: "awaiting_acknowledgement", activation_type: "time", due: "2026-01-03T12:00:00Z" },
+      { id: "done", status: "delivered", activation_type: "time", due: "2026-01-04T12:00:00Z" },
     ];
     panel._reminderCard = (reminder) => ({ tag: "card", id: reminder.id });
     panel.shadowRoot = {
@@ -274,11 +276,11 @@ test("Upcoming renders waiting and overdue reminders in distinct groups", () => 
     panel._renderList();
     assert.deepEqual(
       host.children.filter((node) => node.tag === "h2").map((node) => node.textContent),
-      ["Waiting for conditions", "Overdue"],
+      ["Awaiting dismissal", "Action available", "Waiting for conditions", "Overdue"],
     );
     assert.deepEqual(
       host.children.filter((node) => node.tag === "card").map((node) => node.id),
-      ["waiting", "overdue"],
+      ["dismiss", "done", "waiting", "overdue"],
     );
   } finally {
     globalThis.document = originalDocument;
