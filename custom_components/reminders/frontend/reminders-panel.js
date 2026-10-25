@@ -324,7 +324,7 @@ class RemindersManagementPanel extends HTMLElement {
     const details = document.createElement("details");
     details.className = "outstanding-occurrences";
     const heading = document.createElement("summary");
-    heading.textContent = `${occurrences.length} earlier occurrences need action`;
+    heading.textContent = `${occurrences.length} outstanding occurrences`;
     details.append(heading);
     for (const occurrence of occurrences.slice(0, 5)) {
       const row = document.createElement("div");
