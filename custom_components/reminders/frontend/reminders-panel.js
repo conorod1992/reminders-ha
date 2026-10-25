@@ -684,7 +684,10 @@ class RemindersManagementPanel extends HTMLElement {
     for (const input of form.querySelectorAll?.("input,select,textarea") || []) {
       if (input.disabled || input.type === "hidden") continue;
       const value = input.type === "checkbox" || input.type === "radio"
-        ? Boolean(input.checked) : input.value;
+        ? Boolean(input.checked)
+        : input.multiple
+          ? [...input.selectedOptions].map((option) => option.value)
+          : input.value;
       data.push([input.name || input.id, value]);
     }
     // Native HA selector values are stored separately from ordinary inputs.
