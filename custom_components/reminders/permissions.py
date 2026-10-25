@@ -153,10 +153,10 @@ async def async_filter_delivery_policy_permissions(
     allowed_mobile = policy.mobile_app_services if user is not None and user.is_admin else ()
     denied: list[str] = []
     if "phone" in relevant:
-        denied.extend(f"phone: permission_denied ({target})" for target in policy.notify_targets if target not in allowed_notify)
-        denied.extend(f"phone: permission_denied ({target})" for target in policy.mobile_app_services if target not in allowed_mobile)
+        denied.extend("phone" for target in policy.notify_targets if target not in allowed_notify)
+        denied.extend("phone" for target in policy.mobile_app_services if target not in allowed_mobile)
     if "voice" in relevant:
-        denied.extend(f"voice: permission_denied ({target})" for target in policy.voice_targets if target not in allowed_voice)
+        denied.extend("voice" for target in policy.voice_targets if target not in allowed_voice)
     channels = tuple(
         channel for channel in policy.channels
         if channel not in {"phone", "voice"}
@@ -172,5 +172,5 @@ async def async_filter_delivery_policy_permissions(
             mobile_app_services=allowed_mobile,
             voice_targets=allowed_voice,
         ),
-        tuple(denied),
+        tuple(dict.fromkeys(denied)),
     )
