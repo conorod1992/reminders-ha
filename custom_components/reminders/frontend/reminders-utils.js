@@ -113,6 +113,18 @@ export function zonedInputParts(value, timeZone, locale = "en-CA") {
 export function localDateTime(date, time) {
   return `${date}T${time}:00`;
 }
+/** Format an HA-local date/time without interpreting it in the browser timezone.
+ *  The backend resolves local wall times in the selected HA/recurrence zone.
+ */
+export function scheduledLocalSummary(date, time, timeZone, locale = undefined) {
+  if (!date || !time) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  const displayDate = new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium", timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+  return `on ${displayDate} at ${time} (${timeZone})`;
+}
+
 
 export function quickTimeParts(choice, timeZone, now = Date.now()) {
   const instant = new Date(now);
