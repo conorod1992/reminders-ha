@@ -1177,8 +1177,14 @@ class RemindersManagementPanel extends HTMLElement {
     const resultHost = dialog.querySelector(".test-result"); resultHost.textContent = "Sending test...";
     try {
       const result = await this._call("test_delivery", payload);
-      resultHost.className = result.failed_channels.length ? "test-result hint" : "test-result success";
-      resultHost.textContent = result.failed_channels.length ? `Failed: ${result.failed_channels.join(", ")}` : `Success: ${result.succeeded_channels.join(", ")}`;
+      const succeeded = result.succeeded_channels || [];
+      const failed = result.failed_channels || [];
+      resultHost.className = failed.length ? "test-result hint" : "test-result success";
+      resultHost.textContent = [
+        succeeded.length ? `Succeeded: ${succeeded.join(", ")}` : "",
+        failed.length ? `Failed: ${failed.join(", ")}` : "",
+        !succeeded.length && !failed.length ? "No delivery channels were attempted." : "",
+      ].filter(Boolean).join(" · ");
     } catch (error) { resultHost.className = "test-result hint"; resultHost.textContent = error.message || String(error); }
   }
 
