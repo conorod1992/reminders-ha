@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from custom_components.reminders import websocket_registration as registration
+from custom_components.reminders.manager import ReminderManager
+from custom_components.reminders.recurrence import RecurrenceFrequency, RecurrenceRule
 from custom_components.reminders.models import (
     ActivationType,
     Occurrence,
@@ -124,3 +126,43 @@ async def test_upcoming_includes_reminders_waiting_for_context(
     assert ReminderStatus.WAITING_FOR_CONTEXT in observed_statuses
     assert page == [waiting]
     assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_early_done_round_trip_keeps_recurring_schedule_and_history(
+    fake_store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The actionable list ID must complete the task without shifting its anchor."""
+    monkeypatch.setattr(
+        "custom_components.reminders.manager.async_track_point_in_utc_time",
+        lambda _hass, _callback, _when: lambda: None,
+    )
+    runtime = ReminderManager(
+        SimpleNamespace(), fake_store, SimpleNamespace(async_deliver=None)
+    )
+    await runtime.async_load()
+    tomorrow = datetime.now(UTC) + timedelta(days=2)
+    anchor = tomorrow.replace(hour=10, minute=30, second=0, microsecond=0, tzinfo=None)
+    recurrence = RecurrenceRule(RecurrenceFrequency.DAILY, 1, "UTC", anchor)
+    created = await runtime.async_create_recurring(
+        user_id="owner-1",
+        title="Put out bins",
+        recurrence=recurrence,
+        allow_manual_completion=True,
+    )
+    summary = registration._serialize_summary(created, {})
+    current = summary["occurrence_history"]
+    assert len(current) == 1
+    assert current[0]["status"] == "scheduled"
+    assert current[0]["id"] == created.current_occurrence_id
+
+    completed = await runtime.async_complete(
+        created.id, expected_user_id="owner-1", occurrence_id=current[0]["id"]
+    )
+    updated = await runtime.async_get(created.id)
+    assert completed.status is OccurrenceStatus.COMPLETED
+    assert updated.due == created.due + timedelta(days=1)
+    assert updated.current_occurrence_id != completed.id
+    assert any(item.id == completed.id and item.status is OccurrenceStatus.COMPLETED
+               for item in updated.occurrence_history)
+    assert registration._serialize_summary(updated, {})["occurrence_history"][0]["id"] == updated.current_occurrence_id
