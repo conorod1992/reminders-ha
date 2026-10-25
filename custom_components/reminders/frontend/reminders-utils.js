@@ -219,6 +219,24 @@ export function relativeTime(value, locale = undefined, now = Date.now()) {
   return formatter.format(Math.round(seconds / 86400), "day");
 }
 
+/** A history row must distinguish "not attempted" from a failed send. */
+export function historyDeliverySummary(occurrence) {
+  const succeeded = occurrence?.succeeded_channels || [];
+  const failed = occurrence?.failed_channels || [];
+  if (succeeded.length) return `Delivered by ${succeeded.join(", ")}`;
+  if (failed.length || occurrence?.status === "failed") return "Delivery failed";
+  if (occurrence?.delivered_at) return "Delivered (channels not recorded)";
+  if (occurrence?.status === "completed") return "Completed without notification";
+  if (occurrence?.status === "acknowledged") return "Dismissed (delivery not recorded)";
+  if (occurrence?.status === "expired") return "Expired without notification";
+  if (occurrence?.status === "skipped") return "Skipped without notification";
+  if (occurrence?.status === "cancelled") return "Cancelled without notification";
+  if (occurrence?.status === "waiting_for_context") return "Waiting for delivery conditions";
+  if (occurrence?.status === "scheduled") return "Not yet delivered";
+  if (occurrence?.status === "delivering") return "Delivery in progress";
+  return "No notification recorded";
+}
+
 export function historyHighlights(occurrence, formatDate) {
   const result = [];
   const display = (value) => formatDate(value);
@@ -232,6 +250,13 @@ export function historyHighlights(occurrence, formatDate) {
     result.push(`Completed ${display(occurrence.completed_at)}`);
   }
   if (occurrence.next_escalation_at) result.push(`Next follow-up ${display(occurrence.next_escalation_at)}`);
+  if (occurrence.completion_reason === "home_assistant_offline") {
+    result.push("Missed while Home Assistant was offline");
+  } else if (occurrence.completion_reason === "permission_denied") {
+    result.push("Skipped because required entity access was revoked");
+  } else if (occurrence.completion_reason === "context_wait_expired") {
+    result.push("Delivery conditions were not met before expiry");
+  }
   if (occurrence.delivery_errors?.length) {
     result.push(`Delivery errors: ${occurrence.delivery_errors.join(", ")}`);
   }
