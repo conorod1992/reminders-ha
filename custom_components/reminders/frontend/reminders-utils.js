@@ -176,6 +176,17 @@ export function canSnooze(reminder) {
   return TIMED_SNOOZE_STATUSES.has(reminder.status);
 }
 
+/** Group already-delivered actionable reminders apart from not-yet-delivered overdue work. */
+export function upcomingSection(reminder, timeZone, now = Date.now()) {
+  if (reminder.status === "waiting_for_context") return "Waiting for conditions";
+  if (reminder.status === "awaiting_acknowledgement") return "Awaiting dismissal";
+  if (reminder.status === "delivered") return "Action available";
+  if (reminder.activation_type === "time" && reminder.due) {
+    return upcomingBucket(reminder.due, timeZone, now);
+  }
+  return null;
+}
+
 export function upcomingBucket(value, timeZone, now = Date.now()) {
   if (new Date(value).getTime() < now) return "Overdue";
   const local = zonedInputParts(value, timeZone).date;
