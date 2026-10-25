@@ -259,6 +259,12 @@ test("unresolved actions are matched to individual occurrences, with resolved hi
     ...reminder, occurrence_history: [
       { id: "already-selected", status: "delivered", external_action_id: "done" },
     ],
+  }).map((x) => x.id), ["already-selected"]);
+  assert.deepEqual(outstandingOccurrences({
+    ...reminder, allow_manual_completion: false, external_actions: [{ id: "done", label: "Done" }],
+    occurrence_history: [
+      { id: "already-selected", status: "delivered", external_action_id: "done" },
+    ],
   }), []);
   assert.deepEqual(outstandingOccurrences(null), []);
 });
