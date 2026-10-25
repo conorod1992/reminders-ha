@@ -87,7 +87,7 @@ async def test_mobile_service_receives_actions_without_done_when_not_required() 
 
     data = services.calls[0][2]
     assert services.calls[0][1] == "mobile_app_conor"
-    assert data["data"]["url"] == "/reminders"
+    assert data["data"]["url"] == "/reminders?reminder_id=reminder"
     assert data["data"]["tag"].startswith("reminders_reminder_")
     assert {action["title"] for action in data["data"]["actions"]} == {
         "Snooze 10 minutes",
@@ -106,7 +106,7 @@ async def test_repeated_mobile_delivery_uses_the_same_occurrence_tag() -> None:
     await provider.async_deliver(source, policy)
     await provider.async_deliver(source, policy)
     assert services.calls[0][2]["data"]["tag"] == services.calls[1][2]["data"]["tag"]
-    assert services.calls[0][2]["data"]["url"] == "/reminders"
+    assert services.calls[0][2]["data"]["url"] == "/reminders?reminder_id=reminder"
 
 
 async def test_mobile_action_rejection_falls_back_to_ordinary_notification() -> None:
