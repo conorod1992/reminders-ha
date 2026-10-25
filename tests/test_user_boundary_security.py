@@ -18,6 +18,7 @@ from custom_components.reminders.models import (
 )
 from custom_components.reminders.permissions import (
     ReminderPermissionError,
+    async_filter_delivery_policy_permissions,
     async_validate_delivery_policy_permission,
     async_validate_trigger_permission,
 )
@@ -295,3 +296,37 @@ async def test_due_delivery_condition_rechecks_revoked_read_access(
     await manager._async_process_due(due)
     assert dispatcher.calls == []
     assert manager._reminders[reminder.id].status is ReminderStatus.SKIPPED
+
+
+async def test_revoked_one_of_multiple_targets_preserves_healthy_destination() -> None:
+    hass = hass_with(
+        user("u1", control={"notify.allowed", "assist_satellite.allowed"})
+    )
+    permitted, denied = await async_filter_delivery_policy_permissions(
+        hass,  # type: ignore[arg-type]
+        "u1",
+        DeliveryPolicy(
+            ("phone", "voice"),
+            notify_targets=("notify.allowed", "notify.revoked"),
+            voice_targets=("assist_satellite.allowed", "assist_satellite.revoked"),
+        ),
+    )
+    assert permitted.channels == ("phone", "voice")
+    assert permitted.notify_targets == ("notify.allowed",)
+    assert permitted.voice_targets == ("assist_satellite.allowed",)
+    assert denied == ("phone", "voice")
+
+
+async def test_revoked_entire_target_group_removes_only_that_channel() -> None:
+    hass = hass_with(user("u1", control={"notify.allowed"}))
+    permitted, denied = await async_filter_delivery_policy_permissions(
+        hass,  # type: ignore[arg-type]
+        "u1",
+        DeliveryPolicy(
+            ("phone", "voice", "persistent_notification"),
+            notify_targets=("notify.allowed",),
+            voice_targets=("assist_satellite.revoked",),
+        ),
+    )
+    assert permitted.channels == ("phone", "persistent_notification")
+    assert denied == ("voice",)
