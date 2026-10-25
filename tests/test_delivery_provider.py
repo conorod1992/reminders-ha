@@ -438,3 +438,43 @@ async def test_parallel_channel_partial_failure() -> None:
     assert result.succeeded == ("phone", "voice")
     assert result.failed_channels == ("phone",)
     assert result.errors == ("phone: notify.offline: RuntimeError",)
+
+
+async def test_phone_targets_are_bounded_but_do_not_block_each_other() -> None:
+    active = 0
+    peak = 0
+    started = 0
+    release = asyncio.Event()
+    enough_started = asyncio.Event()
+
+    class BlockingServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            nonlocal active, peak, started
+            active += 1
+            peak = max(peak, active)
+            started += 1
+            if started == 4:
+                enough_started.set()
+            try:
+                await release.wait()
+            finally:
+                active -= 1
+
+    provider = NotifyProvider(
+        SimpleNamespace(services=BlockingServices())  # type: ignore[arg-type]
+    )
+    policy = DeliveryPolicy(
+        ("phone",),
+        notify_targets=tuple(f"notify.target_{i}" for i in range(10)),
+    )
+    task = asyncio.create_task(provider.async_deliver(reminder(), policy))
+    try:
+        await asyncio.wait_for(enough_started.wait(), 1)
+        assert started == 4
+        assert peak == 4
+    finally:
+        release.set()
+    await asyncio.wait_for(task, 1)
+    assert started == 10
