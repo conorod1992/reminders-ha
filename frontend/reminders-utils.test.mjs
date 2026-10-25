@@ -6,6 +6,7 @@ import {
   canSnooze,
   currentCompletableOccurrence,
   deliverySummary,
+  historyDeliverySummary,
   historyHighlights,
   localDateTime,
   quickTimeParts,
@@ -209,4 +210,32 @@ test("schedule preview preserves HA wall time independent of browser timezone", 
   assert.ok(scheduledLocalSummary("2026-11-01", "14:00", "America/New_York", "en-US").includes(
     "14:00 (America/New_York)",
   ));
+});
+
+test("history does not report failed delivery when no notification was attempted", () => {
+  for (const [status, expected] of [
+    ["completed", "Completed without notification"],
+    ["expired", "Expired without notification"],
+    ["skipped", "Skipped without notification"],
+    ["cancelled", "Cancelled without notification"],
+    ["waiting_for_context", "Waiting for delivery conditions"],
+  ]) {
+    assert.equal(historyDeliverySummary({ status, succeeded_channels: [], failed_channels: [] }), expected);
+  }
+  assert.equal(historyDeliverySummary({ status: "failed", failed_channels: ["phone"] }), "Delivery failed");
+  assert.equal(historyDeliverySummary({ status: "completed", delivered_at: "2026-10-10T11:00:00Z",
+    succeeded_channels: ["phone"], failed_channels: ["voice"] }), "Delivered by phone");
+  assert.equal(historyDeliverySummary({ status: "acknowledged", delivered_at: "2026-10-10T11:00:00Z" }),
+    "Delivered (channels not recorded)");
+});
+
+test("history gives specific reasons for missed, revoked and expired reminders", () => {
+  const format = (v) => v;
+  assert.deepEqual(historyHighlights({ completion_reason: "home_assistant_offline" }, format),
+    ["Missed while Home Assistant was offline"]);
+  assert.deepEqual(historyHighlights({ completion_reason: "permission_denied" }, format),
+    ["Skipped because required entity access was revoked"]);
+  assert.deepEqual(historyHighlights({ completion_reason: "context_wait_expired" }, format),
+    ["Delivery conditions were not met before expiry"]);
+  assert.deepEqual(historyHighlights({ completion_reason: "done" }, format), []);
 });
