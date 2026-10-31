@@ -24,7 +24,7 @@ if (proto && !proto.__robustStartupInstalled) {
   proto._start = async function () {
     if (this._started || this._startupInFlight || !this._hass || !this.isConnected) return;
     const generation = this._startupGeneration || 0;
-    const current = () => this.isConnected && generation === this._startupGeneration;
+    const current = () => this.isConnected && generation === (this._startupGeneration || 0);
     _clearRetryTimer(this);
     this._started = true;
     this._startupInFlight = true;
