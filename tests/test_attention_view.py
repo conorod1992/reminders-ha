@@ -103,7 +103,15 @@ def test_attention_panel_is_additive_wrapper_over_native_panel() -> None:
 
     assert '["attention", "Needs attention"]' in polish
     assert "proto._renderFilters = function ()" not in source
-    assert "Nothing needs your attention" in source
+    panel = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel.js"
+    ).read_text(encoding="utf-8")
+    assert "Nothing needs your attention" in panel
+    assert "proto._renderList = function ()" not in source
 
 
 async def test_native_listener_failure_appears_in_needs_attention(
