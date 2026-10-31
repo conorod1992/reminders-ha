@@ -1,5 +1,6 @@
 """Behavior tests for ReminderManager."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +16,7 @@ from custom_components.reminders.models import (
     AcknowledgementPolicy,
     DeliveryPolicy,
     EscalationPolicy,
+    Occurrence,
     OccurrenceStatus,
     Reminder,
     ReminderStatus,
@@ -371,3 +373,72 @@ async def test_unload_cancels_callback(
     await manager.async_unload()
     assert scheduler.cancelled == 1
     assert manager.scheduled_for is None
+
+
+async def test_multiple_due_reminders_dispatch_without_head_of_line_blocking(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await _manager(fake_store, FakeDispatcher(), scheduler)
+    now = datetime.now(UTC)
+    starts: set[str] = set()
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_delivery(reminder_id: str, _now: datetime) -> None:
+        starts.add(reminder_id)
+        if len(starts) == 2:
+            both_started.set()
+        await release.wait()
+
+    runtime._async_deliver_claimed = blocked_delivery  # type: ignore[method-assign]
+    for name in ("one", "two"):
+        occurrence = Occurrence(name, now, now)
+        runtime._reminders[name] = Reminder(
+            id=name,
+            user_id="owner",
+            title=name,
+            due=now,
+            created_at=now,
+            updated_at=now,
+            current_occurrence_id=name,
+            occurrence_history=(occurrence,),
+        )
+    task = asyncio.create_task(runtime._async_process_due(now))
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        assert starts == {"one", "two"}
+    finally:
+        release.set()
+    await asyncio.wait_for(task, timeout=1)
+
+
+async def test_derived_predicate_filters_before_pagination_and_exact_count(
+    fake_store: FakeStore, scheduler: Scheduler
+) -> None:
+    runtime = await _manager(fake_store, FakeDispatcher(), scheduler)
+    now = datetime.now(UTC)
+    for index in range(23):
+        await runtime.async_create(
+            user_id="u1",
+            title=f"Item {index:02d}",
+            due=now + timedelta(days=index + 1),
+        )
+    for index in range(3):
+        await runtime.async_create(
+            user_id="u2",
+            title=f"Other {index}",
+            due=now + timedelta(days=index + 1),
+        )
+    filtered, total = await runtime.async_list_page(
+        user_id="u1",
+        limit=4,
+        offset=2,
+        predicate=lambda reminder: int(reminder.title[-2:]) % 3 == 0,
+    )
+    assert total == 8
+    assert [item.title for item in filtered] == [
+        "Item 06",
+        "Item 09",
+        "Item 12",
+        "Item 15",
+    ]

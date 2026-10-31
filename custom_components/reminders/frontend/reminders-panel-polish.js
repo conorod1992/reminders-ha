@@ -93,6 +93,28 @@ if (proto && !proto.__frontendPolishInstalled) {
           ? result.total
           : this._items.length;
       }
+      if (this._linkedReminderId && !appendHistory && !appendList) {
+        const requestedId = this._linkedReminderId;
+        try {
+          const result = await this._call("get", { reminder_id: requestedId });
+          if (requestId !== this._loadRequestId) return true;
+          if (this._linkedReminderId === requestedId) this._linkedReminder = result.reminder || null;
+        } catch {
+          // A failed older lookup must not clear a newer authorized result.
+          if (requestId !== this._loadRequestId) return true;
+          if (this._linkedReminderId === requestedId) {
+            this._linkedReminder = null;
+          }
+        }
+      }
+      const total = historyView ? this._historyTotal : this._listTotal;
+      const announcement = `${total} ${historyView ? "history entries" : "reminders"} match the current view.`;
+      if (this._lastListAnnouncement !== announcement || this._lastAnnouncementFilter !== filterKey) {
+        const status = this.shadowRoot?.querySelector("#list-status");
+        if (status) status.textContent = announcement;
+        this._lastListAnnouncement = announcement;
+        this._lastAnnouncementFilter = filterKey;
+      }
       this._loadedFilterKey = filterKey;
       this._clearError();
       return true;
@@ -119,6 +141,8 @@ if (proto && !proto.__frontendPolishInstalled) {
     if (!tabs || !toolbar) return;
 
     tabs.classList.add("primary-tabs");
+    tabs.setAttribute?.("role", "tablist");
+    tabs.setAttribute?.("aria-label", "Reminder views");
     tabs.replaceChildren();
     const primary = [
       ["attention", "Needs attention"],
@@ -132,9 +156,24 @@ if (proto && !proto.__frontendPolishInstalled) {
       button.className = `tab${active ? " active" : ""}`;
       button.dataset.view = view;
       button.textContent = label;
+      button.setAttribute?.("role", "tab");
+      button.setAttribute?.("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
       button.onclick = () => {
         this._view = view;
         this._load();
+      };
+      button.onkeydown = (event) => {
+        const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+        if (!keys.includes(event.key)) return;
+        const buttons = [...tabs.querySelectorAll('[role="tab"]')];
+        const current = buttons.indexOf(button);
+        const next = event.key === "Home" ? 0
+          : event.key === "End" ? buttons.length - 1
+            : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+        event.preventDefault();
+        buttons[next]?.focus();
+        buttons[next]?.click();
       };
       tabs.append(button);
     }
@@ -299,6 +338,9 @@ function _installPolishStyles(root) {
   const style = document.createElement("style");
   style.id = "reminders-polish-styles";
   style.textContent = `
+    .attention-card{border-inline-start:4px solid var(--warning-color)}
+    .attention-note{margin-top:5px;font-size:13px;font-weight:500;color:var(--warning-color)}
+    .attention-note.delivery_failed,.attention-note.recent_delivery_failed{color:var(--error-color)}
     .primary-tabs{gap:4px}
     .primary-tabs .tab{white-space:nowrap;padding-inline:14px}
     .toolbar{align-items:end}

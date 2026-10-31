@@ -4,14 +4,20 @@ import {
   acknowledgementSummary,
   awaitingOccurrences,
   canSnooze,
+  currentCompletableOccurrence,
   deliverySummary,
+  historyDeliverySummary,
   historyHighlights,
+  outstandingOccurrences,
   localDateTime,
   quickTimeParts,
   recurrenceSummary,
+  reminderNextStep,
+  scheduledLocalSummary,
   suggestedStates,
   triggerRepeatSummary,
   upcomingBucket,
+  upcomingSection,
   relativeTime,
 } from "../custom_components/reminders/frontend/reminders-utils.js";
 
@@ -73,6 +79,8 @@ test("groups upcoming reminders using the Home Assistant timezone", () => {
   assert.equal(upcomingBucket("2026-08-31T08:00:00Z", "Europe/Dublin", now), "This week");
   assert.equal(upcomingBucket("2026-09-20T08:00:00Z", "Europe/Dublin", now), "Later");
   assert.equal(relativeTime("2026-08-26T23:12:00Z", "en", now), "in 42 minutes");
+  assert.equal(upcomingBucket("2026-08-26T21:45:00Z", "Europe/Dublin", now), "Overdue");
+  assert.equal(upcomingBucket("2026-08-25T09:00:00Z", "Europe/Dublin", now), "Overdue");
 });
 
 
@@ -111,4 +119,152 @@ test("history highlights distinguish planned, actual and resolved times", () => 
 
 test("history highlights tolerate sparse older occurrence records", () => {
   assert.deepEqual(historyHighlights({}, (time) => time), []);
+});
+
+test("later-today shortcut never chooses an elapsed or invalid time", () => {
+  assert.deepEqual(quickTimeParts("later", "UTC", Date.parse("2026-08-04T09:00:00Z")), {
+    date: "2026-08-04", time: "18:00",
+  });
+  assert.deepEqual(quickTimeParts("later", "UTC", Date.parse("2026-08-04T22:30:00Z")), {
+    date: "2026-08-04", time: "23:00",
+  });
+  assert.equal(quickTimeParts("later", "UTC", Date.parse("2026-08-04T23:00:00Z")), null);
+  assert.equal(quickTimeParts("later", "UTC", Date.parse("2026-08-04T23:59:59Z")), null);
+  // 22:30 UTC is 23:30 in Dublin during summer time.
+  assert.equal(quickTimeParts("later", "Europe/Dublin", Date.parse("2026-08-04T22:30:00Z")), null);
+});
+
+test("explains context waits, deadlines and reminder resolution without losing privacy", () => {
+  const waiting = {
+    status: "waiting_for_context",
+    current_occurrence_id: "due-1",
+    deliver_when_summary: "when the house is occupied",
+    occurrence_history: [
+      { id: "other", expires_at: "2026-08-04T15:00:00Z" },
+      { id: "due-1", status: "waiting_for_context", expires_at: "2026-08-04T21:00:00Z" },
+    ],
+  };
+  assert.equal(
+    reminderNextStep(waiting, (value) => value.slice(11, 16)),
+    "Waiting for delivery conditions: when the house is occupied. If it is still waiting, it expires 21:00.",
+  );
+  assert.equal(reminderNextStep({ status: "failed" }), "Delivery failed — review the delivery error or retry the reminder.");
+  assert.equal(reminderNextStep({ status: "awaiting_acknowledgement" }), "Delivered — waiting for you to dismiss this occurrence.");
+  assert.equal(reminderNextStep({ status: "pending" }), "");
+});
+
+test("pre-delivery Done now requires the active, scheduled, eligible occurrence", () => {
+  const reminder = {
+    status: "pending",
+    activation_type: "time",
+    allow_manual_completion: true,
+    paused: false,
+    current_occurrence_id: "active",
+    occurrence_history: [
+      { id: "older", status: "scheduled" },
+      { id: "active", status: "scheduled" },
+    ],
+  };
+  assert.equal(currentCompletableOccurrence(reminder)?.id, "active");
+  assert.equal(currentCompletableOccurrence({ ...reminder, paused: true }), null);
+  assert.equal(currentCompletableOccurrence({ ...reminder, allow_manual_completion: false }), null);
+  assert.equal(currentCompletableOccurrence({ ...reminder, status: "completed" }), null);
+  assert.equal(currentCompletableOccurrence({ ...reminder, activation_type: "trigger" }), null);
+  assert.equal(currentCompletableOccurrence({
+    ...reminder, occurrence_history: [{ id: "active", status: "completed" }],
+  }), null);
+});
+
+test("an advanced recurring series explains a prior unresolved occurrence", () => {
+  const text = reminderNextStep({
+    status: "pending",
+    occurrence_history: [{ id: "older", status: "awaiting_acknowledgement" }],
+  });
+  assert.match(text, /earlier occurrence still needs dismissal/);
+});
+
+test("upcoming sections do not mislabel delivered action-required reminders as overdue", () => {
+  const now = Date.parse("2026-09-22T10:00:00Z");
+  const timeZone = "Europe/Dublin";
+  const due = "2026-09-21T08:00:00Z";
+  const base = { activation_type: "time", due };
+  assert.equal(upcomingSection({ ...base, status: "pending" }, timeZone, now), "Overdue");
+  assert.equal(upcomingSection({ ...base, status: "waiting_for_context" }, timeZone, now), "Waiting for conditions");
+  assert.equal(upcomingSection({ ...base, status: "awaiting_acknowledgement" }, timeZone, now), "Awaiting dismissal");
+  assert.equal(upcomingSection({ ...base, status: "delivered" }, timeZone, now), "Action available");
+  assert.equal(upcomingSection({
+    ...base, status: "pending", due: "2026-09-23T08:00:00Z",
+  }, timeZone, now), "Tomorrow");
+  assert.equal(upcomingSection({
+    activation_type: "trigger", status: "waiting_for_trigger", due: null,
+  }, timeZone, now), null);
+});
+
+test("schedule preview preserves HA wall time independent of browser timezone", () => {
+  assert.equal(
+    scheduledLocalSummary("2026-10-25", "09:00", "Europe/Dublin", "en-GB"),
+    "on 25 Oct 2026 at 09:00 (Europe/Dublin)",
+  );
+  assert.ok(scheduledLocalSummary("2026-03-29", "02:30", "Europe/Dublin", "en-GB").includes(
+    "02:30 (Europe/Dublin)",
+  ));
+  assert.ok(scheduledLocalSummary("2026-11-01", "14:00", "America/New_York", "en-US").includes(
+    "14:00 (America/New_York)",
+  ));
+});
+
+test("history does not report failed delivery when no notification was attempted", () => {
+  for (const [status, expected] of [
+    ["completed", "Completed without notification"],
+    ["expired", "Expired without notification"],
+    ["skipped", "Skipped without notification"],
+    ["cancelled", "Cancelled without notification"],
+    ["waiting_for_context", "Waiting for delivery conditions"],
+  ]) {
+    assert.equal(historyDeliverySummary({ status, succeeded_channels: [], failed_channels: [] }), expected);
+  }
+  assert.equal(historyDeliverySummary({ status: "failed", failed_channels: ["phone"] }), "Delivery failed");
+  assert.equal(historyDeliverySummary({ status: "completed", delivered_at: "2026-10-10T11:00:00Z",
+    succeeded_channels: ["phone"], failed_channels: ["voice"] }), "Delivered by phone");
+  assert.equal(historyDeliverySummary({ status: "acknowledged", delivered_at: "2026-10-10T11:00:00Z" }),
+    "Delivered (channels not recorded)");
+});
+
+test("history gives specific reasons for missed, revoked and expired reminders", () => {
+  const format = (v) => v;
+  assert.deepEqual(historyHighlights({ completion_reason: "home_assistant_offline" }, format),
+    ["Missed while Home Assistant was offline"]);
+  assert.deepEqual(historyHighlights({ completion_reason: "permission_denied" }, format),
+    ["Skipped because required entity access was revoked"]);
+  assert.deepEqual(historyHighlights({ completion_reason: "context_wait_expired" }, format),
+    ["Delivery conditions were not met before expiry"]);
+  assert.deepEqual(historyHighlights({ completion_reason: "done" }, format), []);
+});
+
+test("unresolved actions are matched to individual occurrences, with resolved history excluded", () => {
+  const reminder = {
+    allow_manual_completion: true,
+    occurrence_history: [
+      { id: "old", status: "awaiting_acknowledgement", scheduled_due: "2026-10-01T10:00:00Z" },
+      { id: "done", status: "completed", scheduled_due: "2026-10-02T10:00:00Z" },
+      { id: "new", status: "delivered", scheduled_due: "2026-10-03T10:00:00Z" },
+      { id: "scheduled", status: "scheduled", scheduled_due: "2026-10-04T10:00:00Z" },
+    ],
+  };
+  assert.deepEqual(outstandingOccurrences(reminder).map((x) => x.id), ["new", "old"]);
+  assert.deepEqual(outstandingOccurrences({
+    ...reminder, allow_manual_completion: false,
+  }).map((x) => x.id), ["old"]);
+  assert.deepEqual(outstandingOccurrences({
+    ...reminder, occurrence_history: [
+      { id: "already-selected", status: "delivered", external_action_id: "done" },
+    ],
+  }).map((x) => x.id), ["already-selected"]);
+  assert.deepEqual(outstandingOccurrences({
+    ...reminder, allow_manual_completion: false, external_actions: [{ id: "done", label: "Done" }],
+    occurrence_history: [
+      { id: "already-selected", status: "delivered", external_action_id: "done" },
+    ],
+  }), []);
+  assert.deepEqual(outstandingOccurrences(null), []);
 });

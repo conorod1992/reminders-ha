@@ -81,8 +81,21 @@ def _serialize_summary(reminder: Reminder, names: dict[str, str]) -> dict[str, A
         for item in reminder.occurrence_history
         if item.status is OccurrenceStatus.AWAITING_ACKNOWLEDGEMENT
         or (
+            item.status is OccurrenceStatus.WAITING_FOR_CONTEXT
+            and item.id == reminder.current_occurrence_id
+            and reminder.status is ReminderStatus.WAITING_FOR_CONTEXT
+        )
+        or (
             item.status is OccurrenceStatus.DELIVERED
             and (reminder.allow_manual_completion or reminder.external_actions)
+        )
+        or (
+            item.status is OccurrenceStatus.SCHEDULED
+            and item.id == reminder.current_occurrence_id
+            and reminder.allow_manual_completion
+            and reminder.activation_type is ActivationType.TIME
+            and reminder.status is ReminderStatus.PENDING
+            and not reminder.paused
         )
     ]
     attention_reason = _attention_reason(reminder)
@@ -111,28 +124,22 @@ async def _filtered_page(
 ) -> tuple[list[Reminder], int]:
     """Apply a derived predicate before paging and report its exact total."""
     manager = _manager(hass)
-    matches: list[Reminder] = []
-    source_offset = 0
-    source_total: int | None = None
-    while source_total is None or source_offset < source_total:
-        page, source_total = await manager.async_list_page(
-            user_id=user_id,
-            due_after=due_after,
-            due_before=due_before,
-            query=query,
-            recurring=recurring,
-            activation_type=activation_type,
-            statuses=statuses,
-            source=source,
-            source_id=source_id,
-            limit=1000,
-            offset=source_offset,
-        )
-        matches.extend(item for item in page if predicate(item))
-        source_offset += len(page)
-        if not page:
-            break
-    return matches[offset : offset + limit], len(matches)
+    # Filter, sort and count under the manager's existing list lock once.
+    # Repeated 1000-item scans re-sorted the same population on every page.
+    return await manager.async_list_page(
+        user_id=user_id,
+        due_after=due_after,
+        due_before=due_before,
+        query=query,
+        recurring=recurring,
+        activation_type=activation_type,
+        statuses=statuses,
+        source=source,
+        source_id=source_id,
+        limit=limit,
+        offset=offset,
+        predicate=predicate,
+    )
 
 
 async def _failed_page(
@@ -188,7 +195,12 @@ async def _attention_page(
         source_id=source_id,
         limit=limit,
         offset=offset,
-        predicate=lambda item: _attention_reason(item) is not None,
+        predicate=lambda item: (
+            _attention_reason(item) is not None
+            or bool(
+                getattr(_manager(hass), "native_failure_roles", lambda _id: ())(item.id)
+            )
+        ),
     )
 
 
@@ -218,6 +230,7 @@ async def _upcoming_page(
         activation_type=ActivationType.TIME,
         statuses={
             ReminderStatus.PENDING,
+            ReminderStatus.WAITING_FOR_CONTEXT,
             ReminderStatus.AWAITING_ACKNOWLEDGEMENT,
             ReminderStatus.DELIVERED,
         },
@@ -342,12 +355,19 @@ async def websocket_list(
     names = (
         await _user_names(hass) if connection.user.is_admin and scope != "mine" else {}
     )
+    health = getattr(manager, "native_failure_roles", None)
+    summaries = []
+    for item in reminders:
+        summary = _serialize_summary(item, names)
+        if callable(health):
+            roles = health(item.id)
+            if roles:
+                summary["native_trigger_failure_roles"] = list(roles)
+                summary.setdefault("attention_reason", "automation_unavailable")
+        summaries.append(summary)
     connection.send_result(
         msg["id"],
-        {
-            "reminders": [_serialize_summary(item, names) for item in reminders],
-            "total": total,
-        },
+        {"reminders": summaries, "total": total},
     )
 
 

@@ -140,31 +140,58 @@ async def async_filter_delivery_policy_permissions(
     user, enforced = await _async_user(hass, user_id)
     if not enforced:
         return policy, ()
-    denied: set[str] = set()
-    if user is None:
-        denied.update(relevant)
-    elif not user.is_admin:
-        if "phone" in relevant and (
-            policy.mobile_app_services
-            or any(
-                not _can(user, item, POLICY_CONTROL) for item in policy.notify_targets
-            )
-        ):
-            denied.add("phone")
-        if "voice" in relevant and any(
-            not _can(user, item, POLICY_CONTROL) for item in policy.voice_targets
-        ):
-            denied.add("voice")
+    if user is not None and user.is_admin:
+        return policy, ()
+    allowed_notify = (
+        tuple(
+            target
+            for target in policy.notify_targets
+            if _can(user, target, POLICY_CONTROL)
+        )
+        if user is not None
+        else ()
+    )
+    allowed_voice = (
+        tuple(
+            target
+            for target in policy.voice_targets
+            if _can(user, target, POLICY_CONTROL)
+        )
+        if user is not None
+        else ()
+    )
+    allowed_mobile = (
+        policy.mobile_app_services if user is not None and user.is_admin else ()
+    )
+    denied: list[str] = []
+    if "phone" in relevant:
+        denied.extend(
+            "phone" for target in policy.notify_targets if target not in allowed_notify
+        )
+        denied.extend(
+            "phone"
+            for target in policy.mobile_app_services
+            if target not in allowed_mobile
+        )
+    if "voice" in relevant:
+        denied.extend(
+            "voice" for target in policy.voice_targets if target not in allowed_voice
+        )
+    channels = tuple(
+        channel
+        for channel in policy.channels
+        if channel not in {"phone", "voice"}
+        or (channel == "phone" and (allowed_notify or allowed_mobile))
+        or (channel == "voice" and allowed_voice)
+    )
     if not denied:
         return policy, ()
     return (
         DeliveryPolicy(
-            channels=tuple(
-                channel for channel in policy.channels if channel not in denied
-            ),
-            notify_targets=policy.notify_targets,
-            mobile_app_services=policy.mobile_app_services,
-            voice_targets=policy.voice_targets,
+            channels=channels,
+            notify_targets=allowed_notify,
+            mobile_app_services=allowed_mobile,
+            voice_targets=allowed_voice,
         ),
-        tuple(channel for channel in policy.channels if channel in denied),
+        tuple(dict.fromkeys(denied)),
     )

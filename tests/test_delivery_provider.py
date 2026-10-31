@@ -74,6 +74,48 @@ async def test_generic_notify_entity_never_receives_actions() -> None:
     assert kwargs["context"].user_id == "user"
 
 
+async def test_parallel_targets_do_not_share_mutable_service_payloads() -> None:
+    """HA merges target into service_data before awaiting the service handler."""
+    both_started = asyncio.Event()
+    received: list[dict[str, Any]] = []
+    mobile: list[dict[str, Any]] = []
+
+    class MutatingServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            if service == "send_message":
+                data.update(kwargs["target"])
+                received.append(data)
+                if len(received) == 2:
+                    both_started.set()
+                await both_started.wait()
+            else:
+                mobile.append(data)
+                if "entity_id" in data:
+                    raise ServiceValidationError("unexpected entity_id")
+
+    provider = NotifyProvider(SimpleNamespace(services=MutatingServices()))  # type: ignore[arg-type]
+    result = await asyncio.wait_for(
+        provider.async_deliver(
+            reminder(),
+            DeliveryPolicy(
+                ("phone",),
+                notify_targets=("notify.first", "notify.second"),
+                mobile_app_services=("notify.mobile_app_phone",),
+            ),
+        ),
+        timeout=1,
+    )
+    assert result is None
+    assert [data["entity_id"] for data in received] == [
+        ["notify.first"],
+        ["notify.second"],
+    ]
+    assert len(mobile) == 1
+    assert "entity_id" not in mobile[0]
+
+
 async def test_mobile_service_receives_actions_without_done_when_not_required() -> None:
     services = Services()
     provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]
@@ -87,7 +129,7 @@ async def test_mobile_service_receives_actions_without_done_when_not_required() 
 
     data = services.calls[0][2]
     assert services.calls[0][1] == "mobile_app_conor"
-    assert data["data"]["url"] == "/reminders"
+    assert data["data"]["url"] == "/reminders?reminder_id=reminder"
     assert data["data"]["tag"].startswith("reminders_reminder_")
     assert {action["title"] for action in data["data"]["actions"]} == {
         "Snooze 10 minutes",
@@ -106,7 +148,7 @@ async def test_repeated_mobile_delivery_uses_the_same_occurrence_tag() -> None:
     await provider.async_deliver(source, policy)
     await provider.async_deliver(source, policy)
     assert services.calls[0][2]["data"]["tag"] == services.calls[1][2]["data"]["tag"]
-    assert services.calls[0][2]["data"]["url"] == "/reminders"
+    assert services.calls[0][2]["data"]["url"] == "/reminders?reminder_id=reminder"
 
 
 async def test_mobile_action_rejection_falls_back_to_ordinary_notification() -> None:
@@ -374,3 +416,107 @@ async def test_mobile_tag_rejection_without_actions_falls_back() -> None:
     assert len(services.calls) == 2
     assert "data" in services.calls[0][2]
     assert services.calls[1][2] == {"title": source.title, "message": source.message}
+
+
+async def test_independent_channels_do_not_wait_for_slow_provider() -> None:
+    slow_started = asyncio.Event()
+    release_slow = asyncio.Event()
+    fast_delivered = asyncio.Event()
+
+    class Slow:
+        channel = "phone"
+
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> None:
+            slow_started.set()
+            await release_slow.wait()
+
+    class Fast:
+        channel = "voice"
+
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> None:
+            fast_delivered.set()
+
+    dispatcher = DeliveryDispatcher([Slow(), Fast()])  # type: ignore[list-item]
+    task = asyncio.create_task(
+        dispatcher.async_deliver(reminder(), DeliveryPolicy(("phone", "voice")))
+    )
+    try:
+        await asyncio.wait_for(slow_started.wait(), timeout=1)
+        await asyncio.wait_for(fast_delivered.wait(), timeout=1)
+    finally:
+        release_slow.set()
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result.succeeded == ("phone", "voice")
+    assert result.failed_channels == ()
+
+
+async def test_parallel_channel_partial_failure() -> None:
+    from custom_components.reminders.delivery import PartialDeliveryOutcome
+
+    class Partial:
+        channel = "phone"
+
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> PartialDeliveryOutcome:
+            return PartialDeliveryOutcome(("notify.offline: RuntimeError",))
+
+    class Healthy:
+        channel = "voice"
+
+        async def async_deliver(
+            self, _reminder: Reminder, _policy: DeliveryPolicy
+        ) -> None:
+            return None
+
+    dispatcher = DeliveryDispatcher([Partial(), Healthy()])  # type: ignore[list-item]
+    result = await dispatcher.async_deliver(
+        reminder(), DeliveryPolicy(("phone", "voice"))
+    )
+    assert result.succeeded == ("phone", "voice")
+    assert result.failed_channels == ("phone",)
+    assert result.errors == ("phone: notify.offline: RuntimeError",)
+
+
+async def test_phone_targets_are_bounded_but_do_not_block_each_other() -> None:
+    active = 0
+    peak = 0
+    started = 0
+    release = asyncio.Event()
+    enough_started = asyncio.Event()
+
+    class BlockingServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            nonlocal active, peak, started
+            active += 1
+            peak = max(peak, active)
+            started += 1
+            if started == 4:
+                enough_started.set()
+            try:
+                await release.wait()
+            finally:
+                active -= 1
+
+    provider = NotifyProvider(
+        SimpleNamespace(services=BlockingServices())  # type: ignore[arg-type]
+    )
+    policy = DeliveryPolicy(
+        ("phone",),
+        notify_targets=tuple(f"notify.target_{i}" for i in range(10)),
+    )
+    task = asyncio.create_task(provider.async_deliver(reminder(), policy))
+    try:
+        await asyncio.wait_for(enough_started.wait(), 1)
+        assert started == 4
+        assert peak == 4
+    finally:
+        release.set()
+    await asyncio.wait_for(task, 1)
+    assert started == 10

@@ -155,7 +155,9 @@ These include:
 - automatic completion
 - repeated reminders/escalation
 
-Quick time choices simply fill in the normal date/time fields. You can still edit either before saving.
+Quick time choices simply fill in the normal date/time fields. You can still edit either before saving. **Later today** becomes unavailable late at night when no suitable time remains today, rather than selecting a time in the past.
+
+The editor warns before discarding unsaved fields or Home Assistant-native rules, and changing a recurring schedule is explained before saving. Save requests are guarded against accidental double-submission. On a small screen or keyboard, dialog controls remain accessible and the focused control is restored after closing a dialog.
 
 ### Reminder actions
 
@@ -226,7 +228,7 @@ Search looks through reminder titles and messages.
 The panel has four primary views:
 
 - **Needs attention** — reminders that currently require action or have a problem
-- **Upcoming** — reminders waiting for their next scheduled delivery
+- **Upcoming** — scheduled reminders, including those already due but still waiting for delivery conditions; waiting reminders have their own section and any genuinely overdue items are identified separately
 - **All reminders** — the complete current reminder list
 - **History** — resolved/delivered occurrence history
 
@@ -687,6 +689,8 @@ If a selected Companion App service rejects the action payload, Reminders retrie
 
 No Home Assistant automation is required to handle these actions.
 
+Opening a supported Companion App notification navigates directly to the linked reminder using an authorized Reminders WebSocket lookup. If the reminder has been deleted or the user does not have access, its private details are not shown.
+
 ## Multiple Home Assistant users
 
 Each Home Assistant user has their own:
@@ -960,6 +964,14 @@ A fully failed one-time reminder stops rather than entering an automatic retry l
 For recurring reminders, a failed occurrence is recorded and the series advances to its next scheduled occurrence.
 
 Repeated-reminder/escalation attempts are tracked separately and use their configured repeat delay.
+
+### Isolated delivery and rule health
+
+When several reminders become due at once, delivery attempts run with bounded concurrency rather than allowing one slow notification provider to delay every other reminder. Independent channels and phone destinations are likewise isolated, with timeouts, partial-failure reporting, and deterministic result ordering.
+
+If a non-administrator loses access to one phone or Assist target, remaining authorized targets are still attempted. Reminders records that the channel partially failed; it never reveals restricted entity IDs through another user's reminder list.
+
+When Home Assistant cannot attach a native activation, delivery, or completion listener, the affected reminder displays a warning in **Needs attention**. Native delivery-condition evaluation failures are also visible. For compatibility with the existing safety-biased rule policy, a native delivery-condition error currently **fails open** (the reminder may still deliver); users should review the affected rules.
 
 ## Recurrence timing and daylight saving time
 

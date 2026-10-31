@@ -101,6 +101,10 @@ class NativeReminderManager(ReminderManager):
         """Return privacy-safe native trigger failure counts by lifecycle role."""
         return self._native_runtime.failed_listener_roles
 
+    def native_failure_roles(self, reminder_id: str) -> tuple[str, ...]:
+        """Return only affected listener roles for an authorized reminder."""
+        return self._native_runtime.failed_roles_for_reminder(reminder_id)
+
     async def async_load(self) -> None:
         """Load legacy state, then arm native rules."""
         await super().async_load()

@@ -60,6 +60,7 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
     _installClassicFallback(this, form);
     _refreshNativeVisibility(form);
     this._updateBehaviorSummary(form);
+    form._initialSnapshot = this._formSnapshot(form);
   };
 
   proto._triggerData = function (form, prefix = "") {

@@ -22,31 +22,45 @@ if (proto && !proto.__robustStartupInstalled) {
   };
 
   proto._start = async function () {
-    if (this._started || this._startupInFlight || !this._hass) return;
-
+    if (this._started || this._startupInFlight || !this._hass || !this.isConnected) return;
+    const generation = this._startupGeneration || 0;
+    const current = () => this.isConnected && generation === (this._startupGeneration || 0);
     _clearRetryTimer(this);
     this._started = true;
     this._startupInFlight = true;
     this._startupLoadError = null;
     try {
-      if (this._hass.user?.is_admin) this._users = (await this._call("users")).users;
-      this._preferences = (await this._call("get_preferences")).preferences;
+      if (this._hass.user?.is_admin) {
+        const users = await this._call("users");
+        if (!current()) return;
+        this._users = users.users;
+      }
+      const preferences = await this._call("get_preferences");
+      if (!current()) return;
+      this._preferences = preferences.preferences;
 
       this._startupPhase = true;
       const loaded = await this._load();
+      if (!current()) return;
       this._startupPhase = false;
       if (loaded === false || this._startupLoadError) {
         throw this._startupLoadError || new Error("Reminders could not be loaded.");
       }
 
-      this._unsubscribe = await this._hass.connection.subscribeMessage(
-        () => this._load(),
+      const unsubscribe = await this._hass.connection.subscribeMessage(
+        () => { if (current()) this._load(); },
         { type: "reminders/subscribe" },
       );
+      if (!current()) {
+        unsubscribe();
+        return;
+      }
+      this._unsubscribe = unsubscribe;
       this._startupRetryAttempt = 0;
       _removeRetryUi(this);
       if (!this._preferences.configured) this._openPreferences(true);
     } catch (error) {
+      if (!current()) return;
       this._startupPhase = false;
       if (this._unsubscribe) {
         this._unsubscribe();
@@ -59,11 +73,15 @@ if (proto && !proto.__robustStartupInstalled) {
       _showRetryUi(this);
       _scheduleRetry(this);
     } finally {
-      this._startupInFlight = false;
+      if (generation === (this._startupGeneration || 0)) this._startupInFlight = false;
     }
   };
 
   proto.disconnectedCallback = function () {
+    this._startupGeneration = (this._startupGeneration || 0) + 1;
+    // Retire any page request which started before the disconnect.
+    // Otherwise a late response could redraw an obsolete panel after teardown.
+    this._loadRequestId = (this._loadRequestId || 0) + 1;
     _clearRetryTimer(this);
     _removeRetryUi(this);
     this._startupInFlight = false;
