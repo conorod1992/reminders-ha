@@ -437,5 +437,8 @@ async def test_derived_predicate_filters_before_pagination_and_exact_count(
     )
     assert total == 8
     assert [item.title for item in filtered] == [
-        "Item 06", "Item 09", "Item 12", "Item 15"
+        "Item 06",
+        "Item 09",
+        "Item 12",
+        "Item 15",
     ]
