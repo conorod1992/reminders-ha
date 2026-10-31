@@ -73,7 +73,7 @@ if (proto && !proto.__robustStartupInstalled) {
       _showRetryUi(this);
       _scheduleRetry(this);
     } finally {
-      if (generation === this._startupGeneration) this._startupInFlight = false;
+      if (generation === (this._startupGeneration || 0)) this._startupInFlight = false;
     }
   };
 

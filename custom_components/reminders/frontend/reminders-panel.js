@@ -704,7 +704,8 @@ class RemindersManagementPanel extends HTMLElement {
   _formSnapshot(form) {
     const data = [];
     for (const input of form.querySelectorAll?.("input,select,textarea") || []) {
-      if (input.disabled || input.type === "hidden") continue;
+      // HA entity pickers write their editable values into hidden inputs.
+      if (input.disabled) continue;
       const value = input.type === "checkbox" || input.type === "radio"
         ? Boolean(input.checked)
         : input.multiple

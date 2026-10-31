@@ -36,6 +36,19 @@ function panelFixture() {
   return panel;
 }
 
+test("a transient first-start failure releases the guard and permits retry", async () => {
+  const panel = panelFixture();
+  panel._call = async () => { throw new Error("temporarily disconnected"); };
+  await panel._start();
+  assert.equal(panel._started, false);
+  assert.equal(panel._startupInFlight, false);
+  panel._call = async () => ({ preferences: { configured: true } });
+  await panel._start();
+  assert.equal(panel._started, true);
+  assert.equal(panel._startupInFlight, false);
+  panel.disconnectedCallback();
+});
+
 test("disconnect during preferences fetch cannot subscribe or open a dialog", async () => {
   const panel = panelFixture();
   const pending = deferred();

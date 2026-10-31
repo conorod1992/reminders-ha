@@ -19,7 +19,7 @@ test("dirty-form snapshot tracks only editable state and native rules", () => {
   const fields = [
     { name: "title", value: "Take bins out", type: "text" },
     { name: "manual", type: "checkbox", checked: false },
-    { name: "internal_id", type: "hidden", value: "token" },
+    { name: "state_entity", type: "hidden", value: "sensor.original" },
     { name: "disabled", type: "text", value: "ignored", disabled: true },
   ];
   const targets = { name: "notify_targets", type: "select-multiple", multiple: true,
@@ -27,7 +27,9 @@ test("dirty-form snapshot tracks only editable state and native rules", () => {
   fields.push(targets);
   const form = { querySelectorAll: () => fields };
   const original = panel._formSnapshot(form);
-  fields[2].value = "changed";
+  fields[2].value = "sensor.changed";
+  assert.notEqual(panel._formSnapshot(form), original);
+  fields[2].value = "sensor.original";
   fields[3].value = "changed";
   assert.equal(panel._formSnapshot(form), original);
   fields[1].checked = true;

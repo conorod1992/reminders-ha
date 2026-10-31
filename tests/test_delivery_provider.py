@@ -74,6 +74,48 @@ async def test_generic_notify_entity_never_receives_actions() -> None:
     assert kwargs["context"].user_id == "user"
 
 
+async def test_parallel_targets_do_not_share_mutable_service_payloads() -> None:
+    """HA merges target into service_data before awaiting the service handler."""
+    both_started = asyncio.Event()
+    received: list[dict[str, Any]] = []
+    mobile: list[dict[str, Any]] = []
+
+    class MutatingServices(Services):
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, Any], **kwargs: Any
+        ) -> None:
+            if service == "send_message":
+                data.update(kwargs["target"])
+                received.append(data)
+                if len(received) == 2:
+                    both_started.set()
+                await both_started.wait()
+            else:
+                mobile.append(data)
+                if "entity_id" in data:
+                    raise ServiceValidationError("unexpected entity_id")
+
+    provider = NotifyProvider(SimpleNamespace(services=MutatingServices()))  # type: ignore[arg-type]
+    result = await asyncio.wait_for(
+        provider.async_deliver(
+            reminder(),
+            DeliveryPolicy(
+                ("phone",),
+                notify_targets=("notify.first", "notify.second"),
+                mobile_app_services=("notify.mobile_app_phone",),
+            ),
+        ),
+        timeout=1,
+    )
+    assert result is None
+    assert [data["entity_id"] for data in received] == [
+        ["notify.first"],
+        ["notify.second"],
+    ]
+    assert len(mobile) == 1
+    assert "entity_id" not in mobile[0]
+
+
 async def test_mobile_service_receives_actions_without_done_when_not_required() -> None:
     services = Services()
     provider = NotifyProvider(SimpleNamespace(services=services))  # type: ignore[arg-type]

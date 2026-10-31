@@ -175,7 +175,7 @@ class NotifyProvider:
                         self._hass,
                         "notify",
                         "send_message",
-                        ordinary_data,
+                        dict(ordinary_data),
                         target={"entity_id": [target]},
                         blocking=True,
                         context=Context(user_id=reminder.user_id),
@@ -212,7 +212,7 @@ class NotifyProvider:
                             self._hass,
                             "notify",
                             service,
-                            ordinary_data,
+                            dict(ordinary_data),
                             blocking=True,
                             context=Context(user_id=reminder.user_id),
                         )
