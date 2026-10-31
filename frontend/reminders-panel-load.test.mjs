@@ -345,3 +345,25 @@ test("notification-linked reminder appears even when omitted from the current pa
     globalThis.document = previousDocument;
   }
 });
+
+test("stale failed notification lookup never clears a newer successful lookup", async () => {
+  const panel = makePanel();
+  panel._linkedReminderId = "same";
+  const requests = [];
+  panel._call = (name) => {
+    if (name === "list") return Promise.resolve({ reminders: [], total: 0 });
+    const pending = deferred();
+    requests.push(pending);
+    return pending.promise;
+  };
+  const oldRequest = panel._load();
+  await Promise.resolve(); await Promise.resolve();
+  const newRequest = panel._load();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(requests.length, 2);
+  requests[1].resolve({ reminder: { id: "same", title: "Latest" } });
+  await newRequest;
+  requests[0].reject(new Error("Old unauthorized result"));
+  await oldRequest;
+  assert.equal(panel._linkedReminder.title, "Latest");
+});
