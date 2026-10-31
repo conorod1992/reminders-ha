@@ -8,15 +8,7 @@ if (proto && !proto.__needsAttentionInstalled) {
 
   // The final panel owns the navigation tabs. This layer only enriches
   // attention cards and empty states, avoiding a redundant filter wrapper.
-  const originalRenderList = proto._renderList;
   const originalReminderCard = proto._reminderCard;
-
-  proto._renderList = function () {
-    originalRenderList.call(this);
-    if (this._view !== "attention" || this._loading || this._items.length) return;
-    const text = this.shadowRoot?.querySelector("#list .empty p");
-    if (text && !this._query) text.textContent = "Nothing needs your attention";
-  };
 
   proto._reminderCard = function (reminder) {
     const card = originalReminderCard.call(this, reminder);
