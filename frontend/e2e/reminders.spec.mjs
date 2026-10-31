@@ -63,7 +63,6 @@ test("create, find and delete a disposable reminder through the real UI", async 
   await panel.getByRole("button", { name: /add reminder/i }).click();
   const dialog = panel.locator("dialog");
   await dialog.locator('[name="title"]').fill(title);
-  const date = new Date(Date.now() + 3 * 86400_000);
   // Use the visible Tomorrow shortcut rather than browser-local date values.
   await dialog.locator('[data-quick="tomorrow"]').click();
   await dialog.locator('button[type="submit"]').click();
@@ -77,4 +76,41 @@ test("create, find and delete a disposable reminder through the real UI", async 
   const confirm = panel.locator("dialog");
   await confirm.getByRole("button", { name: "Delete" }).click();
   await expect(card).toHaveCount(0);
+});
+
+test("non-admin can open the editor without administrator-only mobile services", async ({ browser }) => {
+  test.skip(!process.env.HA_NONADMIN_STORAGE_STATE,
+    "Provide HA_NONADMIN_STORAGE_STATE to test actual non-admin permissions.");
+  const context = await browser.newContext({
+    storageState: process.env.HA_NONADMIN_STORAGE_STATE,
+  });
+  try {
+    const page = await context.newPage();
+    const panel = await openReminders(page);
+    await panel.getByRole("button", { name: /add reminder/i }).click();
+    const dialog = panel.locator("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".mobile-app-label")).toBeHidden();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+  } finally {
+    await context.close();
+  }
+});
+
+test("non-admin cannot view a different user's reminder via deep link", async ({ browser }) => {
+  test.skip(!process.env.HA_NONADMIN_STORAGE_STATE || !process.env.HA_OTHER_USER_REMINDER_ID,
+    "Provide separate-account state and a disposable other-user reminder ID.");
+  const context = await browser.newContext({
+    storageState: process.env.HA_NONADMIN_STORAGE_STATE,
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto("/reminders?reminder_id=" +
+      encodeURIComponent(process.env.HA_OTHER_USER_REMINDER_ID));
+    const panel = page.locator("reminders-management-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("Opened from notification")).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
 });
