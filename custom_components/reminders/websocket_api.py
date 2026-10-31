@@ -7,7 +7,6 @@ from functools import wraps
 from typing import Any, cast
 
 import voluptuous as vol
-from homeassistant.components.websocket_api import async_register_command
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.decorators import (
     async_response,
@@ -32,7 +31,6 @@ from .models import (
     MissedOccurrencePolicy,
     OccurrenceStatus,
     QuietHoursPolicy,
-    ReminderStatus,
     TriggerRepeatPolicy,
     WhileAwaitingAcknowledgement,
 )
@@ -151,102 +149,6 @@ async def _user_names(hass: HomeAssistant) -> dict[str, str]:
         for user in await hass.auth.async_get_users()
         if user.is_active and not user.system_generated
     }
-
-
-@websocket_command(
-    {
-        vol.Required("type"): f"{COMMAND_PREFIX}list",
-        vol.Optional("scope", default="mine"): vol.In(("mine", "all", "user")),
-        vol.Optional("user_id"): cv.string,
-        vol.Optional("view", default="upcoming"): vol.In(
-            (
-                "upcoming",
-                "recurring",
-                "triggered",
-                "waiting_for_trigger",
-                "expired",
-                "failed",
-                "all",
-            )
-        ),
-        vol.Optional("due_after"): cv.string,
-        vol.Optional("due_before"): cv.string,
-        vol.Optional("query"): cv.string,
-        vol.Optional("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
-        vol.Optional("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
-        vol.Optional("limit", default=500): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=1000)
-        ),
-        vol.Optional("offset", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
-    }
-)
-@async_response
-@_api_errors
-async def websocket_list(
-    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
-) -> None:
-    """List only records authorized for the authenticated connection."""
-    scope = msg["scope"]
-    if scope == "user" and "user_id" not in msg:
-        raise HomeAssistantError("user_id is required for user scope")
-    user_id = await async_resolve_list_user(
-        hass,
-        connection.user,
-        msg.get("user_id") if scope == "user" else None,
-        all_users=scope == "all",
-    )
-    reminders = await _manager(hass).async_list(
-        user_id=user_id,
-        due_after=(
-            _parse_datetime(hass, msg["due_after"]) if "due_after" in msg else None
-        ),
-        due_before=(
-            _parse_datetime(hass, msg["due_before"]) if "due_before" in msg else None
-        ),
-        query=msg.get("query"),
-        source=msg.get("source"),
-        source_id=msg.get("source_id"),
-        limit=msg["limit"],
-        offset=msg["offset"],
-    )
-    view = msg["view"]
-    if view == "upcoming":
-        reminders = [
-            item
-            for item in reminders
-            if item.activation_type is ActivationType.TIME
-            and item.status is ReminderStatus.PENDING
-        ]
-    elif view == "recurring":
-        reminders = [item for item in reminders if item.recurrence is not None]
-    elif view == "failed":
-        reminders = [
-            item
-            for item in reminders
-            if item.status is ReminderStatus.FAILED
-            or item.last_occurrence_status is ReminderStatus.FAILED
-        ]
-    elif view == "triggered":
-        reminders = [
-            item for item in reminders if item.activation_type is ActivationType.TRIGGER
-        ]
-    elif view == "waiting_for_trigger":
-        reminders = [
-            item
-            for item in reminders
-            if item.status is ReminderStatus.WAITING_FOR_TRIGGER
-        ]
-    elif view == "expired":
-        reminders = [
-            item for item in reminders if item.status is ReminderStatus.EXPIRED
-        ]
-    names = (
-        await _user_names(hass) if connection.user.is_admin and scope != "mine" else {}
-    )
-    connection.send_result(
-        msg["id"],
-        {"reminders": [_serialize(item, names) for item in reminders]},
-    )
 
 
 @websocket_command(
@@ -661,6 +563,7 @@ async def websocket_skip_next(
 @websocket_command(
     {
         vol.Required("type"): f"{COMMAND_PREFIX}snooze",
+        vol.Optional("occurrence_id"): cv.string,
         vol.Required("reminder_id"): cv.string,
         vol.Exclusive("due", "when"): cv.string,
         vol.Exclusive("duration_seconds", "when"): vol.All(
@@ -684,7 +587,23 @@ async def websocket_snooze(
         )
     manager = _manager(hass)
     reminder = await async_get_authorized(manager, connection.user, msg["reminder_id"])
-    if msg.get("wait_for_next_trigger"):
+    if msg.get("occurrence_id"):
+        if msg.get("wait_for_next_trigger"):
+            raise HomeAssistantError("An occurrence snooze requires a time")
+        duration = (
+            timedelta(seconds=msg["duration_seconds"])
+            if "duration_seconds" in msg
+            else _parse_datetime(hass, msg["due"]) - dt_util.utcnow()
+        )
+        updated = await manager.async_snooze_occurrence(
+            reminder.id,
+            msg["occurrence_id"],
+            duration,
+            expected_user_id=reminder.user_id,
+        )
+        if updated is None:
+            raise HomeAssistantError("Occurrence is no longer available to snooze")
+    elif msg.get("wait_for_next_trigger"):
         updated = await manager.async_wait_for_next_trigger(
             reminder.id, expected_user_id=reminder.user_id
         )
@@ -986,7 +905,7 @@ async def websocket_users(
     if not connection.user.is_admin:
         raise HomeAssistantError("Only administrators can list users")
     users = [
-        {"id": user.id, "name": user.name or "Unnamed user"}
+        {"id": user.id, "name": user.name or "Unnamed user", "is_admin": user.is_admin}
         for user in await hass.auth.async_get_users()
         if user.is_active and not user.system_generated
     ]
@@ -1011,29 +930,7 @@ def websocket_subscribe(
 
 @callback
 def async_register_websocket_api(hass: HomeAssistant) -> None:
-    """Register integration-global command handlers exactly once."""
-    for handler in (
-        websocket_list,
-        websocket_get,
-        websocket_create,
-        websocket_create_recurring,
-        websocket_create_triggered,
-        websocket_fire_trigger,
-        websocket_update,
-        websocket_delete,
-        websocket_pause,
-        websocket_resume,
-        websocket_skip_next,
-        websocket_snooze,
-        websocket_acknowledge,
-        websocket_complete,
-        websocket_external_action,
-        websocket_history,
-        websocket_preview_recurrence,
-        websocket_get_preferences,
-        websocket_set_preferences,
-        websocket_test_delivery,
-        websocket_users,
-        websocket_subscribe,
-    ):
-        async_register_command(hass, handler)
+    """Compatibility entry point for canonical registration."""
+    from .websocket_registration import async_register_websocket_api as register
+
+    register(hass)

@@ -191,6 +191,7 @@ class NotifyProvider:
             actionable_data["data"] = {
                 "tag": f"reminders_{reminder.id}_{occurrence_id or 'current'}",
                 "url": f"/reminders?reminder_id={reminder.id}",
+                "clickAction": f"/reminders?reminder_id={reminder.id}",
             }
             if reminder.notification_actions:
                 actionable_data["data"]["actions"] = _mobile_actions(

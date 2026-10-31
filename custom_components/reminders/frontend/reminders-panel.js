@@ -326,7 +326,7 @@ class RemindersManagementPanel extends HTMLElement {
         && !reminder.recurring && !reminder.managed_externally && !reminder.paused) {
       actions.append(this._action("Retry now", () => this._retryFailed(reminder)));
     }
-    if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder)));
+    if (!reminder.paused) actions.append(this._action("Snooze", () => this._openSnooze(reminder, single?.id)));
     if (single?.status === "awaiting_acknowledgement") {
       actions.append(this._action("Dismiss", () => this._acknowledge(reminder, single.id)));
     }
@@ -357,6 +357,7 @@ class RemindersManagementPanel extends HTMLElement {
       when.textContent = this._formatDate(occurrence.scheduled_due || occurrence.due);
       const actions = document.createElement("div");
       actions.className = "actions";
+      actions.append(this._action("Snooze", () => this._openSnooze(reminder, occurrence.id)));
       if (reminder.allow_manual_completion) {
         actions.append(this._action("Done", () => this._complete(reminder, occurrence.id)));
       }
@@ -411,6 +412,12 @@ class RemindersManagementPanel extends HTMLElement {
     body.append(title, status, details);
     const actions = document.createElement("div");
     actions.className = "actions";
+    if (["delivered", "awaiting_acknowledgement"].includes(occurrence.status)) {
+      actions.append(this._action("Snooze", () => this._openSnooze({ id: row.reminder_id, title: row.title, recurring: row.recurring }, occurrence.id)));
+      if (!occurrence.external_action_id) for (const item of row.external_actions || []) {
+        actions.append(this._action(item.label, () => this._externalAction({ id: row.reminder_id }, occurrence.id, item.id)));
+      }
+    }
     if (row.allow_manual_completion && ["delivered", "awaiting_acknowledgement"].includes(occurrence.status)) {
       actions.append(this._action("Done", () => this._complete({ id: row.reminder_id }, occurrence.id)));
     }
@@ -1023,15 +1030,16 @@ class RemindersManagementPanel extends HTMLElement {
     }
   }
 
-  _openSnooze(reminder) {
+  _openSnooze(reminder, occurrenceId = null) {
     const dialog = this.shadowRoot.querySelector("#dialog");
-    const triggered = reminder.activation_type === "trigger";
+    const triggered = reminder.activation_type === "trigger" && !occurrenceId;
     const hint = triggered
       ? "Matching triggers are ignored until the snooze ends; it will then wait for the next matching change."
       : reminder.recurring
         ? "Only this occurrence moves; the series stays anchored."
         : reminder.title;
     dialog.innerHTML = `<div class="dialog"><h2>Snooze</h2><p class="hint"></p><div class="quick"><button data-seconds="600">10 minutes</button><button data-seconds="1800">30 minutes</button><button data-seconds="3600">1 hour</button>${triggered ? '<button class="next-trigger">Wait for next trigger</button>' : '<button class="tomorrow">Tomorrow morning</button>'}</div>${triggered ? "" : '<div class="fieldrow"><label>Date<input type="date"></label><label>Time<input type="time"></label></div>'}<div class="dialog-actions"><button class="secondary cancel">Cancel</button>${triggered ? "" : '<button class="custom">Choose date/time…</button>'}</div></div>`;
+    dialog._snoozeOccurrenceId = occurrenceId;
     dialog.querySelector(".hint").textContent = hint;
     const parts = quickTimeParts("1h", this._hass.config.time_zone);
     const inputs = dialog.querySelectorAll("input"); if (!triggered) { inputs[0].value = parts.date; inputs[1].value = parts.time; }
@@ -1046,8 +1054,16 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   async _doSnooze(dialog, reminder, data) {
-    try { await this._call("snooze", { reminder_id: reminder.id, ...data }); dialog.close(); await this._load(); }
-    catch (error) { this._showError(error); }
+    try { await this._call("snooze", { reminder_id: reminder.id, ...(dialog._snoozeOccurrenceId ? { occurrence_id: dialog._snoozeOccurrenceId } : {}), ...data }); }
+    catch (error) { this._dialogError(dialog, error); return; }
+    dialog.close();
+    try { await this._load(); } catch (error) { this._showError(error); }
+  }
+
+  _dialogError(dialog, error) {
+    let host = dialog.querySelector(".action-error");
+    if (!host) { host = document.createElement("p"); host.className = "action-error"; host.setAttribute("role", "alert"); dialog.querySelector(".dialog").append(host); }
+    host.textContent = error?.message || String(error);
   }
 
   async _retryFailed(reminder) {
@@ -1083,16 +1099,16 @@ class RemindersManagementPanel extends HTMLElement {
     dialog.querySelector(".cancel").onclick = () => dialog.close();
     dialog.querySelector(".confirm").onclick = async () => {
       try { await this._call("delete", { reminder_id: reminder.id }); dialog.close(); await this._load(); }
-      catch (error) { this._showError(error); }
+      catch (error) { this._dialogError(dialog, error); }
     };
     this._showDialog(dialog);
   }
 
-  async _seriesAction(reminder, action) {
+  async _seriesAction(reminder, action, dialog = null) {
     try {
       await this._call(action, { reminder_id: reminder.id });
     } catch (error) {
-      this._showError(error);
+      if (dialog) this._dialogError(dialog, error); else this._showError(error);
       return false;
     }
     // The action is committed. A subsequent refresh failure must not invite
@@ -1111,7 +1127,7 @@ class RemindersManagementPanel extends HTMLElement {
       if (confirm.disabled) return;
       confirm.disabled = true;
       try {
-        if (await this._seriesAction(reminder, "skip_next")) dialog.close();
+        if (await this._seriesAction(reminder, "skip_next", dialog)) dialog.close();
       } finally {
         confirm.disabled = false;
       }
@@ -1128,15 +1144,24 @@ class RemindersManagementPanel extends HTMLElement {
       const select = this._userSelect(target); label.append(select); dialog.querySelector("#preference-user").append(label);
       select.onchange = () => load(select.value);
     }
+    const preferenceSession = Symbol();
+    dialog._preferencesSession = preferenceSession;
+    let preferenceRequest = 0;
     const load = async (userId) => {
       target = userId;
+      const request = ++preferenceRequest;
+      dialog._preferencesOwner = null;
+      for (const button of dialog.querySelectorAll(".save,[data-test]")) button.disabled = true;
       try {
-        const prefs = (await this._call("get_preferences", { user_id: target })).preferences;
+        const prefs = (await this._call("get_preferences", { user_id: userId })).preferences;
+        if (request !== preferenceRequest || dialog._preferencesSession !== preferenceSession || !dialog.open) return;
         this._populatePreferences(dialog, prefs);
-      } catch (error) { this._showError(error); }
+        dialog._preferencesOwner = userId;
+        for (const button of dialog.querySelectorAll(".save,[data-test]")) button.disabled = false;
+      } catch (error) { if (request === preferenceRequest && dialog._preferencesSession === preferenceSession && dialog.open) this._dialogError(dialog, error); }
     };
     dialog.querySelector(".cancel").onclick = async () => {
-      if (firstRun) await this._savePreferences(dialog, target, true);
+      if (firstRun && dialog._preferencesOwner === target) await this._savePreferences(dialog, target, true);
       dialog.close();
     };
     dialog.querySelector(".save").onclick = async () => {
@@ -1189,6 +1214,8 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   async _savePreferences(dialog, target) {
+    if (dialog._preferencesOwner !== target || dialog._preferencesSaving) return false;
+    dialog._preferencesSaving = true;
     try {
       const result = await this._call("set_preferences", this._preferencesPayload(dialog, target));
       if (target === this._hass.user.id) this._preferences = result.preferences;
@@ -1198,10 +1225,11 @@ class RemindersManagementPanel extends HTMLElement {
       if (host) { host.className = "test-result hint"; host.textContent = error.message || String(error); }
       else this._showError(error);
       return false;
-    }
+    } finally { dialog._preferencesSaving = false; }
   }
 
   async _testDelivery(dialog, target, channel) {
+    if (dialog._preferencesOwner !== target) return;
     const values = this._preferencesPayload(dialog, target);
     const payload = {
       user_id: target,

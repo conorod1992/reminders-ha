@@ -520,3 +520,14 @@ async def test_phone_targets_are_bounded_but_do_not_block_each_other() -> None:
         release.set()
     await asyncio.wait_for(task, 1)
     assert started == 10
+
+
+async def test_mobile_deep_links_cover_both_companion_platforms():
+    services = Services()
+    provider = NotifyProvider(SimpleNamespace(services=services))
+    await provider.async_deliver(
+        reminder(),
+        DeliveryPolicy(("phone",), mobile_app_services=("notify.mobile_app_phone",)),
+    )
+    data = services.calls[0][2]["data"]
+    assert data["url"] == data["clickAction"] == "/reminders?reminder_id=reminder"

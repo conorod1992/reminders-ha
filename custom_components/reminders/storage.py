@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
 from .const import SAVE_DELAY, STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
@@ -28,7 +30,30 @@ class StoredData(TypedDict):
     users: dict[str, dict[str, Any]]
 
 
-class ReminderStore(Store[StoredData]):
+class DurableStore[T: Mapping[str, Any] | Sequence[Any]](Store[T]):
+    """A store whose awaited writes propagate failure to the transaction owner."""
+
+    async def async_save(self, data: T) -> None:
+        await super().async_save(data)
+        if self.hass.state is CoreState.stopping:
+            await self._async_handle_write_data()
+
+    async def _async_handle_write_data(self, *_args: Any) -> None:
+        async with self._write_lock:
+            self._manager.async_invalidate(self.key)
+            self._async_cleanup_delay_listener()
+            self._async_cleanup_final_write_listener()
+            data = self._data
+            if data is None:
+                return
+            if self._read_only:
+                raise HomeAssistantError("Reminders storage is read-only")
+            await self._async_write_data(data)
+            if self._data is data:
+                self._data = None
+
+
+class ReminderStore(DurableStore[StoredData]):
     """Versioned Home Assistant store."""
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -55,7 +80,11 @@ class ReminderStore(Store[StoredData]):
         if _is_cooldown_counter_only_update(previous, data):
             self.async_delay_save(self._latest_requested_data, SAVE_DELAY)
             return
-        await super().async_save(data)
+        try:
+            await super().async_save(data)
+        except BaseException:
+            self._last_requested_data = previous
+            raise
 
     def _latest_requested_data(self) -> StoredData:
         """Return the most recent state for a delayed write."""
@@ -235,6 +264,8 @@ def deserialize_storage(
     normalized = _normalize_storage(data)
     for reminder_id, raw in normalized["reminders"].items():
         try:
+            if not isinstance(raw, dict):
+                raise ValueError("Reminder record must be an object")
             reminder = Reminder.from_dict(raw)
             if reminder.id != reminder_id:
                 raise ValueError("Reminder ID does not match storage key")
@@ -273,12 +304,14 @@ def deserialize_storage(
             if reminder.recurrence and reminder.scheduled_due is None:
                 reminder = reminder.updated(scheduled_due=reminder.due)
             reminders[reminder_id] = reminder
-        except (KeyError, TypeError, ValueError) as err:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as err:
             _LOGGER.error("Skipping malformed stored reminder %s: %s", reminder_id, err)
     for user_id, raw in normalized["users"].items():
         try:
+            if not isinstance(raw, dict):
+                raise ValueError("Preferences record must be an object")
             users[user_id] = UserPreferences.from_dict(raw)
-        except (KeyError, TypeError, ValueError) as err:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as err:
             _LOGGER.error(
                 "Skipping malformed stored user preferences for %s: %s", user_id, err
             )

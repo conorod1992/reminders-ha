@@ -28,6 +28,7 @@ function setup() {
   panel.shadowRoot = { querySelector: () => dialog };
   panel._formatDate = (value) => value;
   panel._load = async () => true;
+  panel._dialogError = (_dialog, error) => panel._showError(error);
   panel._showError = (error) => { panel.lastError = error; };
   panel._confirmSkip({ id: "series", due: "2026-10-26T10:00:00Z" });
   return { panel, dialog, confirm };

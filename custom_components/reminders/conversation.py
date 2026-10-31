@@ -68,7 +68,11 @@ class RemindersTool(llm.Tool):
         llm_context: llm.LLMContext,
     ) -> dict[str, Any]:
         """Validate identity and invoke one shared domain operation."""
-        return await self._handler(hass, tool_input.tool_args, llm_context)
+        try:
+            args = self.parameters(tool_input.tool_args)
+            return await self._handler(hass, args, llm_context)
+        except (vol.Invalid, ValueError, KeyError) as err:
+            raise HomeAssistantError(str(err)) from err
 
 
 class RemindersAPI(llm.API):
@@ -412,6 +416,9 @@ def _tools() -> list[llm.Tool]:
                     vol.Optional("query"): cv.string,
                     vol.Optional("due_after"): cv.string,
                     vol.Optional("due_before"): cv.string,
+                    vol.Optional("offset", default=0): vol.All(
+                        vol.Coerce(int), vol.Range(min=0)
+                    ),
                     vol.Optional("limit", default=20): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=100)
                     ),
@@ -841,5 +848,12 @@ async def _history(
         if "due_before" in args
         else None,
         limit=args["limit"],
+        offset=args.get("offset", 0),
     )
-    return {"history": rows, "total": total}
+    next_offset = args.get("offset", 0) + len(rows)
+    return {
+        "history": rows,
+        "total": total,
+        "next_offset": next_offset,
+        "has_more": next_offset < total,
+    }

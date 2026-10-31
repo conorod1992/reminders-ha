@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 // This suite uses a *real* authenticated Home Assistant instance. It is not
-// included in normal PR CI because it needs an installed integration and an
-// account/session belonging to the person running the checks.
+// run in PR CI against a disposable installation, or manually with an existing
+// authorized test session.
 const configured = Boolean(process.env.HA_URL && process.env.HA_STORAGE_STATE);
 test.skip(!configured, "Set HA_URL and HA_STORAGE_STATE (see README) first.");
 
@@ -112,5 +112,39 @@ test("non-admin cannot view a different user's reminder via deep link", async ({
     await expect(panel.getByText("Opened from notification")).toHaveCount(0);
   } finally {
     await context.close();
+  }
+});
+
+
+test("keyboard tab focus survives an asynchronous data refresh", async ({ page }) => {
+  const panel = await openReminders(page);
+  const upcoming = panel.getByRole("tab", { name: "Upcoming" });
+  await upcoming.focus();
+  await upcoming.press("ArrowRight");
+  await expect(panel.getByRole("tab", { name: "All reminders" })).toBeFocused();
+  await panel.evaluate(async (element) => { await element._load(); });
+  await expect(panel.getByRole("tab", { name: "All reminders" })).toBeFocused();
+});
+
+test("renaming a classic reminder preserves its delivery condition", async ({page}) => {
+  test.skip(process.env.HA_E2E_MUTATE !== "1", "Requires disposable test mutations");
+  const panel = await openReminders(page);
+  const title = "Classic editor regression " + Date.now();
+  const reminder = await panel.evaluate(async (element, title) => {
+    const result = await element._hass.callWS({type:"reminders/create", title, due:new Date(Date.now()+86400000).toISOString(), deliver_when:{type:"state",entity_id:"input_boolean.review_ready",to:"on"}});
+    return result.reminder;
+  }, title);
+  try {
+    await panel.evaluate(async (element) => { await element._load(); });
+    await panel.evaluate((element, reminder) => element._openReminderForm(reminder), reminder);
+    const dialog = panel.locator("dialog");
+    await dialog.locator('[name="title"]').fill(title + " renamed");
+    await dialog.locator('button[type="submit"]').click();
+    await expect(dialog).not.toBeVisible();
+    const saved = await panel.evaluate(async (element,id) => (await element._hass.callWS({type:"reminders/get",reminder_id:id})).reminder,reminder.id);
+    expect(saved.deliver_when).toEqual(reminder.deliver_when);
+    expect(saved.delivery_triggers).toEqual([]);
+  } finally {
+    await panel.evaluate(async (element,id) => element._hass.callWS({type:"reminders/delete",reminder_id:id}),reminder.id);
   }
 });
