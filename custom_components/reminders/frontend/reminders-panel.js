@@ -226,7 +226,7 @@ class RemindersManagementPanel extends HTMLElement {
       if (this._linkedReminder) return;
       const empty = document.createElement("div");
       empty.className = "empty";
-      empty.innerHTML = `<p>${this._query ? "No matching reminders" : this._view === "history" ? "No reminder history yet" : "No reminders here"}</p>`;
+      empty.innerHTML = `<p>${this._query ? "No matching reminders" : this._view === "history" ? "No reminder history yet" : this._view === "attention" ? "Nothing needs your attention" : "No reminders here"}</p>`;
       host.append(empty);
       return;
     }
