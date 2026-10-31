@@ -18,3 +18,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+
+# Local browser test credentials and traces
+/frontend/e2e/artifacts/
+/frontend/node_modules/
+/frontend/playwright-report/
+/frontend/test-results/
+*ha-auth*.json
