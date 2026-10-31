@@ -413,7 +413,7 @@ class RemindersManagementPanel extends HTMLElement {
     const actions = document.createElement("div");
     actions.className = "actions";
     if (["delivered", "awaiting_acknowledgement"].includes(occurrence.status)) {
-      actions.append(this._action("Snooze", () => this._openSnooze({ id: row.reminder_id, recurring: row.recurring }, occurrence.id)));
+      actions.append(this._action("Snooze", () => this._openSnooze({ id: row.reminder_id, title: row.title, recurring: row.recurring }, occurrence.id)));
       if (!occurrence.external_action_id) for (const item of row.external_actions || []) {
         actions.append(this._action(item.label, () => this._externalAction({ id: row.reminder_id }, occurrence.id, item.id)));
       }
@@ -1054,8 +1054,10 @@ class RemindersManagementPanel extends HTMLElement {
   }
 
   async _doSnooze(dialog, reminder, data) {
-    try { await this._call("snooze", { reminder_id: reminder.id, ...(dialog._snoozeOccurrenceId ? { occurrence_id: dialog._snoozeOccurrenceId } : {}), ...data }); dialog.close(); await this._load(); }
-    catch (error) { this._dialogError(dialog, error); }
+    try { await this._call("snooze", { reminder_id: reminder.id, ...(dialog._snoozeOccurrenceId ? { occurrence_id: dialog._snoozeOccurrenceId } : {}), ...data }); }
+    catch (error) { this._dialogError(dialog, error); return; }
+    dialog.close();
+    try { await this._load(); } catch (error) { this._showError(error); }
   }
 
   _dialogError(dialog, error) {

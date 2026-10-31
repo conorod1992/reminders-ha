@@ -366,7 +366,7 @@ function _addClassicNotice(form) {
   if (!activation) return;
   const note = document.createElement("div");
   note.className = "expert-note";
-  note.textContent = "This reminder uses a Reminders named trigger, which is not a Home Assistant-native trigger type. It remains in the classic editor so it can be edited without changing its behaviour.";
+  note.textContent = "Existing trigger settings are preserved when you edit this reminder.";
   activation.prepend(note);
 }
 
