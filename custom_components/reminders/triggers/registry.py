@@ -123,7 +123,9 @@ class TriggerRegistry:
             if state is None or zone_state is None:
                 return False
             inside = self._zone_match(trigger, state)
-            return inside if trigger.event is ZoneEvent.ENTER else not inside
+            return (
+                inside is True if trigger.event is ZoneEvent.ENTER else inside is False
+            )
         return False
 
     def duration_is_still_matching(
@@ -207,10 +209,18 @@ class TriggerRegistry:
             old_inside = self._zone_match(trigger, old_state)
             new_inside = self._zone_match(trigger, new_state)
             matched = (
-                trigger.event is ZoneEvent.ENTER and not old_inside and new_inside
-            ) or (trigger.event is ZoneEvent.LEAVE and old_inside and not new_inside)
+                trigger.event is ZoneEvent.ENTER
+                and old_inside is False
+                and new_inside is True
+            ) or (
+                trigger.event is ZoneEvent.LEAVE
+                and old_inside is True
+                and new_inside is False
+            )
             remains_matching = (
-                new_inside if trigger.event is ZoneEvent.ENTER else not new_inside
+                new_inside is True
+                if trigger.event is ZoneEvent.ENTER
+                else new_inside is False
             )
         if not remains_matching:
             await self._activate(entry, "duration_cancelled", {})
@@ -252,28 +262,37 @@ class TriggerRegistry:
         references: set[str] | None = None,
     ) -> None:
         targets = entry.reminder_ids if references is None else references
-        for reminder_id in tuple(targets):
+        limiter = asyncio.Semaphore(4)
+
+        async def activate(reminder_id: str) -> None:
             if self._unloaded:
                 return
             try:
-                await self._callback(reminder_id, cause, context)
+                async with limiter:
+                    await self._callback(reminder_id, cause, context)
             except Exception:
                 _LOGGER.exception("Error activating triggered reminder")
 
-    def _zone_match(self, trigger: TriggerDefinition, state: State | None) -> bool:
+        await asyncio.gather(*(activate(reminder_id) for reminder_id in tuple(targets)))
+
+    def _zone_match(
+        self, trigger: TriggerDefinition, state: State | None
+    ) -> bool | None:
         zone_state = self._hass.states.get(trigger.zone_entity_id or "")
         if state is None or zone_state is None:
-            return False
+            return None
+        if state.state in {"unknown", "unavailable"}:
+            return None
         try:
             latitude = float(state.attributes["latitude"])
             longitude = float(state.attributes["longitude"])
             gps_accuracy = float(state.attributes.get("gps_accuracy", 0))
         except KeyError, TypeError, ValueError:
-            return False
+            return None
         try:
             return in_zone(zone_state, latitude, longitude, gps_accuracy)
         except KeyError, TypeError, ValueError:
-            return False
+            return None
 
     async def _async_run_tracked(self, callback: Awaitable[None]) -> None:
         """Track callback work from inside HA's thread-safe task wrapper."""

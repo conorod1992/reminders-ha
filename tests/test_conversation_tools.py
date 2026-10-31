@@ -267,3 +267,30 @@ async def test_voice_updates_and_resets_reminder_delivery_channels(
         context("u1"),
     )
     assert reset["reminder"]["delivery_policy"] is None
+
+
+async def test_tool_dispatch_applies_defaults_and_rejects_invalid_arguments(runtime):
+    hass, _manager = runtime
+    tools = {tool.name: tool for tool in _tools()}
+    result = await tools["create_reminder"].async_call(
+        hass,
+        llm.ToolInput(
+            tool_name="create_reminder",
+            tool_args={"title": "Minimal", "delay_minutes": 10},
+        ),
+        context("u1"),
+    )
+    assert result
+    listed = await tools["list_reminders"].async_call(
+        hass, llm.ToolInput(tool_name="list_reminders", tool_args={}), context("u1")
+    )
+    assert listed
+    with pytest.raises(HomeAssistantError):
+        await tools["create_reminder"].async_call(
+            hass,
+            llm.ToolInput(
+                tool_name="create_reminder",
+                tool_args={"title": "Invalid", "delay_minutes": -1},
+            ),
+            context("u1"),
+        )

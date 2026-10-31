@@ -123,3 +123,21 @@ test("native recurring creation also sends a single atomic request", async () =>
   assert.equal(panel.calls[0].action, "create_native_recurring");
   assert.deepEqual(panel.calls[0].data.delivery_conditions, []);
 });
+
+
+test("ordinary admin edits preserve classic context rules", () => {
+  const panel = new Panel();
+  panel._hass = {user:{id:"admin",is_admin:true}};
+  currentForm = {elements:{}, querySelector:()=>null, append(){}};
+  panel._openReminderForm({id:"classic", user_id:"admin", deliver_when:{type:"state",entity_id:"person.user",to:"home"}});
+  assert.equal(currentForm._nativeRules, undefined);
+});
+
+test("admin editing a non-admin owner's reminder retains the compatible editor", () => {
+  const panel = new Panel();
+  panel._hass = {user:{id:"admin",is_admin:true}};
+  panel._users = [{id:"ordinary",is_admin:false}];
+  currentForm = {elements:{}, querySelector:()=>null, append(){}};
+  panel._openReminderForm({id:"other",user_id:"ordinary"});
+  assert.equal(currentForm._nativeRules, undefined);
+});

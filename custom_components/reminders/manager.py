@@ -603,6 +603,7 @@ class ReminderManager:
                             "message": reminder.message,
                             "recurring": reminder.recurrence is not None,
                             "allow_manual_completion": reminder.allow_manual_completion,
+                            "external_actions": list(reminder.external_actions),
                             "activation_type": reminder.activation_type.value,
                             "trigger_summary": reminder.trigger_summary,
                             "occurrence": occurrence.to_dict(),
@@ -742,6 +743,18 @@ class ReminderManager:
                         changes["while_awaiting_acknowledgement"]
                     )
                 )
+            for unchanged in (
+                "trigger",
+                "repeat_policy",
+                "fire_if_already_matching",
+                "available_from",
+                "expires_at",
+                "recurrence",
+            ):
+                if unchanged in changes and changes[unchanged] == getattr(
+                    current, unchanged
+                ):
+                    changes.pop(unchanged)
             trigger_fields = {
                 "trigger",
                 "repeat_policy",
@@ -783,9 +796,9 @@ class ReminderManager:
                     activation_type=ActivationType.TRIGGER,
                     trigger=definition,
                     trigger_summary=self._summary(definition),
-                    due=None,
+                    due=None if rearm_trigger else current.due,
                     recurrence=None,
-                    scheduled_due=None,
+                    scheduled_due=None if rearm_trigger else current.scheduled_due,
                     current_occurrence_id=(
                         None if rearm_trigger else current.current_occurrence_id
                     ),
@@ -3601,7 +3614,13 @@ class ReminderManager:
         users: dict[str, UserPreferences],
     ) -> None:
         """Persist proposed state, then commit it to runtime memory."""
-        reminder_copy = dict(reminders)
+        now = dt_util.utcnow()
+        reminder_copy = {
+            key: _prune_history(value, users.get(value.user_id, UserPreferences()), now)
+            if value != self._reminders.get(key)
+            else value
+            for key, value in reminders.items()
+        }
         user_copy = dict(users)
         await async_prepare_persistent_cleanup(
             self._hass, self._reminders, reminder_copy

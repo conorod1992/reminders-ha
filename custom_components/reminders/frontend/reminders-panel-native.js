@@ -19,10 +19,14 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
     if (!form) return;
     if (!this._hass?.user?.is_admin) return;
 
-    if (_containsNamedLegacyRule(source)) {
+    // Existing classic rules retain their semantics through ordinary edits.
+    if (source?.trigger || source?.deliver_when || source?.complete_when || _containsNamedLegacyRule(source)) {
       _addClassicNotice(form);
       return;
     }
+
+    const owner = source?.user_id || this._hass.user.id;
+    if (owner !== this._hass.user.id && !this._users?.find((user) => user.id === owner)?.is_admin) return;
 
     const activation = source?.activation_triggers?.length
       ? _clone(source.activation_triggers)
@@ -58,6 +62,19 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
     _enhanceCompletion(this, form);
     _enhanceDelivery(this, form);
     _installClassicFallback(this, form);
+    for (const name of ["fire_if_already_matching", "for_seconds", "state_from", "state_attribute", "numeric_attribute", "event_data"]) {
+      const field = form.elements[name];
+      const label = field?.closest?.("label");
+      if (label) { label.classList.add("native-unsupported", "hidden"); field.disabled = true; }
+    }
+    form.elements.user_id?.addEventListener?.("change", () => {
+      const selected = form.elements.user_id.value;
+      if (selected === this._hass.user.id || this._users?.find((user) => user.id === selected)?.is_admin) return;
+      if (source?.activation_triggers?.length || source?.delivery_triggers?.length || source?.delivery_conditions?.length || source?.completion_triggers?.length) {
+        form.elements.user_id.value = owner;
+        _formError(form, "Home Assistant rules require an administrator recipient.");
+      } else form.querySelector(".native-classic-fallback button")?.click();
+    });
     _refreshNativeVisibility(form);
     this._updateBehaviorSummary(form);
     form._initialSnapshot = this._formSnapshot(form);
@@ -327,6 +344,11 @@ function _installClassicFallback(panel, form) {
   activation?.append(details);
   details.querySelector("button").onclick = () => {
     form._nativeRules.classic = true;
+    for (const label of form.querySelectorAll(".native-unsupported")) {
+      label.classList.remove("hidden");
+      const field = label.querySelector("input,select,textarea");
+      if (field) field.disabled = false;
+    }
     for (const legacy of form.querySelectorAll(".native-legacy-fields")) {
       legacy.classList.remove("native-legacy-fields");
       for (const field of legacy.querySelectorAll("input,select,textarea")) field.disabled = false;

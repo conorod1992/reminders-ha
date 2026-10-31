@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from homeassistant.helpers.storage import Store
 
 from custom_components.reminders.const import SAVE_DELAY
 from custom_components.reminders.storage import (
+    DurableStore,
     ReminderStore,
     StoredData,
     _is_cooldown_counter_only_update,
@@ -86,7 +86,7 @@ async def test_cooldown_only_save_is_debounced(
         immediate.append(data)
 
     store.async_delay_save = delay_save  # type: ignore[method-assign]
-    monkeypatch.setattr(Store, "async_save", immediate_save)
+    monkeypatch.setattr(DurableStore, "async_save", immediate_save)
 
     await store.async_save(current)
 
@@ -119,7 +119,7 @@ async def test_meaningful_save_supersedes_pending_cooldown_snapshot(
         immediate.append(data)
 
     store.async_delay_save = delay_save  # type: ignore[method-assign]
-    monkeypatch.setattr(Store, "async_save", immediate_save)
+    monkeypatch.setattr(DurableStore, "async_save", immediate_save)
 
     await store.async_save(cooldown)
     await store.async_save(meaningful)

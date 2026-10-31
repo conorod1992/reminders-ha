@@ -16,12 +16,12 @@ from custom_components.reminders.websocket_api import (
     websocket_delete,
     websocket_get,
     websocket_get_preferences,
-    websocket_list,
     websocket_set_preferences,
     websocket_snooze,
     websocket_subscribe,
     websocket_update,
 )
+from custom_components.reminders.websocket_registration import websocket_list
 
 from .conftest import FakeDispatcher, FakeStore
 

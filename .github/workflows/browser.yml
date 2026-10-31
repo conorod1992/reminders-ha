@@ -1,0 +1,44 @@
+name: Home Assistant browser regression
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Start disposable Home Assistant
+        run: |
+          mkdir -p "$RUNNER_TEMP/reminders-ha/custom_components"
+          cp -R custom_components/reminders "$RUNNER_TEMP/reminders-ha/custom_components/"
+          printf 'default_config:\n' > "$RUNNER_TEMP/reminders-ha/configuration.yaml"
+          docker run -d --name reminders-review -p 8123:8123 -v "$RUNNER_TEMP/reminders-ha:/config" ghcr.io/home-assistant/home-assistant:2026.9.4
+      - name: Bootstrap disposable account and integration
+        env:
+          HA_URL: http://localhost:8123
+          HA_STORAGE_STATE: ${{ runner.temp }}/reminders-auth.json
+        run: node frontend/e2e/bootstrap.mjs
+      - name: Install browser tooling
+        working-directory: frontend
+        run: |
+          npm install --no-save @playwright/test
+          npx playwright install --with-deps chromium
+      - name: Exercise real Home Assistant panel
+        working-directory: frontend
+        env:
+          HA_URL: http://localhost:8123
+          HA_STORAGE_STATE: ${{ runner.temp }}/reminders-auth.json
+          HA_E2E_MUTATE: "1"
+        run: npm run test:e2e
+      - name: Home Assistant logs on failure
+        if: failure()
+        run: docker logs reminders-review
+      - name: Stop disposable Home Assistant
+        if: always()
+        run: docker rm -f reminders-review

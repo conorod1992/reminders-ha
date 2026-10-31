@@ -73,6 +73,13 @@ if (proto && !proto.__frontendPolishInstalled) {
         data.limit = appendHistory ? HISTORY_PAGE_SIZE : Math.min(200, restoredLimit);
         data.offset = offset;
         const result = await this._call("history", data);
+        while (!appendHistory && (result.history || []).length < restoredLimit && result.history.length < result.total) {
+          if (requestId !== this._loadRequestId) return true;
+          const page = await this._call("history", { ...data, offset: result.history.length, limit: Math.min(200, restoredLimit - result.history.length) });
+          if (!page.history?.length) break;
+          result.history.push(...page.history);
+          result.total = page.total;
+        }
         if (requestId !== this._loadRequestId) return true;
         this._history = appendHistory
           ? [...appendBase, ...(result.history || [])]
@@ -85,6 +92,13 @@ if (proto && !proto.__frontendPolishInstalled) {
         data.limit = appendList ? LIST_PAGE_SIZE : Math.min(1000, restoredLimit);
         data.offset = offset;
         const result = await this._call("list", data);
+        while (!appendList && (result.reminders || []).length < restoredLimit && result.reminders.length < result.total) {
+          if (requestId !== this._loadRequestId) return true;
+          const page = await this._call("list", { ...data, offset: result.reminders.length, limit: Math.min(1000, restoredLimit - result.reminders.length) });
+          if (!page.reminders?.length) break;
+          result.reminders.push(...page.reminders);
+          result.total = page.total;
+        }
         if (requestId !== this._loadRequestId) return true;
         this._items = appendList
           ? [...appendBase, ...(result.reminders || [])]
@@ -134,6 +148,9 @@ if (proto && !proto.__frontendPolishInstalled) {
   };
 
   proto._renderFilters = function () {
+    const focused = this.shadowRoot?.activeElement;
+    const focusedView = focused?.dataset?.view;
+    const focusedFilter = focused?.classList?.contains("view-filter");
     originalRenderFilters.call(this);
     const root = this.shadowRoot;
     const tabs = root?.querySelector(".tabs");
@@ -225,6 +242,8 @@ if (proto && !proto.__frontendPolishInstalled) {
     }
 
     _installPolishStyles(root);
+    if (focusedView) tabs.querySelector(`[data-view="${focusedView}"]`)?.focus();
+    else if (focusedFilter) toolbar.querySelector(".view-filter")?.focus();
   };
 
   proto._renderList = function () {

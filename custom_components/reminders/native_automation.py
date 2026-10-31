@@ -69,6 +69,7 @@ class NativeAutomationRuntime:
         self._trigger_retry_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._sync_lock = asyncio.Lock()
         self._unloaded = False
+        self._callback_tokens: dict[tuple[str, str], object] = {}
 
     @property
     def listener_count(self) -> int:
@@ -334,21 +335,30 @@ class NativeAutomationRuntime:
         self._condition_failures.discard(reminder_id)
         self._condition_entries[reminder_id] = _ConditionEntry(key, checker)
 
+    def invalidate_callbacks(self, reminder_id: str) -> None:
+        """Retire already queued work immediately when stored rules change."""
+        for reference in tuple(self._callback_tokens):
+            if reference[0] == reminder_id:
+                self._remove_trigger(reference)
+
     def _action(
         self, reference: tuple[str, str]
     ) -> Callable[[dict[str, Any], Context | None], Awaitable[None]]:
         reminder_id, role = reference
+        token = object()
+        self._callback_tokens[reference] = token
 
         async def action(
             run_variables: dict[str, Any], context: Context | None = None
         ) -> None:
-            if self._unloaded:
+            if self._unloaded or self._callback_tokens.get(reference) is not token:
                 return
             await self._callback(reminder_id, role, run_variables, context)
 
         return action
 
     def _remove_trigger(self, reference: tuple[str, str]) -> None:
+        self._callback_tokens.pop(reference, None)
         entry = self._trigger_entries.pop(reference, None)
         if entry is not None:
             entry.unsubscribe()
