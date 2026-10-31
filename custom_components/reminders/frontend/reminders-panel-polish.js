@@ -100,9 +100,11 @@ if (proto && !proto.__frontendPolishInstalled) {
           if (requestId !== this._loadRequestId) return true;
           if (this._linkedReminderId === requestedId) this._linkedReminder = result.reminder || null;
         } catch {
-          // The detail API applies HA authorization. Never display cached
-          // reminder data after an unsuccessful authorized fetch.
-          this._linkedReminder = null;
+          // A failed older lookup must not clear a newer authorized result.
+          if (requestId !== this._loadRequestId) return true;
+          if (this._linkedReminderId === requestedId) {
+            this._linkedReminder = null;
+          }
         }
       }
       const total = historyView ? this._historyTotal : this._listTotal;
