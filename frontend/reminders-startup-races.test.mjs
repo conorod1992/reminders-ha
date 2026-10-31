@@ -59,11 +59,14 @@ test("late subscription is immediately released after disconnect", async () => {
   const panel = panelFixture();
   const pending = deferred();
   let unsubscribes = 0;
-  panel._hass.connection.subscribeMessage = () => pending.promise;
+  const subscribed = deferred();
+  panel._hass.connection.subscribeMessage = () => {
+    subscribed.resolve();
+    return pending.promise;
+  };
   const startup = panel._start();
-  // Promise continuations after preference load must get to subscription setup.
-  await Promise.resolve();
-  await Promise.resolve();
+  // Wait until the subscription request has genuinely started.
+  await subscribed.promise;
   panel.isConnected = false;
   panel.disconnectedCallback();
   pending.resolve(() => { unsubscribes++; });
