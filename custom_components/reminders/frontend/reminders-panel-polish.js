@@ -336,6 +336,9 @@ function _installPolishStyles(root) {
   const style = document.createElement("style");
   style.id = "reminders-polish-styles";
   style.textContent = `
+    .attention-card{border-inline-start:4px solid var(--warning-color)}
+    .attention-note{margin-top:5px;font-size:13px;font-weight:500;color:var(--warning-color)}
+    .attention-note.delivery_failed,.attention-note.recent_delivery_failed{color:var(--error-color)}
     .primary-tabs{gap:4px}
     .primary-tabs .tab{white-space:nowrap;padding-inline:14px}
     .toolbar{align-items:end}
