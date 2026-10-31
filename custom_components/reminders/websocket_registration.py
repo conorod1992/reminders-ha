@@ -124,28 +124,22 @@ async def _filtered_page(
 ) -> tuple[list[Reminder], int]:
     """Apply a derived predicate before paging and report its exact total."""
     manager = _manager(hass)
-    matches: list[Reminder] = []
-    source_offset = 0
-    source_total: int | None = None
-    while source_total is None or source_offset < source_total:
-        page, source_total = await manager.async_list_page(
-            user_id=user_id,
-            due_after=due_after,
-            due_before=due_before,
-            query=query,
-            recurring=recurring,
-            activation_type=activation_type,
-            statuses=statuses,
-            source=source,
-            source_id=source_id,
-            limit=1000,
-            offset=source_offset,
-        )
-        matches.extend(item for item in page if predicate(item))
-        source_offset += len(page)
-        if not page:
-            break
-    return matches[offset : offset + limit], len(matches)
+    # Filter, sort and count under the manager's existing list lock once.
+    # Repeated 1000-item scans re-sorted the same population on every page.
+    return await manager.async_list_page(
+        user_id=user_id,
+        due_after=due_after,
+        due_before=due_before,
+        query=query,
+        recurring=recurring,
+        activation_type=activation_type,
+        statuses=statuses,
+        source=source,
+        source_id=source_id,
+        limit=limit,
+        offset=offset,
+        predicate=predicate,
+    )
 
 
 async def _failed_page(
