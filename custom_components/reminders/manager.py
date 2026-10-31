@@ -473,6 +473,7 @@ class ReminderManager:
         source_id: str | None = None,
         limit: int = 500,
         offset: int = 0,
+        predicate: Callable[[Reminder], bool] | None = None,
     ) -> tuple[list[Reminder], int]:
         """Return one filtered reminder page and its pre-pagination total."""
         after = _normalize_due(due_after) if due_after else None
@@ -500,6 +501,7 @@ class ReminderManager:
                 and (statuses is None or reminder.status in statuses)
                 and (source is None or reminder.source == source)
                 and (source_id is None or reminder.source_id == source_id)
+                and (predicate is None or predicate(reminder))
                 and (
                     activation_type is None
                     or reminder.activation_type is activation_type
