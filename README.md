@@ -70,6 +70,14 @@ Installing through HACS puts the integration files on your Home Assistant system
 4. Complete the one-step setup.
 5. Open **Reminders** from the Home Assistant sidebar.
 
+### Publishing a HACS release (maintainers)
+
+Use **Actions → Publish HACS release → Run workflow** on `main`, entering the next stable version (for example, `2.8.2`, without `v`). This is a **manual** publication workflow: merging ordinary PRs does not release automatically.
+
+The workflow rejects invalid/non-increasing versions and existing tags, updates `custom_components/reminders/manifest.json`, runs Python type/lint/tests and frontend checks, then fast-forward pushes the version commit to `main`, creates an annotated `vX.Y.Z` tag and publishes a GitHub Release with generated notes. HACS reads the GitHub release tag and its source archive, together with the integration manifest's matching version. `hacs.json` specifies only compatibility metadata and must not be updated for each release.
+
+Release publishing requires Actions write permissions and permission to push to `main` under the repository's branch rules. If branch protection blocks the push, the workflow stops before tagging or publishing; update the manifest through an approved PR and publish the corresponding tag/release separately. If a later tag or release step fails *after* the version commit was pushed, do **not** bump the version again just to retry: inspect the commit/tag and finish the same version manually.
+
 ### Manual installation
 
 If you prefer not to use HACS:

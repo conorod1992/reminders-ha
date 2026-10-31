@@ -1,0 +1,96 @@
+name: Publish HACS release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Stable release version, e.g. 2.8.2 (no v prefix)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reminders-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the exact main commit
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Ensure main is current and release does not exist
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || {
+            echo "::error::main changed after checkout; dispatch the workflow again."
+            exit 1
+          }
+          if git show-ref --verify --quiet "refs/tags/v${VERSION}"; then
+            echo "::error::Tag v${VERSION} already exists."
+            exit 1
+          fi
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Release v${VERSION} already exists."
+            exit 1
+          fi
+
+      - name: Stage and validate integration version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python scripts/prepare_release.py "$VERSION"
+          python scripts/check_release_version.py
+          git diff --check
+          test "$(git diff --name-only)" = "custom_components/reminders/manifest.json"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Test release candidate before publishing
+        run: |
+          python -m pip install -r requirements-test.txt
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m mypy custom_components/reminders
+          python -m pytest
+          cd frontend
+          npm run build
+          npm run lint
+          npm test
+
+      - name: Commit version, tag exact commit, and publish GitHub release
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/reminders/manifest.json
+          git commit -m "chore(release): v${VERSION}"
+          # Normal fast-forward push respects branch protection; never force-update main.
+          git push origin HEAD:refs/heads/main
+          git tag -a "v${VERSION}" -m "Reminders v${VERSION}"
+          git push origin "refs/tags/v${VERSION}"
+          gh release create "v${VERSION}" \
+            --verify-tag \
+            --title "Reminders v${VERSION}" \
+            --generate-notes \
+            --latest
