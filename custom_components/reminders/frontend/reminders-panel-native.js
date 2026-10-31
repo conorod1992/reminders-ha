@@ -65,7 +65,7 @@ if (proto && !proto.__nativeRuleEditorsInstalled) {
     for (const name of ["fire_if_already_matching", "for_seconds", "state_from", "state_attribute", "numeric_attribute", "event_data"]) {
       const field = form.elements[name];
       const label = field?.closest?.("label");
-      if (label) { label.classList.add("native-unsupported", "hidden"); field.disabled = true; }
+      if (label) { label.classList.add("native-unsupported", "hidden"); label.hidden = true; field.disabled = true; }
     }
     form.elements.user_id?.addEventListener?.("change", () => {
       const selected = form.elements.user_id.value;
@@ -346,6 +346,7 @@ function _installClassicFallback(panel, form) {
     form._nativeRules.classic = true;
     for (const label of form.querySelectorAll(".native-unsupported")) {
       label.classList.remove("hidden");
+      label.hidden = false;
       const field = label.querySelector("input,select,textarea");
       if (field) field.disabled = false;
     }

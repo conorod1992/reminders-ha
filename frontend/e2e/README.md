@@ -1,6 +1,6 @@
-# Real Home Assistant browser checks (opt-in)
+# Real Home Assistant browser checks
 
-These Playwright checks operate against a **running, authenticated Home Assistant instance with Reminders installed**. They are deliberately not part of PR CI, because CI does not have an HA installation, a Companion App, real Assist devices or user credentials. They are not a substitute for verifying mobile notification delivery on a physical device.
+These Playwright checks operate against a **running, authenticated Home Assistant instance with Reminders installed**. PR CI provisions a disposable Home Assistant installation for browser journeys; manual runs can target an authorized test instance. They are not a substitute for verifying mobile notification delivery on a physical device.
 
 1. On a disposable/test HA installation, install this branch of Reminders and open its management panel once in a browser.
 2. From `frontend/`, install the optional test tooling: `npm install --no-save @playwright/test`, then `npx playwright install chromium`.
@@ -14,6 +14,6 @@ Also manually check a *real* mobile Companion App notification link, each select
 
 ## Validation boundary
 
-The ordinary Node and Python suites cover pure logic and mocked WebSocket/DOM scenarios. This Playwright suite is **opt-in**; it does not claim real-HA coverage until someone runs it against a configured instance. No live HA server or authentication state is available to GitHub CI by default.
+The ordinary Node and Python suites cover pure logic and mocked WebSocket/DOM scenarios. The browser CI job supplies a disposable HA server and temporary account. Manual runs use the configuration below. Browser checks do not certify physical device behavior.
 
-CI now provisions a fresh, disposable Home Assistant 2026.9.4 container and runs the authenticated Playwright smoke and create/delete journeys automatically. Its account and auth state exist only on the runner; private traces are not uploaded. `bootstrap.mjs` refuses existing installations and is intended only for that localhost container. Physical phone and Assist checks remain manual.
+CI now provisions a fresh, disposable Home Assistant 2026.9.4 container and runs the authenticated Playwright smoke and create/delete journeys automatically. Its administrator/ordinary accounts and auth states exist only on the runner; private traces are not uploaded. `bootstrap.mjs` refuses existing installations and is intended only for that localhost container. Physical phone and Assist checks remain manual.

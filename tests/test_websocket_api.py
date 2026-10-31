@@ -400,3 +400,46 @@ async def test_subscription_is_invalidation_only_and_owner_filtered(
     assert connection.events == [(42, {"changed": True})] * 4
     assert "Visible" not in str(connection.events)
     assert "Changed" not in str(connection.events)
+
+
+async def test_occurrence_snooze_targets_delivered_occurrence(api):
+    hass, manager = api
+    reminder = await manager.async_create(
+        user_id="u1",
+        title="Occurrence",
+        due=datetime.now(UTC) - timedelta(seconds=1),
+        managed_externally=True,
+        external_actions=({"id": "handled", "label": "Handled"},),
+    )
+    reminder = await manager.async_get(reminder.id)
+    occurrence_id = reminder.current_occurrence_id
+    connection = Connection(user("u1"))
+    await invoke(
+        websocket_snooze,
+        hass,
+        connection,
+        type="reminders/snooze",
+        reminder_id=reminder.id,
+        occurrence_id=occurrence_id,
+        duration_seconds=600,
+    )
+    assert connection.results[-1][1]["reminder"]["occurrence_history"][0]["snoozed"]
+    history, _ = await manager.async_history(user_id="u1")
+    assert history[0]["occurrence"]["id"] == occurrence_id
+    assert history[0]["occurrence"]["snoozed"]
+
+
+async def test_history_exposes_authorized_external_actions(api):
+    _hass, manager = api
+    reminder = await manager.async_create(
+        user_id="u1",
+        title="Action",
+        due=datetime.now(UTC) - timedelta(seconds=1),
+        managed_externally=True,
+        external_actions=({"id": "handled", "label": "Handled"},),
+    )
+    rows, total = await manager.async_history(user_id="u1")
+    assert total == 1
+    assert rows[0]["reminder_id"] == reminder.id
+    assert rows[0]["external_actions"] == [{"id": "handled", "label": "Handled"}]
+    assert await manager.async_history(user_id="u2") == ([], 0)

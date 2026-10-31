@@ -29,7 +29,7 @@ Each layer has a narrow responsibility:
 
 Run the lightweight `cd frontend && npm test && npm run lint` checks after JavaScript changes. Also run the Python suite and PR CI to detect cross-system regressions. Startup races, late callbacks, notification authorization and duplicate submits have focused Node tests.
 
-For **actual** Home Assistant/browser testing, follow [e2e/README.md](e2e/README.md). Those Playwright checks are opt-in and require an installed integration, a running HA instance and authenticated test accounts. They are not executed by ordinary PR CI. Device-specific Companion App actions, Assist delivery and restart recovery still require a real HA/manual environment. A green lightweight CI does not certify them.
+For **actual** Home Assistant/browser testing, follow [e2e/README.md](e2e/README.md). The browser CI workflow provisions a disposable installation and authenticated account; manual runs can also use a configured test instance. Device-specific Companion App actions, Assist delivery and restart recovery still require a real HA/manual environment. A green lightweight CI does not certify them.
 
 ## Risk-managed simplification
 

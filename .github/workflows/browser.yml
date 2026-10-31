@@ -23,6 +23,7 @@ jobs:
         env:
           HA_URL: http://localhost:8123
           HA_STORAGE_STATE: ${{ runner.temp }}/reminders-auth.json
+          HA_NONADMIN_STORAGE_STATE: ${{ runner.temp }}/reminders-ordinary-auth.json
         run: node frontend/e2e/bootstrap.mjs
       - name: Install browser tooling
         working-directory: frontend
@@ -34,6 +35,7 @@ jobs:
         env:
           HA_URL: http://localhost:8123
           HA_STORAGE_STATE: ${{ runner.temp }}/reminders-auth.json
+          HA_NONADMIN_STORAGE_STATE: ${{ runner.temp }}/reminders-ordinary-auth.json
           HA_E2E_MUTATE: "1"
         run: npm run test:e2e
       - name: Home Assistant logs on failure

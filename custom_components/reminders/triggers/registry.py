@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -287,6 +288,16 @@ class TriggerRegistry:
             latitude = float(state.attributes["latitude"])
             longitude = float(state.attributes["longitude"])
             gps_accuracy = float(state.attributes.get("gps_accuracy", 0))
+            if (
+                not all(
+                    math.isfinite(value)
+                    for value in (latitude, longitude, gps_accuracy)
+                )
+                or not -90 <= latitude <= 90
+                or not -180 <= longitude <= 180
+                or gps_accuracy < 0
+            ):
+                return None
         except KeyError, TypeError, ValueError:
             return None
         try:

@@ -28,8 +28,8 @@ from tests.conftest import FakeDispatcher
 from tests.test_native_rules import _manager, _timed_reminder
 
 
-async def test_native_condition_edit_zone_unknown_and_history_retention():
-    patch = pytest.MonkeyPatch()
+async def test_native_condition_edit_zone_unknown_and_history_retention(monkeypatch):
+    patch = monkeypatch
     manager, _dispatcher = _manager(patch)
     now = datetime.now(UTC)
     reminder = _timed_reminder(
@@ -90,7 +90,7 @@ async def test_native_condition_edit_zone_unknown_and_history_retention():
     )
     assert not registry.condition_is_currently_matching(definition)
 
-    patch = pytest.MonkeyPatch()
+    patch = monkeypatch
     manager, _dispatcher = _manager(patch)
     tomorrow = datetime.now(UTC) + timedelta(days=1)
     rule = RecurrenceRule(
@@ -105,8 +105,8 @@ async def test_native_condition_edit_zone_unknown_and_history_retention():
     patch.undo()
 
 
-async def test_detached_native_callback_is_retired():
-    patch = pytest.MonkeyPatch()
+async def test_detached_native_callback_is_retired(monkeypatch):
+    patch = monkeypatch
     manager, dispatcher = _manager(patch)
     now = datetime.now(UTC)
     reminder = _timed_reminder(
@@ -135,8 +135,8 @@ async def test_detached_native_callback_is_retired():
     patch.undo()
 
 
-async def test_native_title_edit_preserves_snoozed_redelivery():
-    patch = pytest.MonkeyPatch()
+async def test_native_title_edit_preserves_snoozed_redelivery(monkeypatch):
+    patch = monkeypatch
     manager, dispatcher = _manager(patch)
     patch.setattr(
         "custom_components.reminders.native_crud.async_validate_native_triggers",
