@@ -79,6 +79,9 @@ if (proto && !proto.__robustStartupInstalled) {
 
   proto.disconnectedCallback = function () {
     this._startupGeneration = (this._startupGeneration || 0) + 1;
+    // Retire any page request which started before the disconnect.
+    // Otherwise a late response could redraw an obsolete panel after teardown.
+    this._loadRequestId = (this._loadRequestId || 0) + 1;
     _clearRetryTimer(this);
     _removeRetryUi(this);
     this._startupInFlight = false;
