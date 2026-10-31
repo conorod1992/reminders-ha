@@ -21,13 +21,17 @@ def test_release_bumps_manifest_preserving_other_fields(tmp_path: Path) -> None:
     path.write_text('{"domain": "reminders", "version": "2.8.1", "name": "Reminders"}\n')
     prepare_release("2.8.2", manifest_path=path)
     assert json.loads(path.read_text()) == {
-        "domain": "reminders", "version": "2.8.2", "name": "Reminders"
+        "domain": "reminders",
+        "version": "2.8.2",
+        "name": "Reminders",
     }
     assert path.read_text().endswith("\n")
 
 
 @pytest.mark.parametrize("version", ["2.8.1", "2.8.0", "2.7.99", "1.9.99"])
-def test_release_never_reuses_or_downgrades_version(tmp_path: Path, version: str) -> None:
+def test_release_never_reuses_or_downgrades_version(
+    tmp_path: Path, version: str
+) -> None:
     path = tmp_path / "manifest.json"
     original = '{"version": "2.8.1"}\n'
     path.write_text(original)
