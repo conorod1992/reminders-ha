@@ -93,8 +93,16 @@ def test_attention_panel_is_additive_wrapper_over_native_panel() -> None:
     ).read_text(encoding="utf-8")
 
     assert 'import "./reminders-panel-native.js"' in source
-    assert 'button.textContent = "Needs attention"' in source
-    assert 'this._view = "attention"' in source
+    polish = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "reminders"
+        / "frontend"
+        / "reminders-panel-polish.js"
+    ).read_text(encoding="utf-8")
+
+    assert '["attention", "Needs attention"]' in polish
+    assert "proto._renderFilters = function ()" not in source
     assert "Nothing needs your attention" in source
 
 
