@@ -367,3 +367,15 @@ test("stale failed notification lookup never clears a newer successful lookup", 
   await oldRequest;
   assert.equal(panel._linkedReminder.title, "Latest");
 });
+
+test("disconnected panel discards late list responses", async () => {
+  const panel = makePanel();
+  panel._items = [{ id: "before-disconnect" }];
+  const pending = deferred();
+  panel._call = () => pending.promise;
+  const load = panel._load();
+  panel.disconnectedCallback();
+  pending.resolve({ reminders: [{ id: "stale-after-disconnect" }], total: 1 });
+  await load;
+  assert.deepEqual(panel._items, [{ id: "before-disconnect" }]);
+});
