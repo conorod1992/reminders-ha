@@ -25,15 +25,21 @@ from .const import (
     SERVICE_RESUME,
     SERVICE_SET_NATIVE_RULES,
     SERVICE_SKIP_NEXT,
-    SERVICE_UPDATE,
     SERVICE_UPSERT,
 )
 from .interop_manager import InteropReminderManager
 from .manager import ReminderNotFoundError, ReminderValidationError
 from .models import ActivationType, Reminder
 from .recurrence import RecurrenceError
-from .services import CREATE_RECURRING_SCHEMA, CREATE_SCHEMA, CREATE_TRIGGERED_SCHEMA
-from .triggers.models import TriggerValidationError
+from .services import (
+    CREATE_RECURRING_SCHEMA,
+    CREATE_SCHEMA,
+    CREATE_TRIGGERED_SCHEMA,
+    _parse_datetime,
+    _policy_from_data,
+    _recurrence_from_data,
+)
+from .triggers.models import TriggerDefinition, TriggerValidationError
 
 _EXTERNAL_KINDS = ("one_time", "recurring", "triggered")
 _RESERVED_UPSERT_FIELDS = {
@@ -171,12 +177,26 @@ def async_register_interop_services(hass: HomeAssistant) -> None:
 
         async def update(existing: Reminder) -> dict[str, Any]:
             _validate_existing_kind(existing, kind)
-            return await _call_service(
-                hass,
-                call,
-                SERVICE_UPDATE,
-                {**desired, "reminder_id": existing.id},
+            changes = _desired_update(hass, desired, kind)
+            # Diff normalized configuration, never the occurrence's mutable due time.
+            changes = {
+                key: value
+                for key, value in changes.items()
+                if value != getattr(existing, key)
+            }
+            if "due" in changes:
+                original_due = existing.scheduled_due or next(
+                    (item.scheduled_due for item in existing.occurrence_history),
+                    existing.due,
+                )
+                if changes["due"] == original_due:
+                    changes.pop("due")
+            if not changes:
+                return {"reminder": existing.to_dict()}
+            updated = await manager.async_update(
+                existing.id, expected_user_id=user_id, **changes
             )
+            return {"reminder": updated.to_dict()}
 
         created, result = await manager.async_upsert_external(
             user_id=user_id,
@@ -309,3 +329,66 @@ def _translate_errors(handler: Any) -> Any:
             raise ServiceValidationError(str(err)) from err
 
     return wrapped
+
+
+def _desired_update(
+    hass: HomeAssistant, desired: dict[str, Any], kind: str
+) -> dict[str, Any]:
+    """Normalize a complete create configuration, including omitted option defaults."""
+    changes = {
+        key: desired.get(key)
+        for key in ("message", "source_event", "complete_when", "escalation")
+    }
+    changes.update(
+        {
+            key: desired[key]
+            for key in (
+                "title",
+                "acknowledgement_policy",
+                "quiet_hours_policy",
+                "allow_manual_completion",
+            )
+        }
+    )
+    changes["external_actions"] = tuple(desired.get("external_actions", ()))
+    changes["delivery_policy"] = _policy_from_data(desired)
+    if kind == "triggered":
+        changes.update(
+            {
+                key: desired[key]
+                for key in (
+                    "repeat_policy",
+                    "fire_if_already_matching",
+                    "while_awaiting_acknowledgement",
+                    "cooldown_seconds",
+                )
+            }
+        )
+        changes["trigger"] = TriggerDefinition.from_dict(desired["trigger"])
+        changes["trigger_description"] = desired.get("trigger_description")
+        for key in ("available_from", "expires_at"):
+            changes[key] = (
+                _parse_datetime(hass, desired[key])
+                if desired.get(key) is not None
+                else None
+            )
+    else:
+        changes["deliver_when"] = desired.get("deliver_when")
+        changes["expires_after_seconds"] = desired.get("expires_after_seconds")
+        if kind == "recurring":
+            changes["recurrence"] = _recurrence_from_data(hass, desired)
+            changes["missed_occurrence_policy"] = desired["missed_occurrence_policy"]
+        else:
+            changes["due"] = _parse_datetime(hass, desired["due"])
+    for key in ("deliver_when", "complete_when"):
+        if changes.get(key) is not None:
+            changes[key] = TriggerDefinition.from_dict(
+                cast(dict[str, Any], changes[key])
+            )
+    if changes.get("escalation") is not None:
+        from .models import EscalationPolicy
+
+        changes["escalation"] = EscalationPolicy.from_dict(
+            cast(dict[str, Any], changes["escalation"])
+        )
+    return changes

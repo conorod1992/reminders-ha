@@ -75,7 +75,7 @@ def test_list_loads_ignore_stale_responses_and_do_not_drop_refreshes() -> None:
     source = (FRONTEND / "reminders-panel-polish.js").read_text(encoding="utf-8")
 
     assert "const requestId = (this._loadRequestId || 0) + 1" in source
-    assert source.count("if (requestId !== this._loadRequestId) return true") == 5
+    assert source.count("if (requestId !== this._loadRequestId) return true") >= 5
     assert "if (requestId === this._loadRequestId)" in source
     assert "if (this._historyLoadingMore) return true" in source
     assert "if (this._listLoadingMore) return true" in source

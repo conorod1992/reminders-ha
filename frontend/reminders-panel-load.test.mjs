@@ -379,3 +379,19 @@ test("disconnected panel discards late list responses", async () => {
   await load;
   assert.deepEqual(panel._items, [{ id: "before-disconnect" }]);
 });
+
+
+test("history refresh preserves depth beyond one server page", async () => {
+  const panel = makePanel();
+  panel._view = "history";
+  panel._history = Array.from({ length: 350 }, (_, id) => ({id}));
+  panel._loadedFilterKey = JSON.stringify(["history", "mine", "", undefined, "all"]);
+  const calls = [];
+  panel._call = async (_action, data) => {
+    calls.push(data);
+    return { history: Array.from({length: Math.min(data.limit, 350-data.offset)}, (_, i) => ({id: data.offset+i})), total:350 };
+  };
+  await panel._load();
+  assert.equal(panel._history.length, 350);
+  assert.deepEqual(calls.map(x => [x.offset,x.limit]), [[0,200],[200,150]]);
+});
