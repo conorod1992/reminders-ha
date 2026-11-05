@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.decorators import (
     async_response,
@@ -37,6 +36,7 @@ from .services import (
     _recurrence_from_data,
     _source_from_data,
 )
+from .validation import Schema, vol
 from .websocket_api import (
     COMMAND_PREFIX,
     CREATE_RECURRING_SCHEMA,
@@ -66,7 +66,7 @@ def _native_manager(hass: HomeAssistant) -> NativeReminderManager:
 
 @websocket_command(
     vol.All(
-        vol.Schema(
+        Schema(
             {
                 vol.Required("type"): f"{COMMAND_PREFIX}set_native_rules",
                 vol.Required("reminder_id"): cv.string,

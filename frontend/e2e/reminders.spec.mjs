@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 // This suite uses a *real* authenticated Home Assistant instance. It is not
-// run in PR CI against a disposable installation, or manually with an existing
+// mocked: it runs in PR CI against a disposable installation, or manually with an existing
 // authorized test session.
 const configured = Boolean(process.env.HA_URL && process.env.HA_STORAGE_STATE);
 test.skip(!configured, "Set HA_URL and HA_STORAGE_STATE (see README) first.");

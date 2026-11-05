@@ -8,7 +8,6 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-import voluptuous as vol
 
 from custom_components.reminders import services as services_module
 from custom_components.reminders.const import SERVICE_LIST
@@ -19,6 +18,7 @@ from custom_components.reminders.models import (
     ReminderStatus,
 )
 from custom_components.reminders.triggers.models import TriggerDefinition
+from custom_components.reminders.validation import vol
 
 
 class PagingManager:

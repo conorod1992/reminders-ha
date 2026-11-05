@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-import voluptuous as vol
 
 from custom_components.reminders.models import (
     ActivationType,
@@ -26,6 +25,7 @@ from custom_components.reminders.native_websocket import (
 )
 from custom_components.reminders.storage import serialize_storage
 from custom_components.reminders.triggers.models import TriggerDefinition
+from custom_components.reminders.validation import vol
 
 from .conftest import FakeDispatcher
 from .test_atomic_persistence import FailingStore, SaveError

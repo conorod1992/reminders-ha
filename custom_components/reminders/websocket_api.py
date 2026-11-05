@@ -6,7 +6,6 @@ from datetime import timedelta
 from functools import wraps
 from typing import Any, cast
 
-import voluptuous as vol
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.decorators import (
     async_response,
@@ -49,6 +48,7 @@ from .services import (
     _source_from_data,
 )
 from .triggers.models import TriggerDefinition, TriggerValidationError
+from .validation import vol
 
 COMMAND_PREFIX = f"{DOMAIN}/"
 POLICY_SCHEMA: dict[Any, Any] = {

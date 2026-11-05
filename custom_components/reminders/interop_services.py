@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import voluptuous as vol
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -13,6 +12,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import VolSchemaType
 
 from .authorization import async_actor, async_get_authorized, async_resolve_target_user
 from .const import (
@@ -40,6 +40,7 @@ from .services import (
     _recurrence_from_data,
 )
 from .triggers.models import TriggerDefinition, TriggerValidationError
+from .validation import Schema, vol
 
 _EXTERNAL_KINDS = ("one_time", "recurring", "triggered")
 _RESERVED_UPSERT_FIELDS = {
@@ -51,9 +52,9 @@ _RESERVED_UPSERT_FIELDS = {
 }
 _NATIVE_LIST = vol.All(cv.ensure_list, [dict])
 
-ID_SCHEMA = vol.Schema({vol.Required("reminder_id"): cv.string})
+ID_SCHEMA = Schema({vol.Required("reminder_id"): cv.string})
 SET_NATIVE_RULES_SCHEMA = vol.All(
-    vol.Schema(
+    Schema(
         {
             vol.Required("reminder_id"): cv.string,
             vol.Optional("activation_triggers"): _NATIVE_LIST,
@@ -69,7 +70,7 @@ SET_NATIVE_RULES_SCHEMA = vol.All(
         "completion_triggers",
     ),
 )
-UPSERT_SCHEMA = vol.Schema(
+UPSERT_SCHEMA = Schema(
     {
         vol.Required("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
         vol.Required("source_id"): vol.All(cv.string, vol.Length(min=1, max=255)),
@@ -78,7 +79,7 @@ UPSERT_SCHEMA = vol.Schema(
         vol.Required("data"): dict,
     }
 )
-RECONCILE_SOURCE_SCHEMA = vol.Schema(
+RECONCILE_SOURCE_SCHEMA = Schema(
     {
         vol.Required("source"): vol.All(cv.string, vol.Length(min=1, max=128)),
         vol.Optional("user_id"): cv.string,
@@ -267,7 +268,7 @@ async def _authorized(
     )
 
 
-def _create_service(kind: str) -> tuple[str, vol.Schema]:
+def _create_service(kind: str) -> tuple[str, VolSchemaType]:
     if kind == "one_time":
         return SERVICE_CREATE, CREATE_SCHEMA
     if kind == "recurring":

@@ -6,11 +6,11 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
+from homeassistant.helpers.typing import VolSchemaType
 from homeassistant.util import dt as dt_util
 
 from .authorization import (
@@ -34,6 +34,7 @@ from .models import (
 from .recurrence import RecurrenceFrequency
 from .services import _parse_datetime, _policy_from_data, _recurrence_from_data
 from .triggers.models import TriggerDefinition
+from .validation import Schema, vol
 
 ToolHandler = Callable[
     [HomeAssistant, dict[str, Any], llm.LLMContext], Awaitable[dict[str, Any]]
@@ -53,11 +54,12 @@ class RemindersTool(llm.Tool):
         self,
         name: str,
         description: str,
-        parameters: vol.Schema,
+        parameters: VolSchemaType,
         handler: ToolHandler,
     ) -> None:
         self.name = name
         self.description = description
+        assert isinstance(parameters, Schema)
         self.parameters = parameters
         self._handler = handler
 
@@ -124,9 +126,9 @@ def _tools() -> list[llm.Tool]:
             "Create one reminder. Provide due or delay_minutes; deliver_when waits "
             "for bounded context after that time, complete_when can resolve it, and "
             "escalation can redeliver until Done.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(
+                    Schema(
                         {
                             **create_common,
                             **scheduled_advanced,
@@ -144,7 +146,7 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "create_recurring_reminder",
             "Create an anchored daily, weekly, monthly, or yearly reminder series.",
-            vol.Schema(
+            Schema(
                 {
                     **create_common,
                     **scheduled_advanced,
@@ -174,7 +176,7 @@ def _tools() -> list[llm.Tool]:
             "create_triggered_reminder",
             "Create a reminder activated by a supported state, numeric_state, zone, "
             "event, or named trigger. Use exact Home Assistant entity IDs.",
-            vol.Schema(
+            Schema(
                 {
                     **create_common,
                     vol.Required("trigger"): dict,
@@ -201,7 +203,7 @@ def _tools() -> list[llm.Tool]:
             "list_reminders",
             "List upcoming reminders, optionally searching title/message or a "
             "due range.",
-            vol.Schema(
+            Schema(
                 {
                     vol.Optional("user_id"): cv.string,
                     vol.Optional("query"): cv.string,
@@ -222,9 +224,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "get_reminder",
             "Get reminder details by ID or an unambiguous exact title.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(TARGET_SCHEMA),
+                    Schema(TARGET_SCHEMA),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -233,9 +235,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "update_reminder",
             "Update an unambiguous reminder's details, policies, or recurrence rule.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(
+                    Schema(
                         {
                             **TARGET_SCHEMA,
                             vol.Optional("new_title"): cv.string,
@@ -312,9 +314,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "delete_reminder",
             "Cancel/delete an unambiguous reminder or recurring series.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(TARGET_SCHEMA),
+                    Schema(TARGET_SCHEMA),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -323,9 +325,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "pause_recurring_reminder",
             "Pause an anchored recurring reminder series until explicitly resumed.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(TARGET_SCHEMA),
+                    Schema(TARGET_SCHEMA),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -334,9 +336,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "resume_recurring_reminder",
             "Resume a paused recurring series on its existing anchored schedule.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(TARGET_SCHEMA),
+                    Schema(TARGET_SCHEMA),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -345,9 +347,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "skip_next_reminder",
             "Skip the next occurrence without cancelling the recurring series.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(TARGET_SCHEMA),
+                    Schema(TARGET_SCHEMA),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -356,9 +358,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "snooze_reminder",
             "Snooze only the active occurrence by due time or minutes.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(
+                    Schema(
                         {
                             **TARGET_SCHEMA,
                             vol.Exclusive("due", "when"): cv.string,
@@ -378,11 +380,9 @@ def _tools() -> list[llm.Tool]:
             "acknowledge_reminder",
             "Dismiss one delivered occurrence; occurrence_id disambiguates "
             "series history.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(
-                        {**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}
-                    ),
+                    Schema({**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -391,11 +391,9 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "complete_reminder",
             "Mark the underlying task completed when manual completion is enabled.",
-            vol.Schema(
+            Schema(
                 vol.All(
-                    vol.Schema(
-                        {**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}
-                    ),
+                    Schema({**TARGET_SCHEMA, vol.Optional("occurrence_id"): cv.string}),
                     cv.has_at_least_one_key("reminder_id", "title"),
                 )
             ),
@@ -404,13 +402,13 @@ def _tools() -> list[llm.Tool]:
         RemindersTool(
             "fire_named_reminder_trigger",
             "Fire a named trigger for the authenticated user's reminders only.",
-            vol.Schema({vol.Required("trigger_id"): cv.string}),
+            Schema({vol.Required("trigger_id"): cv.string}),
             _fire_named_trigger,
         ),
         RemindersTool(
             "query_reminder_history",
             "Query bounded delivered/failed/acknowledged reminder occurrence history.",
-            vol.Schema(
+            Schema(
                 {
                     vol.Optional("user_id"): cv.string,
                     vol.Optional("query"): cv.string,
