@@ -6,8 +6,9 @@ from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
 
-# HA 2026.9 implicitly re-exports this; keep the path compatible with HA 2026.7.
-from homeassistant.components.http import StaticPathConfig  # type: ignore[attr-defined]
+# HA 2026.7 defines this here; newer versions implicitly re-export it. The
+# import works on both, but only the newer stubs require attr-defined suppression.
+from homeassistant.components.http import StaticPathConfig  # type: ignore[attr-defined, unused-ignore]
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
