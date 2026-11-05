@@ -29,6 +29,7 @@ from .models import (
     Reminder,
     ReminderStatus,
     TriggerRepeatPolicy,
+    UserPreferences,
     WhileAwaitingAcknowledgement,
 )
 from .native_automation import NativeAutomationRuntime
@@ -80,6 +81,27 @@ class NativeReminderManager(ReminderManager):
         self._native_change_unsub: Callable[[], None] | None = self.async_subscribe(
             self._native_changed
         )
+
+    async def _async_persist_state(
+        self, reminders: dict[str, Reminder], users: dict[str, UserPreferences]
+    ) -> None:
+        retired = [
+            key
+            for key, previous in self._reminders.items()
+            if key not in reminders
+            or any(
+                getattr(previous, role) != getattr(reminders[key], role)
+                for role in (
+                    "activation_triggers",
+                    "delivery_triggers",
+                    "delivery_conditions",
+                    "completion_triggers",
+                )
+            )
+        ]
+        await super()._async_persist_state(reminders, users)
+        for key in retired:
+            self._native_runtime.invalidate_callbacks(key)
 
     @property
     def trigger_listener_count(self) -> int:
@@ -198,6 +220,8 @@ class NativeReminderManager(ReminderManager):
             candidate = dict(self._reminders)
             candidate[reminder_id] = updated
             await self._async_persist_state(candidate, self._users)
+            if any(getattr(current, key) != value for key, value in values.items()):
+                self._native_runtime.invalidate_callbacks(reminder_id)
             self._reschedule(force=True)
         await self._native_runtime.async_sync(self._reminders.values())
         self._notify_changed({current.user_id})
@@ -232,31 +256,37 @@ class NativeReminderManager(ReminderManager):
                 await self._async_validate_security(reminder)
             except ReminderValidationError:
                 await self._async_skip_native_condition_failure(
-                    reminder.id, effective_now, reason="permission_denied"
+                    reminder.id,
+                    effective_now,
+                    reason="permission_denied",
+                    expected=reminder,
                 )
                 continue
             conditions_match = await self._native_runtime.async_conditions_match(
                 reminder
             )
             if reminder.delivery_triggers:
-                await self._async_begin_native_delivery_wait(reminder.id, effective_now)
+                await self._async_begin_native_delivery_wait(
+                    reminder.id, effective_now, expected=reminder
+                )
                 continue
             if conditions_match and reminder.delivery_conditions:
                 continue
             if reminder.delivery_conditions and not conditions_match:
                 await self._async_skip_native_condition_failure(
-                    reminder.id, effective_now
+                    reminder.id, effective_now, expected=reminder
                 )
         await super()._async_process_due(effective_now, recover_missed=recover_missed)
         await self._native_runtime.async_sync(self._reminders.values())
 
     async def _async_begin_native_delivery_wait(
-        self, reminder_id: str, now: datetime
+        self, reminder_id: str, now: datetime, *, expected: Reminder | None = None
     ) -> None:
         async with self._lock:
             reminder = self._reminders.get(reminder_id)
             if (
                 reminder is None
+                or (expected is not None and reminder != expected)
                 or reminder.status is not ReminderStatus.PENDING
                 or reminder.due is None
                 or reminder.due > now
@@ -298,11 +328,22 @@ class NativeReminderManager(ReminderManager):
         self._notify_changed({reminder.user_id})
 
     async def _async_skip_native_condition_failure(
-        self, reminder_id: str, now: datetime, *, reason: str = "conditions_not_met"
+        self,
+        reminder_id: str,
+        now: datetime,
+        *,
+        reason: str = "conditions_not_met",
+        expected: Reminder | None = None,
     ) -> None:
         async with self._lock:
             reminder = self._reminders.get(reminder_id)
-            if reminder is None or reminder.status is not ReminderStatus.PENDING:
+            if (
+                reminder is None
+                or reminder.status is not ReminderStatus.PENDING
+                or (expected is not None and reminder != expected)
+                or reminder.due is None
+                or reminder.due > now
+            ):
                 return
             occurrence = _find_occurrence(reminder, reminder.current_occurrence_id)
             if (
@@ -356,28 +397,35 @@ class NativeReminderManager(ReminderManager):
         cause = _native_trigger_cause(run_variables)
         if role == "activation":
             await self.async_activate_native_trigger(
-                reminder_id, cause=cause, context=trigger_context
+                reminder_id, cause=cause, context=trigger_context, expected=reminder
             )
         elif role == "delivery":
             reminder = await self.async_get(reminder_id)
             if await self._native_runtime.async_conditions_match(reminder):
                 await self.async_activate_native_delivery(
-                    reminder_id, cause=cause, context=trigger_context
+                    reminder_id, cause=cause, context=trigger_context, expected=reminder
                 )
         elif role == "completion":
             await self.async_complete_native(
-                reminder_id, cause=cause, context=trigger_context
+                reminder_id, cause=cause, context=trigger_context, expected=reminder
             )
         await self._native_runtime.async_sync(self._reminders.values())
 
     async def async_activate_native_trigger(
-        self, reminder_id: str, *, cause: str, context: dict[str, Any]
+        self,
+        reminder_id: str,
+        *,
+        cause: str,
+        context: dict[str, Any],
+        expected: Reminder | None = None,
     ) -> str:
         """Claim one HA-native activation trigger hit."""
         now = dt_util.utcnow()
         owner: str | None = None
         async with self._lock:
             current = self._reminders.get(reminder_id)
+            if expected is not None and current != expected:
+                return "inactive"
             if (
                 self._unloaded
                 or current is None
@@ -469,13 +517,20 @@ class NativeReminderManager(ReminderManager):
         return outcome
 
     async def async_activate_native_delivery(
-        self, reminder_id: str, *, cause: str, context: dict[str, Any]
+        self,
+        reminder_id: str,
+        *,
+        cause: str,
+        context: dict[str, Any],
+        expected: Reminder | None = None,
     ) -> str:
         """Claim a native context-waiting occurrence and deliver it once."""
         now = dt_util.utcnow()
         expired = False
         async with self._lock:
             current = self._reminders.get(reminder_id)
+            if expected is not None and current != expected:
+                return "inactive"
             if (
                 self._unloaded
                 or current is None
@@ -516,12 +571,19 @@ class NativeReminderManager(ReminderManager):
         return "activated"
 
     async def async_complete_native(
-        self, reminder_id: str, *, cause: str, context: dict[str, Any]
+        self,
+        reminder_id: str,
+        *,
+        cause: str,
+        context: dict[str, Any],
+        expected: Reminder | None = None,
     ) -> str:
         """Resolve an occurrence after an HA-native completion trigger."""
         now = dt_util.utcnow()
         async with self._lock:
             current = self._reminders.get(reminder_id)
+            if expected is not None and current != expected:
+                return "inactive"
             if self._unloaded or current is None or not current.completion_triggers:
                 return "inactive"
             occurrence = _automatic_completion_occurrence(current)
