@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.components.websocket_api import async_register_command
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.decorators import (
@@ -21,6 +20,7 @@ from .const import DOMAIN
 from .models import ActivationType, OccurrenceStatus, Reminder, ReminderStatus
 from .native_websocket import NATIVE_WEBSOCKET_HANDLERS
 from .services import _parse_datetime
+from .validation import vol
 from .websocket_api import (
     _api_errors,
     _manager,

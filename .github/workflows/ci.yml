@@ -16,6 +16,15 @@ permissions:
   contents: read
 
 jobs:
+  ha-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.versions.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: versions
+        run: echo "matrix=$(python scripts/ha_test_matrix.py)" >> "$GITHUB_OUTPUT"
+
   release-version:
     runs-on: ubuntu-latest
     steps:
@@ -31,14 +40,22 @@ jobs:
         run: python scripts/check_release_version.py
 
   test:
+    name: test (HA ${{ matrix.homeassistant }})
+    needs: ha-versions
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.ha-versions.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
-      - run: python -m pip install -r requirements-test.txt
+      - name: Install dependencies for the selected Home Assistant
+        run: |
+          python scripts/ha_test_matrix.py --requirements "${{ matrix.homeassistant }}" > "$RUNNER_TEMP/requirements-test.txt"
+          python -m pip install -r "$RUNNER_TEMP/requirements-test.txt"
       - run: python -m ruff format --check .
       - run: python -m ruff check .
       - run: python -m mypy custom_components/reminders

@@ -6,7 +6,6 @@ from datetime import date, datetime
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-import voluptuous as vol
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -67,6 +66,7 @@ from .recurrence import (
     Weekday,
 )
 from .triggers.models import TriggerDefinition, TriggerValidationError
+from .validation import Schema, vol
 
 POLICY_FIELDS: dict[Any, Any] = {
     vol.Optional("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
@@ -124,7 +124,7 @@ CREATE_FIELDS: dict[Any, Any] = {
 CREATE_FIELDS.update(POLICY_FIELDS)
 CREATE_FIELDS.update(ADVANCED_FIELDS)
 CREATE_FIELDS.update(SOURCE_FIELDS)
-CREATE_SCHEMA = vol.Schema(CREATE_FIELDS)
+CREATE_SCHEMA = Schema(CREATE_FIELDS)
 CREATE_RECURRING_FIELDS: dict[Any, Any] = {
     vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
     vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
@@ -158,7 +158,7 @@ CREATE_RECURRING_FIELDS: dict[Any, Any] = {
 CREATE_RECURRING_FIELDS.update(POLICY_FIELDS)
 CREATE_RECURRING_FIELDS.update(ADVANCED_FIELDS)
 CREATE_RECURRING_FIELDS.update(SOURCE_FIELDS)
-CREATE_RECURRING_SCHEMA = vol.Schema(CREATE_RECURRING_FIELDS)
+CREATE_RECURRING_SCHEMA = Schema(CREATE_RECURRING_FIELDS)
 CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
     vol.Required("title"): vol.All(cv.string, vol.Length(max=MAX_TITLE_LENGTH)),
     vol.Optional("message"): vol.All(cv.string, vol.Length(max=MAX_MESSAGE_LENGTH)),
@@ -188,14 +188,14 @@ CREATE_TRIGGERED_FIELDS: dict[Any, Any] = {
 }
 CREATE_TRIGGERED_FIELDS.update(POLICY_FIELDS)
 CREATE_TRIGGERED_FIELDS.update(SOURCE_FIELDS)
-CREATE_TRIGGERED_SCHEMA = vol.Schema(CREATE_TRIGGERED_FIELDS)
-FIRE_TRIGGER_SCHEMA = vol.Schema(
+CREATE_TRIGGERED_SCHEMA = Schema(CREATE_TRIGGERED_FIELDS)
+FIRE_TRIGGER_SCHEMA = Schema(
     {
         vol.Required("trigger_id"): cv.string,
         vol.Optional("user_id"): cv.string,
     }
 )
-ID_SCHEMA = vol.Schema({vol.Required("reminder_id"): cv.string})
+ID_SCHEMA = Schema({vol.Required("reminder_id"): cv.string})
 UPDATE_FIELDS: dict[Any, Any] = {
     vol.Required("reminder_id"): cv.string,
     vol.Optional("title"): cv.string,
@@ -244,8 +244,8 @@ UPDATE_FIELDS: dict[Any, Any] = {
 }
 UPDATE_FIELDS.update(SOURCE_UPDATE_FIELDS)
 UPDATE_FIELDS.update(POLICY_FIELDS)
-UPDATE_SCHEMA = vol.Schema(UPDATE_FIELDS)
-LIST_SCHEMA = vol.Schema(
+UPDATE_SCHEMA = Schema(UPDATE_FIELDS)
+LIST_SCHEMA = Schema(
     {
         vol.Optional("user_id"): cv.string,
         vol.Optional("pending_only", default=False): cv.boolean,
@@ -262,7 +262,7 @@ LIST_SCHEMA = vol.Schema(
     }
 )
 SNOOZE_SCHEMA = vol.All(
-    vol.Schema(
+    Schema(
         {
             vol.Required("reminder_id"): cv.string,
             vol.Optional("due"): vol.Any(datetime, cv.string),
@@ -272,7 +272,7 @@ SNOOZE_SCHEMA = vol.All(
     ),
     cv.has_at_least_one_key("due", "duration", "wait_for_next_trigger"),
 )
-PREFERENCES_SCHEMA = vol.Schema(
+PREFERENCES_SCHEMA = Schema(
     {
         vol.Optional("user_id"): cv.string,
         vol.Required("channels"): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
@@ -303,14 +303,14 @@ PREFERENCES_SCHEMA = vol.Schema(
         ): vol.All(cv.ensure_list, [vol.In(SUPPORTED_CHANNELS)]),
     }
 )
-ACKNOWLEDGE_SCHEMA = vol.Schema(
+ACKNOWLEDGE_SCHEMA = Schema(
     {
         vol.Required("reminder_id"): cv.string,
         vol.Optional("occurrence_id"): cv.string,
     }
 )
 COMPLETE_SCHEMA = ACKNOWLEDGE_SCHEMA
-EXTERNAL_ACTION_SERVICE_SCHEMA = vol.Schema(
+EXTERNAL_ACTION_SERVICE_SCHEMA = Schema(
     {
         vol.Required("reminder_id"): cv.string,
         vol.Required("occurrence_id"): cv.string,
@@ -326,7 +326,7 @@ TEST_DELIVERY_FIELDS: dict[Any, Any] = {
     ),
     vol.Optional("voice_targets", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
 }
-TEST_DELIVERY_SCHEMA = vol.Schema(TEST_DELIVERY_FIELDS)
+TEST_DELIVERY_SCHEMA = Schema(TEST_DELIVERY_FIELDS)
 
 
 def async_register_services(hass: HomeAssistant) -> None:

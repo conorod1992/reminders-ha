@@ -5,9 +5,23 @@ on:
 permissions:
   contents: read
 jobs:
+  ha-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.versions.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: versions
+        run: echo "matrix=$(python scripts/ha_test_matrix.py)" >> "$GITHUB_OUTPUT"
+
   browser:
+    name: browser (HA ${{ matrix.homeassistant }})
+    needs: ha-versions
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.ha-versions.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -18,7 +32,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/reminders-ha/custom_components"
           cp -R custom_components/reminders "$RUNNER_TEMP/reminders-ha/custom_components/"
           printf 'default_config:\n' > "$RUNNER_TEMP/reminders-ha/configuration.yaml"
-          docker run -d --name reminders-review -p 8123:8123 -v "$RUNNER_TEMP/reminders-ha:/config" ghcr.io/home-assistant/home-assistant:2026.9.4
+          docker run -d --name reminders-review -p 8123:8123 -v "$RUNNER_TEMP/reminders-ha:/config" "ghcr.io/home-assistant/home-assistant:${{ matrix.homeassistant }}"
       - name: Bootstrap disposable account and integration
         env:
           HA_URL: http://localhost:8123
