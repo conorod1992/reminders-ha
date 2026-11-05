@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, LIFECYCLE_EVENT
 from .models import OccurrenceStatus, Reminder
+from .storage import DurableStore
 
 _LOGGER = logging.getLogger(__name__)
 PERSISTENT_NOTIFICATION_DATA = f"{DOMAIN}_persistent_notification_ids"
@@ -96,7 +96,7 @@ class PersistentCleanupCoordinator:
 
     def __init__(self, hass: HomeAssistant, store: Any | None = None) -> None:
         self._hass = hass
-        self._store = store or Store[dict[str, Any]](
+        self._store = store or DurableStore[dict[str, Any]](
             hass,
             1,
             PERSISTENT_CLEANUP_STORE_KEY,
