@@ -79,10 +79,10 @@ test("multiple unresolved recurring occurrences expose dated, targeted buttons",
   assert.equal(details.children[0].textContent, "2 outstanding occurrences");
   const firstRow = details.children[1];
   assert.equal(firstRow.children[0].textContent, "2026-10-02T12:00:00Z");
-  await firstRow.children[1].children[0].onclick();
+  await firstRow.children[1].children.find((button) => button.textContent === "Done").onclick();
   assert.equal(panel.doneId, "previous-2");
   const secondRow = details.children[2];
-  await secondRow.children[1].children[1].onclick();
+  await secondRow.children[1].children.find((button) => button.textContent === "Dismiss").onclick();
   assert.equal(panel.dismissId, "previous-1");
 });
 

@@ -142,7 +142,7 @@ test("delivery test feedback includes partial success rather than hiding healthy
     failed_channels: ["voice"],
   });
   const host = { textContent: "", className: "" };
-  const dialog = { querySelector: () => host };
+  const dialog = { _preferencesOwner: "owner", querySelector: () => host };
   await panel._testDelivery(dialog, "owner", "all");
   assert.match(host.textContent, /Succeeded: phone/);
   assert.match(host.textContent, /Failed: voice/);
